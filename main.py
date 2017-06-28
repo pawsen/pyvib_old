@@ -5,6 +5,7 @@
 from numpy import ndarray
 from numpy.linalg import solve
 import numpy as np
+from scipy.sparse import coo_matrix
 from scipy.sparse.csr import csr_matrix
 from scipy.sparse.linalg import spsolve
 import femutil
@@ -17,7 +18,7 @@ sparse = False
 
 # read mesh
 mshfile = "template.msh"
-mshfile = "angle_beam.msh"
+#mshfile = "angle_beam.msh"
 mesh = Mesh()
 mesh.read_msh(mshfile)
 
@@ -39,26 +40,20 @@ lines = mesh.Elmts[1]
 
 
 # Materials for different physical types(idx)
-# material = {
-#     100 : { # interior
-#         'nu' : 0.3,
-#         'E' : 1.0
-#     },
-#     200 : { # exterior
-#         'nu' : 0.3,
-#         'E' : 5.0
-#     }
-# }
 material = {
     100 : { # interior
         'nu' : 0.3,
-        'E' : 1e3
+        'E' : 1.0
+    },
+    200 : { # exterior
+        'nu' : 0.3,
+        'E' : 5.0
     }
 }
 
 load = {
     500 : {
-        'val' : -1, # -2 for template.msh
+        'val' : -2, # -2 for template.msh
         'dir' : 1
     }
 }
@@ -131,46 +126,117 @@ for load_t in load:
 
 
 
-#def dense_assem():
+def dense_assem():
     """
     Assembles the global stiffness matrix K using a dense storing scheme
 
     """
-K = np.zeros((neqs, neqs))
-elem = -1
-for elem_t in elmts:
-    ne_t = len(elmts[elem_t][0])
-    for idx in range(ne_t):
-        elem += 1
-        ndof = femutil.elem[elem_t]['ndof']
-        nnodes = femutil.elem[elem_t]['nnodes']
+    K = np.zeros((neqs, neqs))
+    elem = -1
+    for elem_t in elmts:
+        ne_t = len(elmts[elem_t][0])
+        for idx in range(ne_t):
+            elem += 1
+            ndof = femutil.elem[elem_t]['ndof']
+            nnodes = femutil.elem[elem_t]['nnodes']
 
-        # physical properties from physical id.
-        nu = material[elmts[elem_t][0][elem]]['nu']
-        E = material[elmts[elem_t][0][elem]]['E']
+            # physical properties from physical id.
+            nu = material[elmts[elem_t][0][elem]]['nu']
+            E = material[elmts[elem_t][0][elem]]['E']
 
-        # nodes in element
-        IELCON = elmts[elem_t][1][elem]
-        # node coord
-        elcoor = np.zeros([nnodes, 2])
-        for j in range(nnodes):
-            elcoor[j, 0] = nodes[IELCON[j], 0]
-            elcoor[j, 1] = nodes[IELCON[j], 1]
+            # nodes in element
+            IELCON = elmts[elem_t][1][elem]
+            # node coord
+            elcoor = np.zeros([nnodes, 2])
+            for j in range(nnodes):
+                elcoor[j, 0] = nodes[IELCON[j], 0]
+                elcoor[j, 1] = nodes[IELCON[j], 1]
 
-        ke = femutil.ke(elem_t, elcoor, nu, E)
-        dme = DME[elem, :ndof]
+            ke = femutil.ke(elem_t, elcoor, nu, E)
+            dme = DME[elem, :ndof]
 
-        for row in range(ndof):
-            glob_row = dme[row]
-            if glob_row != -1:
-                for col in range(ndof):
-                    glob_col = dme[col]
-                    if glob_col != -1:
-                        K[glob_row, glob_col] = K[glob_row, glob_col] +\
-                                                 ke[row, col]
+            for row in range(ndof):
+                glob_row = dme[row]
+                if glob_row != -1:
+                    for col in range(ndof):
+                        glob_col = dme[col]
+                        if glob_col != -1:
+                            K[glob_row, glob_col] = K[glob_row, glob_col] +\
+                                                     ke[row, col]
 
-    #return K
+    return K
 
+
+def sparse_assem(): #(neqs, elmts, nodes, DME, material, uel=None):
+    """Assembles the global stiffness matrix K using a sparse storing scheme
+
+    The scheme used to assemble is COOrdinate list (COO), and it converted to
+    Compressed Sparse Row (CSR) afterward for the solution phase [1].
+
+    Parameters
+    ----------
+    neqs     : int
+      Number of active equations in the system.
+    elmts    : dict
+      Array with the number for the nodes in each element.
+    nodes    : ndarray (float)
+      Array with the nodal numbers and coordinates.
+    DME      : ndarray (int)
+      Assembly operator.
+    material : dict
+      Dict with the material profiles. Key is the physical id of the surfaces
+    uel      : callable function (optional)
+      Python function that returns the local stiffness matrix.
+
+    Returns
+    -------
+    K : ndarray (float)
+      Array with the global stiffness matrix in a sparse
+      Compressed Sparse Row (CSR) format.
+
+    References
+    ----------
+    .. [1] Sparse matrix. (2017, March 8). In Wikipedia, The Free Encyclopedia.
+        https://en.wikipedia.org/wiki/Sparse_matrix
+
+    """
+    rows = []
+    cols = []
+    vals = []
+    elem = -1
+    for elem_t in elmts:
+        ne_t = len(elmts[elem_t][0])
+        for idx in range(ne_t):
+            elem += 1
+            ndof = femutil.elem[elem_t]['ndof']
+            nnodes = femutil.elem[elem_t]['nnodes']
+
+            # physical properties from physical id.
+            nu = material[elmts[elem_t][0][elem]]['nu']
+            E = material[elmts[elem_t][0][elem]]['E']
+
+            # nodes in element
+            IELCON = elmts[elem_t][1][elem]
+            # node coord
+            elcoor = np.zeros([nnodes, 2])
+            for j in range(nnodes):
+                elcoor[j, 0] = nodes[IELCON[j], 0]
+                elcoor[j, 1] = nodes[IELCON[j], 1]
+
+            ke = femutil.ke(elem_t, elcoor, nu, E)
+            dme = DME[elem, :ndof]
+
+            for row in range(ndof):
+                glob_row = dme[row]
+                if glob_row != -1:
+                    for col in range(ndof):
+                        glob_col = dme[col]
+                        if glob_col != -1:
+                            rows.append(glob_row)
+                            cols.append(glob_col)
+                            vals.append(ke[row, col])
+
+    return coo_matrix((vals, (rows, cols)), shape=(neqs, neqs)).tocsr()
 
 
 def static_solve(mat, rhs):
@@ -186,11 +252,12 @@ def static_solve(mat, rhs):
     return u_sol
 
 
+sparse = True
 # assemble stiffness
-# if sparse:
-#     K = sparse_assem
-# else:
-#     K = dense_assem()
+if sparse:
+    K = sparse_assem()
+else:
+    K = dense_assem()
 U = static_solve(K,rhs)
 print(U)
 print(np.linalg.norm(U))
