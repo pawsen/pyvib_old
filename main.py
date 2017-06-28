@@ -17,12 +17,20 @@ sparse = False
 
 # read mesh
 mshfile = "template.msh"
+mshfile = "angle_beam.msh"
 mesh = Mesh()
 mesh.read_msh(mshfile)
 
-# extract all triangular elements
-elmts = mesh.Elmts[2]
-ne = elmts[1].shape[0]
+
+# extract all elements we support and calculate
+elmts = {}
+ne = 0
+for key in mesh.Elmts:
+    if key in femutil.elem:
+        elmts[key] = mesh.Elmts[key]
+        ne += len(elmts[key][0])
+# elmts = mesh.Elmts[2]
+# ne = elmts[1].shape[0]
 nodes = mesh.Verts
 nn = nodes.shape[0]
 
@@ -31,20 +39,26 @@ lines = mesh.Elmts[1]
 
 
 # Materials for different physical types(idx)
+# material = {
+#     100 : { # interior
+#         'nu' : 0.3,
+#         'E' : 1.0
+#     },
+#     200 : { # exterior
+#         'nu' : 0.3,
+#         'E' : 5.0
+#     }
+# }
 material = {
     100 : { # interior
         'nu' : 0.3,
-        'E' : 1.0
-    },
-    200 : { # exterior
-        'nu' : 0.3,
-        'E' : 5.0
+        'E' : 1e3
     }
 }
 
 load = {
     500 : {
-        'val' : -2,
+        'val' : -1, # -2 for template.msh
         'dir' : 1
     }
 }
@@ -90,26 +104,30 @@ IBC[mask] = np.arange(neqs,dtype=int)
 DME = np.zeros((ne, 18),dtype=int)
 IELCON = np.zeros([ne, 9], dtype=int)
 
-for elem in range(ne):
-    # TODO: maybe loop over element ids?
-    idx = 2
-    ndof = femutil.elem[idx]['ndof']
-    nnodes = femutil.elem[idx]['nnodes']
-    for j in range(nnodes):
-        # connectivities. Nodes in element
-        IELCON[elem, j] = elmts[1][elem,j]
-        kk = IELCON[elem, j]
-        for l in range(2):
-            DME[elem, 2*j+l] = IBC[kk*2 + l]
+# get current element type
+elem = -1
+for elem_t in elmts:
+    ne_t = len(elmts[elem_t][0])
+    for idx in range(ne_t):
+        elem += 1
+        ndof = femutil.elem[elem_t]['ndof']
+        nnodes = femutil.elem[elem_t]['nnodes']
+        for j in range(nnodes):
+            # connectivities. Nodes in element
+            IELCON[elem, j] = elmts[elem_t][1][elem,j]
+            kk = IELCON[elem, j]
+            for l in range(2):
+                DME[elem, 2*j+l] = IBC[kk*2 + l]
 
-            #% loads
+
+#% loads
 rhs = np.zeros((neqs))
-for key in load:
-    idx, = np.where(lines[0] == key)
+for load_t in load:
+    idx, = np.where(lines[0] == load_t)
     bn_tmp = lines[1][idx]
-    bn_tmp = np.unique(bn_tmp.flatten())*2 + load[key]['dir']
+    bn_tmp = np.unique(bn_tmp.flatten())*2 + load[load_t]['dir']
     nloads = len(bn_tmp)
-    rhs[IBC[bn_tmp]] += load[key]['val'] / nloads
+    rhs[IBC[bn_tmp]] += load[load_t]['val'] / nloads
 
 
 
@@ -119,38 +137,37 @@ for key in load:
 
     """
 K = np.zeros((neqs, neqs))
-nels = ne
-for elem in range(nels):
+elem = -1
+for elem_t in elmts:
+    ne_t = len(elmts[elem_t][0])
+    for idx in range(ne_t):
+        elem += 1
+        ndof = femutil.elem[elem_t]['ndof']
+        nnodes = femutil.elem[elem_t]['nnodes']
 
-    # maybe loop over element ids?
-    idx = 2
-    ndof = femutil.elem[idx]['ndof']
-    nnodes = femutil.elem[idx]['nnodes']
+        # physical properties from physical id.
+        nu = material[elmts[elem_t][0][elem]]['nu']
+        E = material[elmts[elem_t][0][elem]]['E']
 
-    # physical properties from physical id.
-    nu = material[elmts[0][elem]]['nu']
-    E = material[elmts[0][elem]]['E']
+        # nodes in element
+        IELCON = elmts[elem_t][1][elem]
+        # node coord
+        elcoor = np.zeros([nnodes, 2])
+        for j in range(nnodes):
+            elcoor[j, 0] = nodes[IELCON[j], 0]
+            elcoor[j, 1] = nodes[IELCON[j], 1]
 
-    # nodes in element
-    IELCON = elmts[1][elem]
-    # node coord
-    elcoor = np.zeros([nnodes, 2])
-    for j in range(nnodes):
-        elcoor[j, 0] = nodes[IELCON[j], 0]
-        elcoor[j, 1] = nodes[IELCON[j], 1]
+        ke = femutil.ke(elem_t, elcoor, nu, E)
+        dme = DME[elem, :ndof]
 
-    idx = 2
-    ke = femutil.ke(idx, elcoor, nu, E)
-    dme = DME[elem, :ndof]
-
-    for row in range(ndof):
-        glob_row = dme[row]
-        if glob_row != -1:
-            for col in range(ndof):
-                glob_col = dme[col]
-                if glob_col != -1:
-                    K[glob_row, glob_col] = K[glob_row, glob_col] +\
-                                             ke[row, col]
+        for row in range(ndof):
+            glob_row = dme[row]
+            if glob_row != -1:
+                for col in range(ndof):
+                    glob_col = dme[col]
+                    if glob_col != -1:
+                        K[glob_row, glob_col] = K[glob_row, glob_col] +\
+                                                 ke[row, col]
 
     #return K
 
@@ -177,3 +194,7 @@ def static_solve(mat, rhs):
 U = static_solve(K,rhs)
 print(U)
 print(np.linalg.norm(U))
+
+
+if not(np.allclose(K.dot(U)/K.max(), rhs/K.max())):
+    print("The system is not in equilibrium!")
