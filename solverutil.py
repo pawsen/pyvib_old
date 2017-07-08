@@ -2,15 +2,14 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from numpy import ndarray
 from numpy.linalg import solve
 from scipy.sparse import coo_matrix
 from scipy.sparse.csr import csr_matrix
 from scipy.sparse.linalg import spsolve
 import femutil
-import sys
-sys.path.insert(0, '../gmsh')
-from gmsh import Mesh
+# import sys
+# sys.path.insert(0, '../gmsh')
+from gmsh.gmsh import Mesh
 
 def operator_assem(nn, ne, elmts, lines, boundary):
     # Find boundary DOFs
