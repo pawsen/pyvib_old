@@ -114,9 +114,9 @@ def load_assem(neqs, lines, IBC, load):
 
     return rhs
 
+
 def dense_assem(neqs, elmts, nodes, DME, material, uel=None):
     """Assembles the global stiffness matrix K using a dense storing scheme
-
     """
     K = np.zeros((neqs, neqs))
     elem = -1
@@ -225,6 +225,86 @@ def sparse_assem(neqs, elmts, nodes, DME, material, uel=None):
                             vals.append(ke[row, col])
 
     return coo_matrix((vals, (rows, cols)), shape=(neqs, neqs)).tocsr()
+
+
+def dense_mass_assem(neqs, elmts, nodes, DME, material, uel=None):
+    M = np.zeros((neqs, neqs))
+    elem = -1
+    for elem_t in elmts:
+        # number of elements in the current type of elements
+        ne_t = len(elmts[elem_t][0])
+        for idx in range(ne_t):
+            elem += 1
+            ndof = femutil.elem[elem_t]['ndof']
+            nnodes = femutil.elem[elem_t]['nnodes']
+
+            # physical properties from physical id.
+            rho = float(material[elmts[elem_t][0][elem]]['rho'])
+
+            # nodes in element
+            IELCON = elmts[elem_t][1][elem]
+            # node coord
+            elcoor = np.zeros([nnodes, 2])
+            for j in range(nnodes):
+                elcoor[j, 0] = nodes[IELCON[j], 0]
+                elcoor[j, 1] = nodes[IELCON[j], 1]
+
+            me = femutil.me(elem_t, elcoor, rho)
+            dme = DME[elem, :ndof]
+
+            for row in range(ndof):
+                glob_row = dme[row]
+                if glob_row != -1:
+                    for col in range(ndof):
+                        glob_col = dme[col]
+                        if glob_col != -1:
+                            M[glob_row, glob_col] = M[glob_row, glob_col] +\
+                                                     me[row, col]
+
+    return M
+
+
+def mass_lump(neqs, elmts, nodes, DME, material, uel=None):
+    """HRZ - mass lumping, in COOK, s. 380
+
+    """
+    M = np.zeros((neqs))
+    elem = -1
+    for elem_t in elmts:
+        # number of elements in the current type of elements
+        ne_t = len(elmts[elem_t][0])
+        for idx in range(ne_t):
+            elem += 1
+            ndof = femutil.elem[elem_t]['ndof']
+            nnodes = femutil.elem[elem_t]['nnodes']
+            me_lumped = np.zeros((ndof))
+            # physical properties from physical id.
+            rho = float(material[elmts[elem_t][0][elem]]['rho'])
+
+            # nodes in element
+            IELCON = elmts[elem_t][1][elem]
+            # node coord
+            elcoor = np.zeros([nnodes, 2])
+            for j in range(nnodes):
+                elcoor[j, 0] = nodes[IELCON[j], 0]
+                elcoor[j, 1] = nodes[IELCON[j], 1]
+
+            me = femutil.me(elem_t, elcoor, rho)
+            dme = DME[elem, :ndof]
+
+            # do the lumping
+            for i in range(ndof):
+                me_lumped[i] = me[i,i]
+            me_tot = np.sum(me)  # m in cook
+            me_diag_sum = np.sum(me_lumped)  # S in COOK, s. 380
+            me_lumped = (me_tot / me_diag_sum) * me_lumped
+
+            for row in range(ndof):
+                glob_row = dme[row]
+                if glob_row != -1:
+                    M[glob_row] = M[glob_row] + me_lumped[glob_row]
+
+    return M
 
 
 def static_solve(mat, rhs):
