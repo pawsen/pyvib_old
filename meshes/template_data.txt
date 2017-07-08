@@ -1,0 +1,31 @@
+[mesh]
+file=template.msh
+
+[mat]
+[[100]]
+E=1
+nu=0.3
+rho=1
+
+#exterior
+[[200]]
+E=5
+nu=0.3
+rho=2
+
+[boundary]
+# x-dir
+[[300]]
+dir=0
+val=-1
+
+# y-dir
+[[400]]
+dir=1
+val=-2
+
+
+[load]
+[[500]]
+dir=1
+val=-2
