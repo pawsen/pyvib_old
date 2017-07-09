@@ -21,7 +21,7 @@ def operator_assem(nn, ne, elmts, lines, boundary):
         # DOFs to remove/exclude from assembly
         bn_tmp = np.unique(bn_tmp.flatten())*2 + int(boundary[key]['dir'])
 
-        # TODO: fix np.full command
+        # TODO: fix np.full command: explicit int-casting
         bdof = np.vstack((bdof,
                           np.vstack((bn_tmp,
                                      np.full(bn_tmp.shape,
@@ -131,6 +131,7 @@ def dense_assem(neqs, elmts, nodes, DME, material, uel=None):
             # physical properties from physical id.
             nu = float(material[elmts[elem_t][0][elem]]['nu'])
             E = float(material[elmts[elem_t][0][elem]]['E'])
+            thk = float(material[elmts[elem_t][0][elem]]['thk'])
 
             # nodes in element
             IELCON = elmts[elem_t][1][elem]
@@ -140,7 +141,7 @@ def dense_assem(neqs, elmts, nodes, DME, material, uel=None):
                 elcoor[j, 0] = nodes[IELCON[j], 0]
                 elcoor[j, 1] = nodes[IELCON[j], 1]
 
-            ke = femutil.ke(elem_t, elcoor, nu, E)
+            ke = femutil.ke(elem_t, elcoor, thk, nu, E)
             dme = DME[elem, :ndof]
 
             for row in range(ndof):
@@ -202,6 +203,7 @@ def sparse_assem(neqs, elmts, nodes, DME, material, uel=None):
             # physical properties from physical id.
             nu = float(material[elmts[elem_t][0][elem]]['nu'])
             E = float(material[elmts[elem_t][0][elem]]['E'])
+            thk = float(material[elmts[elem_t][0][elem]]['thk'])
 
             # nodes in element
             IELCON = elmts[elem_t][1][elem]
@@ -211,7 +213,7 @@ def sparse_assem(neqs, elmts, nodes, DME, material, uel=None):
                 elcoor[j, 0] = nodes[IELCON[j], 0]
                 elcoor[j, 1] = nodes[IELCON[j], 1]
 
-            ke = femutil.ke(elem_t, elcoor, nu, E)
+            ke = femutil.ke(elem_t, elcoor, thk, nu, E)
             dme = DME[elem, :ndof]
 
             for row in range(ndof):
@@ -240,6 +242,7 @@ def dense_mass_assem(neqs, elmts, nodes, DME, material, uel=None):
 
             # physical properties from physical id.
             rho = float(material[elmts[elem_t][0][elem]]['rho'])
+            thk = float(material[elmts[elem_t][0][elem]]['thk'])
 
             # nodes in element
             IELCON = elmts[elem_t][1][elem]
@@ -249,7 +252,7 @@ def dense_mass_assem(neqs, elmts, nodes, DME, material, uel=None):
                 elcoor[j, 0] = nodes[IELCON[j], 0]
                 elcoor[j, 1] = nodes[IELCON[j], 1]
 
-            me = femutil.me(elem_t, elcoor, rho)
+            me = femutil.me(elem_t, elcoor, thk, rho)
             dme = DME[elem, :ndof]
 
             for row in range(ndof):
@@ -280,6 +283,7 @@ def mass_lump(neqs, elmts, nodes, DME, material, uel=None):
             me_lumped = np.zeros((ndof))
             # physical properties from physical id.
             rho = float(material[elmts[elem_t][0][elem]]['rho'])
+            thk = float(material[elmts[elem_t][0][elem]]['thk'])
 
             # nodes in element
             IELCON = elmts[elem_t][1][elem]
@@ -289,7 +293,7 @@ def mass_lump(neqs, elmts, nodes, DME, material, uel=None):
                 elcoor[j, 0] = nodes[IELCON[j], 0]
                 elcoor[j, 1] = nodes[IELCON[j], 1]
 
-            me = femutil.me(elem_t, elcoor, rho)
+            me = femutil.me(elem_t, elcoor, thk, rho)
             dme = DME[elem, :ndof]
 
             # do the lumping
