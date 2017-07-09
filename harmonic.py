@@ -88,7 +88,7 @@ class Solver(object):
     def integrate(self, x0, dx0, t):
         return Newmark.newmark_beta(self, x0, dx0, t)
 
-    def eigen(self):
+    def eigen(self, neigs=6):
         """Calculate damped and undamped eigenfrequencies in (rad/s).
         See Jakob S. Jensen & Niels Aage: "Lecture notes: FEMVIB", eq. 3.50 for
         the state space formulation of the EVP.
@@ -105,6 +105,7 @@ class Solver(object):
         dim = np.shape(self.K)
         # stupid way of doing A = [zeros(size(K)),K; K, C]; and
         # B = [K, zeros(size(K)); zeros(size(K)), -M]; in matlab.
+        # TODO: make sparse version
         A = np.column_stack([np.zeros(dim), self.K])
         A = np.row_stack((A, np.column_stack([self.K, self.C])))
         B = np.column_stack([self.K, np.zeros(dim)])
@@ -121,12 +122,15 @@ class Solver(object):
                 eigenvalue vecs[i]."""
             vals, vecs = linalg.eig(A, b=B)
 
-            # remove complex conjugate elements(ie. cut vector/2d array in half)
-            # Be sure to remove conjugate and the ones we want to keep!
-            # vals = np.split(vals,2)[0]
-            # vesc = np.hsplit(vesc,2)[0]
         else:
-            vals, vecs = eigs(A, k=6, M=B, which='SM')
+            vals, vecs = eigs(A, k=neigs*2, M=B, which='SM')
+
+        # remove complex conjugate elements(ie. cut vector/2d array in half)
+        # Be sure to remove conjugate and the ones we want to keep!
+        # TODO: THIS used to be commented out. Why did I comment it out?
+        # Maybe because they are not sorted?
+        vals = np.split(vals,2)[0]
+        vecs = np.hsplit(vecs,2)[0]
 
         # NB! Remember when sorting the eigenvalues, that the eigenvectors
         # should be sorted accordingly, so they still match

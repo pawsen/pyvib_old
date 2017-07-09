@@ -12,6 +12,7 @@ import time
 datafile = 'meshes/cantilever_data.txt'
 datafile = 'meshes/template_data.txt'
 datafile = 'meshes/template_eigen_data.txt'
+datafile = 'meshes/eigen_beam_data.txt'
 config = ConfigObj(datafile)
 
 mshfile = '/'.join([datafile.split('/')[0]] + [config['mesh']['file']])
@@ -96,8 +97,11 @@ M = solver.dense_mass_assem(neqs, elmts, nodes, DME, material)
 
 C = np.zeros(M.shape)
 sys = harmonic.Solver(M, C, K)
-w0, w0d, psi, vesc = sys.eigen()
+neigs = 6
+w0, w0d, psi, vesc = sys.eigen(neigs)
 
+print('undamped eigen: {}'.format(w0))
+print('damped eigen: {}'.format(w0d))
 #import ipdb; ipdb.set_trace()
 
 vtufile = mshfile.split('.')[0] + '.vtu'
@@ -115,18 +119,16 @@ for g_id, E in elmts.items():
     cvdata[vtk_id[g_id]] = k*np.random.rand(E[1].shape[0] * 3)
     pname = ['rand1', 'rand2', 'og en tredje']
     pdata = np.random.rand(nodes.shape[0], 3)
-    pvdata = np.empty((neqs*3,vesc.shape[1]))
+    pvdata = np.empty((neqs + neqs//2,neigs))
     # always use 3d coordinates (x,y) -> (x,y,0)
-    pvdata[:,0] = np.hstack((vesc[:,0], np.zeros((neqs))))
-    pvdata[:,1] = np.hstack((vesc[:,1], np.zeros((neqs))))
-    pvdata[:,2] = np.hstack((vesc[:,2], np.zeros((neqs))))
-    pvdata[:,3] = np.hstack((vesc[:,3], np.zeros((neqs))))
-    pvdata[:,4] = np.hstack((vesc[:,4], np.zeros((neqs))))
-    pvdata[:,5] = np.hstack((vesc[:,5], np.zeros((neqs))))
-
+    for i in range(neigs):
+        pvdata[::3,i] = vesc[:neqs:2,i]
+        pvdata[1::3,i] = vesc[1:neqs:2,i]
+        pvdata[2::3,i] = np.zeros((neqs//2))
+        # pvdata[:,1] = np.hstack((vesc[:neqs,1], np.zeros((neqs//2))))
 
 
 #    pvname = ['disp']
-    print('g_id: {}\nE: {}'.format(g_id, E))
+    #print('g_id: {}\nE: {}'.format(g_id, E))
 
 vtk_writer.write_vtu(Verts=nodes, Cells=Cells, pdata=pdata, pvdata=pvdata, cdata=cdata, cvdata=cvdata, pname=pname, fname=vtufile)
