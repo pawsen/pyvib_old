@@ -85,6 +85,9 @@ class Solver(object):
         self.C = C
         self.K = K
 
+        self.alpha = []
+        self.beta = []
+
         self.list_nonlin = []
         self.list_dfnonlin = []
         self.list_force = []
@@ -220,9 +223,56 @@ class Solver(object):
 
         v.T*M*v = 1
         This in turn implies that
-        v.T*M*v = omega"""
+        v.T*K*v = omega"""
         for i in range(self.vecs.shape[1]):
-            self.vecs[:,i] = self.vecs[:,i] / np.sqrt(self.vecs[:,i].dot(self.M.dot(self.vecs[:,i])))
+            self.vecs[:,i] = self.vecs[:,i] / \
+                np.sqrt(self.vecs[:,i].dot(self.M.dot(self.vecs[:,i])))
+
+    def modal_expansion(self, Omega, rhs, n=None, damped=False):
+        """Solution from modal superposition
+
+        This methods requires the modal equations to decouple. If damping is
+        included, it should be a type that allows decoupling. Proportional
+        damping does that.
+        Eigenvectors should be mass normalized, ie:
+        v.T*M*v = I which implies v.T*K*v = [omega]
+
+        See eq.2.22 and eq. 3.31 in [1]_
+
+        Parameters
+        ----------
+        rhs : float[ndof]
+            force vector
+        n : int
+            n modes to include in expansion
+
+        notes
+        -----
+        ..[1] Jakob S. Jensen & Niels Aage: "Lecture notes: FEMVIB"
+        """
+
+        if len(self.w0) == 0:
+            self.eigen(neigs=10)
+        if n is None or n is False:
+            # use all computed eigenvectors
+            n = len(self.w0)
+
+        if damped:
+            u = np.zeros((self.K.shape[0]), dtype=complex)
+            for i in range(n):
+                # modal excitation force
+                g = self.vecs[:,i].dot(rhs)
+                u = u + g / (self.w0[i]**2 +
+                             1j*Omega*(self.alpha + self.beta*self.w0[i]**2) +
+                             Omega**2) * self.vecs[:,i]
+        else:
+            u = np.zeros((self.K.shape[0]), dtype=float)
+            for i in range(n):
+                # modal excitation force
+                g = self.vecs[:,i].dot(rhs)
+                u = u + g/(self.w0[i]**2 - Omega**2) * self.vecs[:,i]
+
+        return u
 
     def time_harmonic(self, Omega, rhs, damped=False):
         """Time harmonic(steady state) solution of S*u=f
@@ -234,11 +284,18 @@ class Solver(object):
         u = u_r + iu_i
         The time-dependent solution is then
         u(t) = Real(u*e^(i*Omega*t)) = u_r*cos(Omega*t) + u_i*sin(Omega*t)
+        The amplitude is
+        A = np.abs(u)
 
         Parameters
         ----------
         rhs : float[ndof]
             force vector
+
+        Returns
+        -------
+        u : float[ndof] / complex[ndof]
+            Solution. Complex if damping is included
         """
         from scipy.sparse.linalg import spsolve
 
