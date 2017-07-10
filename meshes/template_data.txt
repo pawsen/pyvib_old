@@ -6,12 +6,14 @@ file=template.msh
 E=1
 nu=0.3
 rho=1
+thk = 0.5
 
 #exterior
 [[200]]
 E=5
 nu=0.3
 rho=2
+thk = 0.5
 
 [boundary]
 # x-dir

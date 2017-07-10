@@ -36,12 +36,16 @@ class Fem(object):
     def __init__(self, mshfile):
         self.nn, self.ne, self.elmts, self.lines, self.nodes = mesh_assem(mshfile)
         self.neqs = self.nn*2
+        self.fdof = []
+        self.bdof = []
 
     def boundary_assem(self, boundary):
         # Find boundary DOFs
         bn = []
         for key in boundary:
             idx, = np.where(self.lines[0] == key)
+            if idx.size == 0:
+                continue
             bn_tmp = self.lines[1][idx]
             # DOFs to remove/exclude from assembly
             bn_tmp = np.unique(bn_tmp.flatten())*2 + int(boundary[key]['dir'])
@@ -49,6 +53,7 @@ class Fem(object):
         self.N = identity(self.neqs, format='csr')
         # set all entries corresponding to dofs on the boundary to zero
         self.N[bn, bn] = 0
+        self.bdof = bn
 
     def load_assem(self, load):
         """Assembles the global Right Hand Side Vector RHS
@@ -70,32 +75,37 @@ class Fem(object):
 
         """
         self.rhs = np.zeros((self.neqs))
+        bn = []
         for load_t in load:
             idx, = np.where(self.lines[0] == load_t)
             if idx.size == 0: # no loads of the given type
                 continue
             bn_tmp = self.lines[1][idx]
             bn_tmp = np.unique(bn_tmp.flatten())*2 + int(load[load_t]['dir'])
+            bn.extend(bn_tmp)
             #nloads = len(bn_tmp) if len(bn_tmp) > 0 else 1
             nloads = len(bn_tmp)
-            #rhs[IBC[bn_tmp]] += float(load[load_t]['val']) / nloads
             self.rhs[bn_tmp] += float(load[load_t]['val']) / nloads
-
-        #return rhs
+        self.fdof = bn
 
     def enforce_boundary(self, A, harmonic=False):
-        """Enforce boundary condition according to B.12 in [1].
-        The operation boils down to 2(nnz + n) scalar multiplications, additions
-        or subtractions
+        """Enforce boundary condition
+
+        According to B.12 in [1]_. The operation boils down to 2(nnz + n)
+        scalar multiplications, additions or subtractions
 
         For the eigenvalue problem, the method depends on which range of the
         frequency spectra we're interested in. Here implemented for lowest
-        frequencies. See B.16 & B.17 in [1]
-        According to [2], M should be positive definite, ie. full Rank. Thus:
+        frequencies. See B.16 & B.17 in [1]_
+        According to [2]_, M should be positive definite, ie. full Rank. Thus:
         K should be enforced with harmonic=True and M with harmonic=False
 
+        References
+        ----------
+        ..
         [1] Jakob S. Jensen & Niels Aage: "Lecture notes: FEMVIB"
         [2] https://docs.scipy.org/doc/scipy-0.19.0/reference/generated/scipy.sparse.linalg.eigs.html
+
         """
         dim = A.shape
         if harmonic is True:
@@ -107,7 +117,7 @@ class Fem(object):
         """Assembles the global stiffness matrix K using a sparse storing scheme
 
         The scheme used to assemble is COOrdinate list (COO), and it converted to
-        Compressed Sparse Row (CSR) afterward for the solution phase [1].
+        Compressed Sparse Row (CSR) afterward for the solution phase [1]_.
 
         Parameters
         ----------

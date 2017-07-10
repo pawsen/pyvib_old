@@ -5,6 +5,8 @@ file= cantilever.msh
 [[1001]]
 E=1e8
 nu=0.3
+rho=8e3
+thk=1e-3
 
 [boundary]
 [[1003]]
