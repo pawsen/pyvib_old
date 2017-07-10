@@ -9,9 +9,9 @@ import gmsh.vtk_writer as vtk_writer
 import harmonic
 import time
 
-datafile = 'meshes/cantilever_data.txt'
-datafile = 'meshes/template_data.txt'
-datafile = 'meshes/template_eigen_data.txt'
+# datafile = 'meshes/cantilever_data.txt'
+# datafile = 'meshes/template_data.txt'
+# datafile = 'meshes/template_eigen_data.txt'
 datafile = 'meshes/eigen_beam_data.txt'
 config = ConfigObj(datafile)
 
@@ -60,16 +60,17 @@ if not(np.allclose(fem.K.dot(U)/fem.K.max(), fem.rhs/fem.K.max())):
 # Eigenvalue problem
 fem.M_assem(material)
 fem.M = fem.enforce_boundary(fem.M, False)
-fem.K = fem.enforce_boundary(fem.K, True)
+#fem.K = fem.enforce_boundary(fem.K, True)
+sys = harmonic.Solver(fem.M, fem.K, 0.0001*fem.M)
+neigs = 6
 
-sys = harmonic.Solver(fem.M, fem.K)
-neigs = 12
-w0, w0d, psi, vesc = sys.eigen(neigs)
+w0, w0d, psi, vesc = sys.eigen(neigs, damped=False)
+#w0, w0d, psi, vesc = sys.eigen(neigs, damped=True)
 f0, _ = sys.convert_freqs()
 
 print('undamped [rad/s]: {}'.format(w0))
 print('undamped [Hz/s]: {}'.format(f0))
-#print('damped eigen: {}'.format(w0d))
+print('damped eigen: {}'.format(w0d))
 
 vtufile = mshfile.split('.')[0] + '.vtu'
 vtk_id = {1: 3, 2: 5, 4: 10, 15: 1, 3: 9}
@@ -94,7 +95,7 @@ for i in range(neigs):
     pvdata[::3,i+1] = vesc[:fem.neqs:2,i]
     pvdata[1::3,i+1] = vesc[1:fem.neqs:2,i]
     pvdata[2::3,i+1] = np.zeros((fem.neqs//2))
-    pvname.extend(['eig_f: {0:.3f}'.format(w0[i])])
+    pvname.extend(['eig{}_f: {:.3f}'.format(i, w0[i])])
 
 vtk_writer.write_vtu(Verts=fem.nodes, Cells=Cells, cdata=cdata, pvdata=pvdata,
                      pvname=pvname, fname=vtufile)

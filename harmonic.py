@@ -4,6 +4,39 @@
 import numpy as np
 from scipy import linalg
 from scipy.sparse.linalg import eigs
+from scipy.sparse import csr_matrix, vstack, hstack, identity
+
+def concatenate_csr_matrices_by_rows(matrix1, matrix2):
+    """Using hstack, vstack, or concatenate, is dramatically slower than
+    concatenating the inner data objects themselves. The reason is that
+    hstack/vstack converts the sparse matrix to coo format which can be
+    very slow when the matrix is very large not and not in coo format.
+
+    """
+    new_data = np.concatenate((matrix1.data, matrix2.data))
+    new_indices = np.concatenate((matrix1.indices, matrix2.indices))
+    new_ind_ptr = matrix2.indptr + len(matrix1.data)
+    new_ind_ptr = new_ind_ptr[1:]
+    new_ind_ptr = np.concatenate((matrix1.indptr, new_ind_ptr))
+
+    return csr_matrix((new_data, new_indices, new_ind_ptr))
+
+
+def transpose_csr_matrix(matrix1):
+    """Transpose sparse csr-matrix. Because I cannot get
+    concatenate_csr_matrices_by_columns(k1, k2.T).T
+    to work
+    """
+    from scipy.sparse._sparsetools import csr_tocsc
+
+    indptr = np.empty(matrix1.shape[1] + 1, dtype=int)
+    indices = np.empty(matrix1.nnz, dtype=int)
+    data = np.empty(matrix1.nnz)
+    csr_tocsc(matrix1.shape[0], matrix1.shape[1],
+              matrix1.indptr, matrix1.indices, matrix1.data,
+              indptr, indices, data)
+    return csr_matrix((data, indices, indptr))
+
 
 class nonlinearity(object):
     def __init__(self, dof, order, value):
@@ -96,39 +129,99 @@ class Solver(object):
 
         Use eigs (Works on sparse matrices and calls Arpack under the hood)
 
+        Returns
+        -------
+        vals: The eigenvalues, each repeated according to its multiplicity.
+            The eigenvalues are not necessarily ordered.
+
+        vesc: the normalized (unit “length”) eigenvectors, such that the
+            column vals[:,i] is the eigenvector corresponding to the
+            eigenvalue vecs[i].
+
+
         Undamped frequencies can be found directly from (matlab syntax). Remove
         diag when using python.
         * [phi, w2] = eigs(K,M,6,'sm');
         * f = sort(sqrt(diag(w2))) / (2*pi)
 
         """
+        from scipy.sparse import issparse
 
         dim = np.shape(self.K)
         if damped:
-            # stupid way of doing A = [zeros(size(K)),K; K, C]; and
-            # B = [K, zeros(size(K)); zeros(size(K)), -M]; in matlab.
-            # TODO: make sparse version
-            A = np.column_stack([np.zeros(dim), self.K])
-            A = np.row_stack((A, np.column_stack([self.K, self.C])))
-            B = np.column_stack([self.K, np.zeros(dim)])
-            B = np.row_stack((B, np.column_stack([np.zeros(dim), -self.M])))
+            """ The generalized eigenvalue problem can be stated in different
+            ways. scipy.sparse.linalg.eigs requires B to positive definite. A
+            common formulation[1]:
+            A = [C, K; -eye(size(K)), zeros(size(K))]
+            B = [M, zeros(size(K)); zeros(size(K)), eye(size(K))]
+
+            with corresponding eigenvector
+            z = [lambda x; x]
+            We can then take the first neqs components of z as the eigenvector x
+
+            Note that the system coefficient matrices are always positive
+            definite for elastic problems. Thus the formulation:
+            A = [zeros(size(K)),K; K, C];
+            B = [K, zeros(size(K)); zeros(size(K)), -M];
+            does not work with scipy.sparse. But does work with
+            scipy.linalg.eig. See also [2] and [3]
+
+            [1]
+            https://en.wikipedia.org/wiki/Quadratic_eigenvalue_problem
+            [2]
+            https://mail.python.org/pipermail/scipy-dev/2011-October/016670.html
+            [3]
+            https://scicomp.stackexchange.com/questions/10940/solving-a-generalised-eigenvalue-problem
+            """
+
+            if issparse(self.K):
+                A1 = concatenate_csr_matrices_by_rows(
+                    transpose_csr_matrix(
+                        concatenate_csr_matrices_by_rows(
+                            self.C,
+                            transpose_csr_matrix(self.K))),
+                    transpose_csr_matrix(
+                        concatenate_csr_matrices_by_rows(
+                            -identity(dim[0],format='csr'),
+                            csr_matrix(dim)))  # sparse zero matrix
+                )
+                B1 = concatenate_csr_matrices_by_rows(
+                    transpose_csr_matrix(
+                        concatenate_csr_matrices_by_rows(
+                            self.M,
+                            csr_matrix(dim, dim))),
+                    transpose_csr_matrix(
+                        concatenate_csr_matrices_by_rows(
+                            csr_matrix(dim),
+                            identity(dim[0],format='csr')))
+                )
+
+                A = hstack([self.C, self.K], format='csr')
+                A = vstack((A, hstack([-identity(dim[0]), csr_matrix(dim)])), format='csr')
+                B = hstack([self.M, csr_matrix(dim)], format='csr')
+                B = vstack((B, hstack([csr_matrix(dim), identity(dim[0])])), format='csr')
+
+            else:
+                A = np.column_stack([self.C, self.K])
+                A = np.row_stack((A, np.column_stack([-np.eye(dim[0]), np.zeros(dim)])))
+                B = np.column_stack([self.M, np.zeros(dim)])
+                B = np.row_stack((B, np.column_stack([np.zeros(dim), np.eye(dim[0])])))
+
         else:
             A = self.K
             B = self.M
 
         # For SDOF eigs is not useful.
-        if dim[0] < 12:
-            """
-            vals: The eigenvalues, each repeated according to its multiplicity. 
-                The eigenvalues are not necessarily ordered.
-
-            vesc: he normalized (unit “length”) eigenvectors, such that the
-                column vals[:,i] is the eigenvector corresponding to the
-                eigenvalue vecs[i]."""
+        if dim[0] < 12 and not issparse(self.K):
             vals, vecs = linalg.eig(A, b=B)
 
         else:
-            vals, vecs = eigs(A, k=neigs, M=B, which='SM')
+            vals, vecs = eigs(A, k=neigs, M=B, which='SR')
+
+            if damped:
+                # extract eigenvectors as the first half
+                vecs = np.split(vecs, 2)[0]
+
 
         # remove complex conjugate elements(ie. cut vector/2d array in half)
         # Be sure to remove conjugate and the ones we want to keep!
@@ -150,6 +243,8 @@ class Solver(object):
         # damping ration
         self.psi = -np.real(w2_complex) / self.w0
 
+        # TODO maybe scale eigenvectors so that \phi^T * [M] * \phi = 1
+
         return self.w0, self.w0d, self.psi, self.vecs
 
     def convert_freqs(self):
@@ -158,6 +253,9 @@ class Solver(object):
             self.w0 / (2 * np.pi), \
             self.w0d / (2 * np.pi)
 
+    def scale_eigenvec(self):
+        for i in range(self.vecs.shape[1]):
+            self.vecs[:,i] = self.vecs[:,i].dot(self.M.dot(self.vecs[:,i]))
 
 class Newmark(Solver):
     def f(self, u):
