@@ -152,7 +152,8 @@ def elem_strain(idx, coord, ul):
 
 
 def strain_disp(idx, r ,s, coord):
-    """Strain-displacement interpolator B for a element
+    """Strain-displacement interpolator B for a element and determinant for the
+    jacobi matrix
 
     Parameters
     ----------
@@ -208,7 +209,7 @@ def jacoper(dhdx, coord):
     return det, jaco_inv
 
 
-def ke(idx, coord, nu, E):
+def ke(idx, coord, thk, nu, E):
     """Local element stiffness
 
     Parameters
@@ -234,10 +235,29 @@ def ke(idx, coord, nu, E):
     for i in range(0, ngauss):
         ri = XP[i, 0]
         si = XP[i, 1]
-        alf = XW[i]
+        xw = XW[i]
         ddet, B = strain_disp(idx, ri, si, coord)
-        kl = kl + 0.5 * np.dot(np.dot(B.T,C), B)*alf*ddet
+        kl = kl + thk * np.dot(np.dot(B.T, C), B) * xw*ddet
     return kl
+
+
+def me(idx, coord, thk, rho):
+    """Local element mass matrix
+    """
+    ndof = elem[idx]['ndof']
+    ngauss = elem[idx]['ngauss']
+    me = np.zeros([ndof, ndof])
+    XW, XP = gauss_int(ngauss)
+    for i in range(0, ngauss):
+        ri = XP[i, 0]
+        si = XP[i, 1]
+        xw = XW[i]
+        dhdx = elem[idx]['dhdx'](ri, si)
+        ddet, jaco_inv = jacoper(dhdx, coord)
+        N = elem[idx]['N'](ri, si)
+
+        me = me + thk * np.dot(N.T, N) * rho * xw*ddet
+    return me
 
 
 def mat_prop(nu, E):

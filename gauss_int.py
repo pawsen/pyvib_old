@@ -4,6 +4,7 @@
 """
 Weights and coordinates for Gauss-Legendre quadrature [1]_. The
 values for triangles is presented in section 5.5 of Bathe book [2]_.
+Or found online at [3]_.
 
 Returns
 -------
@@ -20,12 +21,14 @@ References
   url: https://en.wikipedia.org/wiki/Gaussian_quadrature
 .. [2] Bathe, Klaus-Jürgen. Finite element procedures. Prentice Hall,
    Pearson Education, 2006.
+-- [3] http://math2.uncc.edu/~shaodeng/TEACHING/math5172/Lectures/Lect_15.PDF
 """
 
 import numpy as np
 
 def gauss_int(pts):
     # Gauss points for a 2 by 2 grid
+    # Second order quadrature
     if pts == 4:
         xw = np.zeros([4])
         xp = np.zeros([4, 2])
@@ -44,6 +47,7 @@ def gauss_int(pts):
 
     elif pts == 7:
         # Gauss points for a triangle (7 points)
+        # Fifth order quadrature
         xw = np.zeros([7])
         xp = np.zeros([7, 2])
         xw[0] = 0.1259391805448
@@ -75,6 +79,7 @@ def gauss_int(pts):
 
     elif pts == 3:
         # Gauss points for a triangle element (3 points)
+        # Second order quadrature
         xw = np.zeros([3])
         xp = np.zeros([3, 2])
         xw[0] = 0.3333333333333
