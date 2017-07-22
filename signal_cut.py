@@ -154,12 +154,12 @@ class RFS(object):
 
         import scipy.io
 
-        directory = 'data/T03a_Data/'
-        mat =  scipy.io.loadmat(directory + 'f16_x.mat')
+        # directory = 'data/T03a_Data/'
+        # mat =  scipy.io.loadmat(directory + 'f16_x.mat')
 
-        y = mat['x'][dofs,:]
-        dy = mat['xd'][dofs,:]
-        ddy = mat['xdd'][dofs,:]
+        # y = mat['x'][dofs,:]
+        # dy = mat['xd'][dofs,:]
+        # ddy = mat['xdd'][dofs,:]
 
         # g( x_i - x_j, dx_i - dx_j) = -ddx_i
         if val.shape[0] is 2:
@@ -170,11 +170,6 @@ class RFS(object):
             # connected to ground
             self.y = y
             self.dy = dy
-
-        print(np.linalg.norm(y[0,:]))
-        print(np.linalg.norm(dy[0,:]))
-        #import ipdb; ipdb.set_trace()
-
 
 
     def update_sel(self, id0, id1=-1):
@@ -199,8 +194,6 @@ class RFS(object):
         y_tol = y[ind_tol]
         dy_tol = dy[ind_tol]
         ddy_tol = ddy[ind_tol]
-
-        #import ipdb; ipdb.set_trace()
 
         return y, dy, ddy, y_tol, dy_tol, ddy_tol
 

@@ -80,12 +80,11 @@ class rfsPlotBuilder(object):
         plt.show()
     def slider_update(self, value):
 
-        print(value)
         self.rfs.tol_slice = value
         y, dy, ddy, y_tol, dy_tol, ddy_tol = self.rfs.update_sel(self.idx1, self.idx2)
         self.update_rfs()
 
-        # TODO: works the canvas belong to rect...
+        # TODO: works, even if the canvas belong to rect. ie canvas = rect.canvas
         self.canvas.blit(self.ax2d.bbox)
         self.canvas.blit(self.ax3d.bbox)
 
@@ -184,21 +183,10 @@ class rfsPlotBuilder(object):
         self.idx1 = int(np.floor( self.rfs.ns * (x1 - xx[0]) / np.diff(xx)))
         self.idx2 = int(np.ceil( self.rfs.ns * (x2 - xx[0]) / np.diff(xx)))
 
-        # idx1 = 55880
-        # idx2 = 66727
-        # print(x1,x2,self.idx1,self.idx2)
         y, dy, ddy, y_tol, dy_tol, ddy_tol = self.rfs.update_sel(self.idx1, self.idx2)
-        print(np.linalg.norm(y))
-        print(np.linalg.norm(y))
-
         self.ax3d.clear()
         self.ax3d.plot(y,dy,-ddy, '.k', markersize=10)
         self.ax3d.plot(y_tol,dy_tol,-ddy_tol, '.r', markersize=10)
-        # self.rfs_3d.set_xdata(y)
-        # self.rfs_3d.set_ydata(dy)
-        # self.rfs_3d.set_zdata(-ddy)
-
-        print('norm:' , np.linalg.norm(y))
         self.ax2d.clear()
         self.ax2d.plot(y_tol,-ddy_tol, '.k', markersize=12)
 
