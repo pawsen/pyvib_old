@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from scipy import signal, integrate
+from scipy import signal
+from scipy import integrate as sp_integrate
 
-def integrate(ddx, fs, order=3, lowcut=0.1, highcut=0.5):
+
+def integrate(ddx, fs, order=3, lowcut=0.1, highcut=0.6):
     """Integrate acceleration to get vel and displacement.
 
     Numerical integration is prone to low-frequency problems.
@@ -37,15 +39,15 @@ def integrate(ddx, fs, order=3, lowcut=0.1, highcut=0.5):
     #TODO: skal det være samme cutoff-freq for begge filtre?
 
     # Create an order bandpass butterworth filter:
-    b, a = signal.butter(order, high, btype='lowpass')
+    b, a = signal.butter(order, highcut, btype='lowpass')
     ddy = signal.filtfilt(b, a, ddx)
 
-    b, a = signal.butter(order, low, btype='highpass')
+    b, a = signal.butter(order, lowcut, btype='highpass')
 
-    dy = integrate.cumtrapz(ddy)/fs
+    dy = sp_integrate.cumtrapz(ddy)/fs
     dy = signal.filtfilt(b, a, dy)
-    y = integrate.cumtrapz(ddy)/fs
-    y = signal.filtfilt(b, a, dy)
+    y = sp_integrate.cumtrapz(dy)/fs
+    y = signal.filtfilt(b, a, y)
 
     return y, dy
 
@@ -112,10 +114,10 @@ def differentiate(x, fs, order = 3, cutoff=0.5):
     # manual doing the same
     dy = np.zeros(x.shape)
     ddy = np.zeros(x.shape)
-    for i in range(len(t)-4):
+    for i in range(len(dy)-4):
         dy[i+2] = 1/dt * b_diff.dot(y[i:i+5])
     #dy = signal.filtfilt(b, a, dy)
-    for i in range(2,len(t)-8):
+    for i in range(2,len(dy)-8):
         ddy[i+2] = 1/dt * b_diff.dot(dy[i:i+5])
     #dyd = signal.filtfilt(b, a, ddy)
 
