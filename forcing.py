@@ -25,6 +25,11 @@ def sineSweep(amp, fs, f1, f2, vsweep, inctype='lin', t0=0):
         Type of increment. Linear or logarithmic: lin/log
     t0 : float (optional)
         Staring time, default t0=0
+
+    Notes
+    -----
+    See scipy.signal.chirp, which does the same
+    https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.chirp.html
     """
     dt = 1/fs
 
