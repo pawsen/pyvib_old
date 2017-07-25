@@ -109,7 +109,8 @@ def signal_per(u,y,fs, ido=0):
     plt.show()
 
 class RFS(object):
-    def __init__(self,val, fs, dofs=None, show_damped = False, displ = False):
+    def __init__(self,val, fs, dofs=None, show_damped = False, displ = False,
+                 numeric = False):
         """
         Parameters:
         -----------
@@ -119,7 +120,10 @@ class RFS(object):
             dofs to compare. If none, then compare to ground, ie. zero signal
         show_damp : bool
             show stifness or damping coeff.
+        displ : bool
+            Is the signal accelerations or displacements
         """
+        # import pdb; pdb.set_trace()
 
         if dofs is None and val.ndim is 2:
             val = val[0,:]
@@ -129,7 +133,7 @@ class RFS(object):
             # cast to 2d array
             val = val[None,:]
 
-
+        self.numeric = numeric
         self.displ = displ
         self.show_damped = show_damped
         self.dofs = dofs
@@ -140,17 +144,19 @@ class RFS(object):
         # displacement. Differentiate
         if self.displ:
             y = val
-            dy = np.empty(val.hape)
+            dy = np.empty(val.shape)
             self.ddy = np.empty(val.shape)
             for i in range(val.shape[0]):
-                dy[i,:] , self.ddy[i,:] = myfilter.differentiate(y[i,:], self.fs)
+                dy[i,:] , self.ddy[i,:] = myfilter.differentiate(y[i,:],
+                                                                 self.fs, numeric=self.numeric)
         else:
             # accelerations. Integrate
             self.ddy = val
             y = np.empty(val.shape)
             dy = np.empty(val.shape)
             for i in range(val.shape[0]):
-                y[i,1:-1] , dy[i,1:] = myfilter.integrate(self.ddy[i,:], self.fs)
+                y[i,1:-1] , dy[i,1:] = myfilter.integrate(self.ddy[i,:],
+                                                          self.fs, numeric=self.numeric)
 
         import scipy.io
 
@@ -168,8 +174,8 @@ class RFS(object):
             self.dy = dy[0,:] - dy[1,:]
         else:
             # connected to ground
-            self.y = y
-            self.dy = dy
+            self.y = y[0,:]
+            self.dy = dy[0,:]
 
 
     def update_sel(self, id0, id1=-1):
