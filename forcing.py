@@ -57,7 +57,16 @@ def sineSweep(amp, fs, f1, f2, vsweep, inctype='lin', t0=0):
 
 
 def randomPeriodic(arms, fs, f1, f2, ns, nrep=1 ):
-    """ Do an random exitaion
+    """Random periodic excitation
+
+    Random phase multisine signal is a periodic random signal with a
+    user-controlled amplitude spectrum and a random phase spectrum drawn from a
+    uniform distribution. If an integer number of periods is measured, the
+    amplitude spectrum is perfectly realized, unlike classical Gaussian noise.
+    Another advantage is that the periodic nature can help help separate signal
+    from noise.
+
+    Here the amplitude spectrum is flat between f1 and f2.
 
     Parameters
     ----------
@@ -73,6 +82,11 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1 ):
         Number of points
     nrep : int
         Number of times the signal is repeated
+
+    Notes
+    -----
+    R. Pintelon and J. Schoukens. System Identification: A Frequency Domain
+    Approach. IEEE Press, Piscataway, NJ, 2001
     """
 
     dt = 1/fs
@@ -83,7 +97,7 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1 ):
 
     freq = np.linspace(0,fs, ns+1)
 
-    # create desired frequency content
+    # create desired frequency content, by modifying the phase.
     U = np.fft.fft(u)
     U[ freq < f1] = 0
     U[ freq > f2] = 0
