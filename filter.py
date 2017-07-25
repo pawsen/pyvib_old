@@ -6,7 +6,7 @@ from scipy import signal
 from scipy import integrate as sp_integrate
 
 
-def integrate(ddx, fs, order=3, lowcut=0.1, highcut=0.6):
+def integrate(ddy, fs, order=3, lowcut=0.1, highcut=0.6, numeric=False):
     """Integrate acceleration to get vel and displacement.
 
     Numerical integration is prone to low-frequency problems.
@@ -28,6 +28,9 @@ def integrate(ddx, fs, order=3, lowcut=0.1, highcut=0.6):
         "-3 dB point"). Normalized from 0 to 1, where 1 is the Nyquist
         frequency
 
+    numeric : bool
+        Only filter 'real data'. Simulated data without noise should not be
+        filtered
     Notes
     -----
     .
@@ -36,23 +39,26 @@ def integrate(ddx, fs, order=3, lowcut=0.1, highcut=0.6):
 
     """
 
-    #TODO: skal det være samme cutoff-freq for begge filtre?
+    if numeric:
+        dy = sp_integrate.cumtrapz(ddy)/fs
+        y = sp_integrate.cumtrapz(dy)/fs
+    else:
+        #TODO: skal det være samme cutoff-freq for begge filtre?
+        # Create an order bandpass butterworth filter:
+        b, a = signal.butter(order, highcut, btype='lowpass')
+        ddy = signal.filtfilt(b, a, ddy)
 
-    # Create an order bandpass butterworth filter:
-    b, a = signal.butter(order, highcut, btype='lowpass')
-    ddy = signal.filtfilt(b, a, ddx)
+        b, a = signal.butter(order, lowcut, btype='highpass')
 
-    b, a = signal.butter(order, lowcut, btype='highpass')
-
-    dy = sp_integrate.cumtrapz(ddy)/fs
-    dy = signal.filtfilt(b, a, dy)
-    y = sp_integrate.cumtrapz(dy)/fs
-    y = signal.filtfilt(b, a, y)
+        dy = sp_integrate.cumtrapz(ddy)/fs
+        dy = signal.filtfilt(b, a, dy)
+        y = sp_integrate.cumtrapz(dy)/fs
+        y = signal.filtfilt(b, a, y)
 
     return y, dy
 
-def differentiate(x, fs, order = 3, cutoff=0.5):
-    """ Differentiate x twice to get vel and acc
+def differentiate(y, fs, order = 3, cutoff=0.5, numeric=False):
+    """ Differentiate y twice to get vel and acc
 
     5-point stencil offers fairly good results in most cases [1]_
 
@@ -81,11 +87,14 @@ def differentiate(x, fs, order = 3, cutoff=0.5):
     [1]
     K. Worden: Nonlinearity in structural dynamics. Appendix I
     """
-    # Create an order lowpass butterworth filter:
-    b, a = signal.butter(order, cutoff)
+    if numeric:
+        pass
+    else:
+        # Create an order lowpass butterworth filter:
+        b, a = signal.butter(order, cutoff)
 
-    # Use filtfilt to apply the filter:
-    y = signal.filtfilt(b, a, x)
+        # Use filtfilt to apply the filter:
+        y = signal.filtfilt(b, a, y)
 
     #sampling frequency
     # fs = 1./dt
@@ -112,8 +121,8 @@ def differentiate(x, fs, order = 3, cutoff=0.5):
     """
 
     # manual doing the same
-    dy = np.zeros(x.shape)
-    ddy = np.zeros(x.shape)
+    dy = np.zeros(y.shape)
+    ddy = np.zeros(y.shape)
     for i in range(len(dy)-4):
         dy[i+2] = 1/dt * b_diff.dot(y[i:i+5])
     #dy = signal.filtfilt(b, a, dy)
@@ -132,6 +141,63 @@ def differentiate(x, fs, order = 3, cutoff=0.5):
     # #ddy = signal.filtfilt(b, a, ddy)
 
     return dy, ddy
+
+
+def resample(y,fs_in, fs_out, cutoff, order = 3, numeric=False):
+    """Downsampling can be done like this:
+
+    Parameters:
+    ----------
+    cutoff : int
+        The cutoff frequency for lowpass filtering. Should be lower than the
+        output nyquist frequency, ie. could be 98% of the output nyq
+
+    Return:
+    ------
+    y_out : ndarrray
+        The resampled signal at fs_out Hz
+
+
+    In the simple case where your array's size is divisible by the downsampling
+    factor (R), you can reshape your array, and take the mean along the new
+    axis:
+    a = np.array([1.,2,6,2,1,7])
+    R = 3
+    a.reshape((-1, R))
+    => array([[ 1.,  2.,  6.],
+         [ 2.,  1.,  7.]])
+
+    a.reshape((-1, R)).mean(axis=1)
+    => array([ 3.        ,  3.33333333])
+
+    In the general case, you can pad your array with NaNs to a size divisible
+    by R, and take the mean using scipy.nanmean:
+    import math, scipy
+    b = np.append(a, [ 4 ])
+    b.shape
+    => (7,)
+    pad_size = math.ceil(float(b.size)/R)*R - b.size
+    b_padded = np.append(b, np.zeros(pad_size)*np.NaN)
+    b_padded.shape
+    => (9,)
+    scipy.nanmean(b_padded.reshape(-1,R), axis=1)
+    => array([ 3.        ,  3.33333333,  4.])
+    """
+
+    # low pass filter to avoid aliasing
+    nyq = 0.5 * fs_out
+    if cutoff > nyq:
+        raise ValueError('Cutoff frequency is higher than nyquist frequency of \
+        the resampled signal', cutoff, nyq)
+
+    normal_cutoff =  cutoff / nyq * fs_out/fs_in
+    b, a = signal.butter(order, normal_cutoff, 'lowpass')
+    y = signal.filtfilt(b, a, y)
+
+    n_outsamples = int(round(len(y) * fs_out/fs_in))
+    y_out = signal.resample(y, n_outsamples)
+    t_out = np.arange(0,len(y_out)) / fs_out
+    return t_out, y_out
 
 """
 Test:
