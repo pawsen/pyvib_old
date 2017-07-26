@@ -6,14 +6,7 @@ import numpy as np
 from scipy import linalg
 import matplotlib.pylab as plt
 import filter as myfilter
-
-def db(x):
-    """relative value in dB
-
-    TODO: Maybe x should be rescaled to ]0..1].?
-    log10(0) = inf.
-    """
-    return 20*np.log10( np.abs(x **2 ))
+from common import db
 
 def rescale(x):
     """Rescale data to range
@@ -32,15 +25,17 @@ def rescale(x):
     else:
         return (x - np.amin(x)) / (np.amax(x) - np.amin(x))
 
-def signal_per(u,y,fs, ido=0):
+def periodicity(ymat, nper, fs, ido=0):
     """Shows the periodicity for the signal
 
     Parameters:
     ----------
-    u : float(ns)
-        force signal
-    y : float(ns, ndof)
+    y : ndarray(ns, ndof)
         accelerations
+    nper : int
+        Number of points per period
+    fs : int
+        Sampling frequency
     ido : int
         DOF where periodicity is plotted for
     """
@@ -51,20 +46,11 @@ def signal_per(u,y,fs, ido=0):
     ns = ymat.shape[1]
     # number of periods
     nn = int(np.ceil(ns / nper))
-    ts = 1/fs
-    t = np.arange(ns)*ts
-
-    # dof of shaker
-    # id_force = u['iu'].item()
+    t = np.arange(ns)/fs
 
     # dof of measurement to use
     # ie. where is the nonlinearity
     y = ymat[ido]
-
-    # y = np.array( [ np.arange(0,10)+np.random.normal(), np.arange(0,10)+np.random.normal()*0.01, np.arange(0,10)]).flatten()
-    # nper = 10
-    # ns = len(y)
-    # nn = int(np.ceil(ns / nper))
 
     # first index of last period
     ilast = ns - nper
@@ -95,7 +81,7 @@ def signal_per(u,y,fs, ido=0):
 
     plt.figure(1)
     plt.clf()
-    plt.ion()
+    #plt.ion()
     plt.title('Periodicity of signal for DOF {}'.format(ido))
     plt.plot(t,va2, label='signal')  # , rasterized=True)
     plt.plot(t[:ilast],va, label='periodicity')
