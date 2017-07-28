@@ -1,0 +1,28 @@
+[mesh]
+file= cantilever.msh
+
+[mat]
+[[1001]]
+E=1e8
+nu=0.3
+rho=8e3
+thk=1e-3
+
+[boundary]
+[[1003]]
+dir=0
+val=0
+
+[[1004]]
+dir=1
+val=0
+
+#x= 0
+#y= 0
+
+[load]
+[[1005]]
+# 0 for x, 1 for y
+dir=1
+#x=1
+
