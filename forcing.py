@@ -4,7 +4,7 @@
 from scipy import signal
 import numpy as np
 
-def sineSweep(amp, fs, f1, f2, vsweep, inctype='lin', t0=0):
+def sineSweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
     """Do a linear or logarithmic sinus sweep excitation.
 
     For a reverse sweep, swap f1 and f2 and set a negative sweep rate.
@@ -21,6 +21,8 @@ def sineSweep(amp, fs, f1, f2, vsweep, inctype='lin', t0=0):
         Ending frequency in Hz
     vsweep : float
         Sweep rate in Hz/min
+    nrep : int
+        Number of times the signal is repeated
     inctype : str (optional)
         Type of increment. Linear or logarithmic: lin/log
     t0 : float (optional)
@@ -57,6 +59,14 @@ def sineSweep(amp, fs, f1, f2, vsweep, inctype='lin', t0=0):
         psi = 2*np.pi *f1*(t-t0) + 2*np.pi*vsweep/60*(t-t0)**2 / 2
 
     u = amp * np.sin(psi)
+    if nrep > 1:
+        # repeat signal: 1 2 3 -> 1 2 3 1 2 3 1 2 3
+        u = np.tile(u, nrep)
+        # prevent the first number from reoccurring: 1 2 3 -> 1 2 3 2 3 2 3
+        idx = np.arange(1,nrep) * (ns+1)
+        u = np.delete(u, idx)
+        t = np.arange(0, ns*nrep+1) / fs
+
     return u, t, finst
 
 
@@ -84,7 +94,7 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1 ):
     f2 : float
         Ending frequency in Hz
     ns : int
-        Number of points
+        Number of points per sample
     nrep : int
         Number of times the signal is repeated
 
