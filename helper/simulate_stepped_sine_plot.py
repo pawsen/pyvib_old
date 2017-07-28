@@ -8,12 +8,11 @@ from matplotlib import pyplot as plt
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 import filter as myfilter
 
-saveplot = False
 saveplot = True
 savedata =  True
+forcing = '100'
 
 realpath = os.path.dirname(os.path.realpath(sys.argv[0]))
-
 # plot settings
 plt.close('all')
 plt.rc('text', usetex=True)  # enable LaTex in plots
@@ -41,9 +40,12 @@ plt.rcParams.update(params)
 plt.rcParams['agg.path.chunksize'] = 10000
 
 ## import processed data ##
-path = realpath + '/../data/'
-data_inc = np.load(path + 'duffing_inc.npz')
-data_dec = np.load(path + 'duffing_dec.npz')
+path = realpath + '/../data/duffing_stepped' + forcing
+data_inc = np.load(path + '_inc.npz')
+data_dec = np.load(path + '_dec.npz')
+
+def tohz(y):
+    return y/(2*np.pi)
 
 def steady_amp(data):
     # compute steady state amplitudes
@@ -63,33 +65,30 @@ def steady_amp(data):
 A_inc = steady_amp(data_inc)
 A_dec = steady_amp(data_dec)
 
-# plt.ion()  # turn on interactive mode
-# plot amplitude against omega
+# plot amplitude against omega. Ie. FRF
 fig1 = plt.figure()
 plt.clf()
-
-plt.plot(data_inc['OMEGA_vec'], A_inc, 'o', mfc='none',
-          label=r'$\Delta \Omega>0$') # hollow circles
-plt.plot(data_dec['OMEGA_vec'], A_dec, 'rx',
+plt.plot(tohz(data_inc['OMEGA_vec']), A_inc, 'kx',
+          label=r'$\Delta \Omega>0$')
+plt.plot(tohz(data_dec['OMEGA_vec']), A_dec, 'ro', mfc='none',
           label=r'$\Delta \Omega<0$')
 
 plt.legend()
-plt.xlabel(r'$\Omega$')
-plt.ylabel(r'$a$')
+plt.title(r'FRF for stepped sine')
+plt.xlabel(r'$\Omega$ (Hz)')
+plt.ylabel(r'$|$Displacement$|$ (m)')
 plt.grid(True)
-# plt.show()
 
-# Resample data to > 3*omega to capture third harmonic. Cutoff below nyquist
-# freq for resample fs.
-y = data_inc['y']
-t = data_inc['t']
-OMEGAvec = data_inc['OMEGA_vec']
-sweep_idx = data_inc['sweep_idx']
-fs = data_inc['fs']
-fs_out = 11 # data_inc['omega2']*3
-cutoff = 5
-
-t_res, y_res = myfilter.resample(y,fs, fs_out, cutoff)
+inctype = 'inc'
+if inctype == 'inc':
+    data = data_inc
+else:
+    data = data_dec
+y = data['y']
+t = data['t']
+OMEGAvec = data['OMEGA_vec']
+sweep_idx = data['sweep_idx']
+fs = data['fs']
 
 def tick_function(X):
     return ["%.2f" % z for z in X]
@@ -103,11 +102,10 @@ def normalize(x, mini=None, maxi=None):
         mini = np.min(x)
     if maxi is None:
         maxi = np.max(x)
-
     return (x - mini) / (maxi - mini)
 
 def steady_time(data):
-    # compute steady state amplitudes
+    # Find the steady state oscillations
     y_data = data['y']
     steady_idx = data['steady_idx']
     sweep_idx = data['sweep_idx']
@@ -119,66 +117,73 @@ def steady_time(data):
         y.extend(y_data[idx1:idx2])
     return y
 
+# Plot 7 Omegas on the second x-axis.
 step = len(OMEGAvec)//7
-# normalize index of sweep
+# normalize index of sweep. And fix that the index is actually one ahead. TODO:
+# Not working
+sweep_idx2 = np.insert(sweep_idx[:-1],0,0)
+print(sweep_idx2)
 idx_norm =normalize(sweep_idx, 0 ,len(y))
+idx_norm2 =normalize(sweep_idx2, 0 ,len(y))
+idx_norm2 = idx_norm
 
 # Show only steady state
-ys = steady_time(data_inc)
-ts, ys = myfilter.resample(ys,fs, fs_out, cutoff)
+ys = steady_time(data)
+ts = np.arange(len(ys))/fs
 
+# TODO: OMEGAvec tickmarks are only correct for steady state plot. They are
+# off(too early) for the full time plot. Ma
 
-# plot resampled
 fig2 = plt.figure()
 ax1 = fig2.add_subplot(111)
-# ax1.plot(t, y, '-k', rasterized=True)
-ax1.plot(t_res, y_res, '-k', rasterized=True)
-
+ax1.plot(t, y, '-k', label=r'Complete response', rasterized=True)
+ax1.legend()
 ax1.set_xlabel(r"Time (t)")
-ax1.set_ylabel(r"Amplitude (A)")
-ax1.set_xlim(left=t_res[0], right=t_res[-1])
+ax1.set_ylabel(r"Amplitude (m)")
+ax1.set_xlim(left=t[0], right=t[-1])
 
 ax2 = ax1.twiny()
-ax2.set_xticks(idx_norm[::step]) # location of ticks in interval [0,1]
-ax2.set_xticklabels(tick_function(OMEGAvec[::step]))
-ax2.set_xlabel(r"Excitation frequency $\Omega$")
-
+ax2.set_xticks(idx_norm2[::step]) # location of ticks in interval [0,1]
+ax2.set_xticklabels(tick_function(tohz(OMEGAvec[+1::step])))
+ax2.set_xlabel(r"Excitation frequency $\Omega$ (Hz)")
 
 # plot only steady state
 fig3 = plt.figure()
 ax1 = fig3.add_subplot(111)
-# ax1.plot(t, y, '-k', rasterized=True)
-ax1.plot(ts, ys, '-k', rasterized=True)
-
+ax1.plot(ts, ys, '-k', label=r'Steady state', rasterized=True)
+ax1.legend()
 ax1.set_xlabel(r"Time (t)")
 ax1.set_ylabel(r"Amplitude (A)")
 ax1.set_xlim(left=ts[0], right=ts[-1])
 
 ax2 = ax1.twiny()
-ax2.set_xticks(idx_norm[::step]) # location of ticks in interval [0,1]
-ax2.set_xticklabels(tick_function(OMEGAvec[::step]))
-ax2.set_xlabel(r"Excitation frequency $\Omega$")
-
-# plt.show()
+ax2.set_xticks(idx_norm[::step])
+ax2.set_xticklabels(tick_function(tohz(OMEGAvec[+1::step])))
+ax2.set_xlabel(r"Excitation frequency $\Omega (Hz)$")
 
 if saveplot:
-    path = realpath + '/../plots/'
-    fig1.savefig(path + 'duffing_response.pdf')
-    fig1.savefig(path + 'duffing_response.png')
-    fig2.savefig(path + 'duffing_time_all.pdf', dpi=1200)
-    fig2.savefig(path + 'duffing_time_all.png')
-    fig3.savefig(path + 'duffing_time.pdf', dpi=1200)
-    fig3.savefig(path + 'duffing_time.png')
+    relpath = '/../plots/duffing_stepped' + forcing + '_' + inctype
+    path = realpath + relpath
+    fig1.savefig(path + 'frf.pdf')
+    fig1.savefig(path + 'frf.png')
+    fig2.savefig(path + 'time.pdf', dpi=900)
+    fig2.savefig(path + 'time.png')
+    fig3.savefig(path + 'steady_time.pdf', dpi=900)
+    fig3.savefig(path + 'steady_time.png')
+    print('Figures saved in {}'.format(relpath))
 
 if savedata:
-    filename = realpath + '/../data/' + 'duffing_time_inc.npz'
+    relpath = '/../data/duffing_stepped_post' + forcing + '_' + inctype
+    filename = realpath + relpath
     np.savez(
         filename,
-        fs=fs_out,
-        t_res=t_res,
-        y_res=y_res,
+        fs=fs,
+        t=t,
+        y=y,
         ts_res=ts,
         ys_res=ys
     )
+    print('Data saved as {}'.format(relpath))
+
 
 plt.show()

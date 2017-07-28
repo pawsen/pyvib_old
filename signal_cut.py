@@ -25,7 +25,7 @@ def rescale(x):
     else:
         return (x - np.amin(x)) / (np.amax(x) - np.amin(x))
 
-def periodicity(ymat, nper, fs, ido=0):
+def periodicity(ymat, nper, fs, ido=0, savefig={'save':False,'fname':''}):
     """Shows the periodicity for the signal
 
     Parameters:
@@ -39,6 +39,10 @@ def periodicity(ymat, nper, fs, ido=0):
     ido : int
         DOF where periodicity is plotted for
     """
+    if ymat.ndim != 2:
+        # recast to 2d-array
+        ymat = ymat.reshape(-1,ymat.shape[0])
+
 
     # number of measurement/sensors
     ndof = ymat.shape[0]
@@ -92,6 +96,13 @@ def periodicity(ymat, nper, fs, ido=0):
     plt.xlabel('Time (s)')
     plt.ylabel(r'$\varepsilon$ dB')
     plt.legend()
+
+    if savefig['save']:
+        fname = savefig['fname']
+        plt.savefig(fname + '.png')
+        plt.savefig(fname + '.pdf')
+        print('plot saved as {}'.format(fname))
+
     plt.show()
 
 class RFS(object):
@@ -109,7 +120,6 @@ class RFS(object):
         displ : bool
             Is the signal accelerations or displacements
         """
-        # import pdb; pdb.set_trace()
 
         if dofs is None and val.ndim is 2:
             val = val[0,:]

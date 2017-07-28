@@ -1,69 +1,104 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-
-"""Do a swept sine excitation on the duffing eq:
+"""Do a randomPeriodic multisine excitation or sine sweep on the duffing eq:
 
  y'' + 2*beta*omega*y' + omega**2*y =
-    -gam*y**3 - (mu1*y'**2 + mu2)*sign(y') - q*cos(OMEGE*t)
+    -gam*y**3 - (mu1*y'**2 + mu2)*sign(y') - vrms*force(t)
 
 """
 
 import os
 import sys
+sys.path.insert(1, os.path.join(sys.path[0], '..'))
+import forcing
 import PyDSTool as dst
+from matplotlib import pyplot as plt
 import numpy as np
 import time
 
+# ODE parameters
 savedata = True
-omega2 = 1
-beta = 0.01
+saveplot = False
+saveacc = False
+omega2 = 100e3/2
+beta = 10
 mu1 = 0
 mu2 = 0
-q = 0.1
-gamma = 2
-OMEGA_start = 0.1
-OMEGA_stop = 4.0
+gamma = 100e7/2
+gamma = 0
+
+# forcing parameters
+vrms = 100
+fs = 750
+f1 = 5
+f2 = 150
+nsper = 8192
+nper = 5
+vsweep = 10
+ftype = 'sweep'
+#ftype = 'multisine'
+inctype = ''
+
+# get external forcing
+if ftype == 'multisine':
+    u, t_ran = forcing.randomPeriodic(vrms,fs, f1,f2,nsper, nper)
+elif ftype == 'sweep':
+    inctype='log'
+    u, t_ran, _ = forcing.sineSweep(vrms,fs, f1,f2,vsweep, nper, inctype)
+    # we dont use the first value, as it is not repeated when the force is
+    # generated. This is taken care of in randomPeriodic.
+    nsper = (len(u)-1) // nper
+else:
+    raise ValueError('Wrong type of forcing', ftype)
 
 #  Initial conditions
 y0 = 0  # deflection t = 0
-v0 = 0.01  # velocity at t = 0
+v0 = 0  # velocity at t = 0
 
 print( '\n parameters:')
-print( 'omega2   \t = %f' % omega2)
-print( 'q        \t = %f' % q)
-print( 'mu1      \t = %f' % mu1)
-print( 'mu2      \t = %f' % mu2)
-print( 'beta     \t = %f' % beta)
-print( 'gamma    \t = %f' % gamma)
-print( 'y0       \t = %f' % y0)
-print( 'v0       \t = %f' % v0)
+print( 'ftype      \t = %s' % ftype)
+print( 'inctype    \t = %s' % inctype)
+print( 'omega(Hz)  \t = %f' % (np.sqrt(omega2)/(2*np.pi)) )
+print( 'mu1        \t = %f' % mu1)
+print( 'mu2        \t = %f' % mu2)
+print( 'beta       \t = %f' % beta)
+print( 'gamma      \t = %f' % gamma)
+print( 'y0         \t = %f' % y0)
+print( 'vrms       \t = %f' % vrms)
+print( 'fs         \t = %d' % fs)
+print( 'f1         \t = %f' % f1)
+print( 'f2         \t = %f' % f2)
+print( 'nsper      \t = %d' % nsper)
+print( 'nper       \t = %d' % nper)
+print( 'ns_tot     \t = %d' % len(u))
 
-
-# Set simulation parameters:
-# NOTE: A lot transient periods are needed in order to get complete steady
-# state. If the response curve is not smooth, try raising ntransient to
-# something like 500.!
-
-# ntransient = 500  # transient periods of ext excitation
-# nsteady = 100  # state state periods of ext excitation
-# sampling_rate = 25
-
-ntransient = 200  # transient periods of ext excitation
-nsteady = 50  # state state periods of ext excitation
-sampling_rate = 20
-
-n_OMEGA = 100  # numbers in excitation freq range
-
-def recover_acc(t, y, v, OMEGA):
-    a= - 2*beta*v - omega2*y -gamma*y**3 - (mu1*v**2 + mu2)*np.sign(v) - q*np.cos(OMEGA*t)
+def recover_acc(t, y, v):
+    """Recover the acceleration from the RHS:
+    # a= - 2*beta*v - omega2*y -gamma*y**3 - (mu1*v**2 + mu2)*np.sign(v) - q*np.cos(OMEGA*t)
+    # oneliner, but slower than the explicit for loop. Maybe because of mem-init.
+    # a = np.array([DS.Rhs(pts['t'][i],state, DS.pars) for i, state in enumerate(pts)])[:,0]
+    """
+    a = np.empty(len(t))
+    for i in range(len(t)):
+        a[i] = DS.Rhs(t[i], {'y':y[i], 'v':v[i]}, DS.pars)[0]
+    print('accelerations recovered')
     return a
 
-DSargs = dst.args(name='duffing')
-DSargs.algparams = {'max_pts': 100000}
-DSargs.pars = {'q': q,
-               'omega2': omega2,
-               'OMEGA': 0,
+xData = {'force': u}
+my_input = dst.InterpolateTable({'tdata': t_ran,
+                                 'ics': xData,
+                                 'name': 'interp1d',
+                                 'method': 'linear', # next 3 not necessary
+                                 'checklevel': 1,
+                                 'abseps': 1e-6,
+                              }).compute('interp1d')
+
+DSargs = dst.args(name='duffing_sweep')
+tdomain = [t_ran[0], t_ran[-1]]
+DSargs.tdata = tdomain
+DSargs.inputs = my_input.variables['force']
+DSargs.pars = {'omega2': omega2,
                'mu1': mu1,
                'mu2': mu2,
                'gam': gamma,
@@ -73,137 +108,104 @@ DSargs.varspecs = {'y': 'v',
                    'v': '-2*beta*v \
                    -omega2 * y \
                    -gam * y**3 \
-                   -(mu1*v**2 + mu2)*signum(v) \
-                   -q*cos(OMEGA*t)'}
+                   -force', #  -(mu1*v**2 + mu2)*signum(v) \
+                   'inval': 'force'}
+DSargs.vars = ['y', 'v']
+DSargs.ics = {'y': y0, 'v': v0}
+DSargs.algparams = {'init_step' :0.01, 'max_step': 0.01, 'max_pts': 200000}
+DSargs.checklevel = 2
 
-
-#lang = "python"
-lang = "c"
-
-# Create ode-object
-if (lang == 'python'):
-    ode = dst.Generator.Vode_ODEsystem(DSargs)
-if (lang == 'c'):
-    DSargs['nobuild'] = True
-    ode = dst.Generator.Dopri_ODEsystem(DSargs)
-    ode.makeLib()  # compile (remove gen files and dirs before recompiling)
-
-# increase/decrease ext excitation freq
-if len(sys.argv) > 1:
-    arg = sys.argv[1]
-    if arg == 'True':
-        increasing = True
-    else:
-        increasing = False
+python = False
+if python:
+    DS = dst.Generator.Vode_ODEsystem(DSargs)
 else:
-    increasing = False
-    increasing = True
-
-# Sweep OMEGA
-
-path =  os.path.dirname(os.path.realpath(sys.argv[0])) +  '/../data/'
-if increasing:
-    filename = path + 'duffing_inc'
-    OMEGA_vec = np.linspace(OMEGA_start, OMEGA_stop, n_OMEGA)
-else:
-    filename = path + 'duffing_dec'
-    OMEGA_vec = np.linspace(OMEGA_stop, OMEGA_start, n_OMEGA)
-
-y = []
-v = []
-a = []
-t = []
-sweep_idx = np.zeros(n_OMEGA, dtype=int)
-steady_idx = np.zeros(n_OMEGA, dtype=int)
-
-print( '\n looping OMEGA from %f to %f in %d steps' \
-       % (OMEGA_vec[0], OMEGA_vec[-1], n_OMEGA))
-print(' %d Sweeps with %d transient and %d steady periods.' \
-      %(len(OMEGA_vec), ntransient, nsteady))
-print(' Each period is sampled in %d steps, a total of %d steps\n' \
-      %(sampling_rate, len(OMEGA_vec)*ntransient*nsteady*sampling_rate))
+    DS = dst.Generator.Dopri_ODEsystem(DSargs)
 
 startTime = time.time()
-tot = 0
-t0 = 0.0  # start time for for the simulation
-for i, OMEGA in enumerate(OMEGA_vec):
 
-    print( 'OMEGA=%f' % OMEGA)
-
-    # adjust time domain and timestep:
-    ttransient = ntransient*2.0*np.pi/OMEGA + t0  # periods of the excitation force
-    tstop = ttransient + nsteady*2.0*np.pi/OMEGA  # periods of the excitation force
-    dt = 1 / sampling_rate  # timesteps per period of the excitation force
-    #dt = 2*np.pi/OMEGA / sampling_rate  # timesteps per period of the excitation force
-    # print((ttransient-t0)/dt,(tstop-ttransient)/dt)
-
-    # set excitation frequency and update time doamain
-    ode.set(pars={'OMEGA': OMEGA})
-
-    # solve for transient motion:
-    # print 'resolving transient motion'
-    ode.set(tdata=[t0, ttransient],
-            ics={'y': y0, 'v': v0})
-    traj_transient = ode.compute('duffing')  # integrate ODE
-    pts = traj_transient.sample(dt=dt, precise=True)  # sampling data for plotting
-    #pts['t'] = pts['t']/np.sqrt(np.abs(omega2))  # scale back to real time
-    pts_transient = pts
-
-    # solve for steady state motion:
-    ode.set(tdata=[ttransient, tstop+0.5*dt],
-            ics={'y': pts['y'][-1], 'v': pts['v'][-1]})
-    traj_steady = ode.compute('duffing')
-    pts = traj_steady.sample(dt=dt, precise=True)
-    pts_steady = pts
-
-    # update initial conditions
+# Because of the *stupid* way I explicit save the whole forcing repeated times,
+# the integration needs to be run in steps for pydstool not to crash when nrep
+# is large or the sampling high.
+int_time = (t_ran[-1]-t_ran[0])/nper
+t0 = 0
+t1 = int_time
+y, v, t, u_pol, a = [], [], [], [], []
+for i in range(nper):
+    DS.set(tdata=[t0, t1],
+           ics={'y':y0, 'v':v0})
+    traj = DS.compute('in-table')
+    # Precision sampling seems to crash sometimes, when nper is high. It does
+    # not seems to be a problem to run without it.
+    #pts = traj.sample(dt=1/fs, precise=True)
+    pts = traj.sample(dt=1/fs)
+    # Dont save the last point, as it will be the first point for next round
+    y.extend(pts['y'][:-1])
+    v.extend(pts['v'][:-1])
+    t.extend(pts['t'][:-1])
+    u_pol.extend(pts['inval'][:-1])
     y0 = pts['y'][-1]
     v0 = pts['v'][-1]
     t0 = pts['t'][-1]
+    t1 = t0 + int_time
 
-    # Save time data
-    steady_idx[i] = sweep_idx[i-1] + len(pts_transient['t']) - 1
-    sweep_idx[i] = steady_idx[i] + len(pts_steady['t']) - 1
+y.extend([pts['y'][-1]])
+v.extend([pts['v'][-1]])
+t.extend([pts['t'][-1]])
+u_pol.extend([pts['inval'][-1]])
 
-    t.extend(pts_transient['t'])
-    t.extend(pts_steady['t'])
-    y.extend(pts_transient['y'])
-    y.extend(pts_steady['y'])
-    v.extend(pts_transient['v'])
-    v.extend(pts_steady['v'])
+print('Integration done in: {}'.format(time.time()-startTime))
 
-    a.extend(recover_acc(pts_transient['t'], pts_transient['y'], pts_transient['v'], OMEGA))
-    a.extend(recover_acc(pts_steady['t'], pts_steady['y'], pts_steady['v'], OMEGA))
-
-    ymax = np.max(pts_steady['y'])
-    ymin = np.min(pts_steady['y'])
-    print( "max A: %0.5f" % (np.abs(0.5*(ymax-ymin))))
-
-totalTime = time.time()-startTime
-print('')
-print(' Total time: %f, time per sweep: %f' % (totalTime,totalTime/len(OMEGA_vec)))
-print(' Total points in time series: %d' % (len(t)))
-y = np.asarray(y)
-v = np.asarray(v)
-t = np.asarray(t)
-
-
+if saveacc:
+    a = recover_acc(t, y, v)
+abspath =  os.path.dirname(os.path.realpath(sys.argv[0]))
+forcing = str(vrms).replace('.','')
+relpath =  '/../data/' + 'duffing_' + ftype + forcing
+filename = abspath + relpath
 if savedata:
     np.savez(
         filename,
+        ftype=ftype,
+        inctype=inctype,
         beta=beta,
         omega2=omega2,
-        q=q,
         mu1=mu1,
         mu2=mu2,
         gamma=gamma,
-        dt=dt,
-        fs=sampling_rate,
-        OMEGA_vec=OMEGA_vec,
-        a=a,
-        v=v,
-        y=y,
-        t=t,
-        sweep_idx=sweep_idx,
-        steady_idx=steady_idx
-    )
+        vrms=vrms,
+        fs=fs,
+        f1=f1,
+        f2=f2,
+        nsper=nsper,
+        nper=nper,
+        t=t,  #pts['t'],
+        y=y,  #pts['y'],
+        dy=v,  #pts['v'],
+        ddy=a,
+        u=u_pol,  #pts['inval'],
+        )
+    print('data saved as {}'.format(relpath))
+
+
+plt.figure()
+plt.plot(t, y, '-k') #, label = 'disp')
+plt.xlabel('Time (t)')
+plt.ylabel('Displacement (m)')
+plt.title('Force type: {}, periods:{:d}'.format(ftype, nper) )
+# plt.legend()
+
+if saveplot == True:
+
+    relpath = '/../plots/' + 'duffing_' + ftype + forcing
+    filename = abspath + relpath
+    plt.savefig(filename + '.pdf')
+    plt.savefig(filename + '.png')
+    print('plot saved as {}'.format(relpath))
+
+    # plt.figure()
+    # plt.plot(t, u_pol, label='interp')
+    # plt.plot(t_ran, u, '--k', label='u')
+    # plt.legend()
+    # #plt.savefig('error_dopri.png')
+
+if nper <= 10:
+    plt.show()
