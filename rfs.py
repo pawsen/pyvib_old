@@ -43,6 +43,7 @@ class rfsPlotBuilder(object):
         # plot acceleration signal
         t = np.arange(self.rfs.ns)/self.rfs.fs
         ax.plot(t, self.rfs.ddy[0,:],'-k')
+        #ax.plot(t, self.rfs.y,'-k')
 
         #¤ back to rectangular settings
         ymin, ymax = ax.get_ylim()
@@ -78,6 +79,7 @@ class rfsPlotBuilder(object):
         canvas.mpl_connect('motion_notify_event', self.motion_notify_callback)
 
         plt.show()
+
     def slider_update(self, value):
 
         self.rfs.tol_slice = value
@@ -202,3 +204,119 @@ class rfsPlotBuilder(object):
         self.ax2d.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
 
 
+import filter as myfilter
+class RFS(object):
+    def __init__(self,val, fs, dofs=None, show_damped = False, displ = False,
+                 numeric = False):
+        """
+        Parameters:
+        -----------
+        val : ndarray(ns)
+            either accelerations or displacements
+        dofs : int(2)
+            dofs to compare. If none, then compare to ground, ie. zero signal
+        show_damp : bool
+            show stifness or damping coeff.
+        displ : bool
+            Is the signal accelerations or displacements
+        """
+
+        if dofs is None and val.ndim is 2:
+            val = val[0,:]
+        else:
+            val = val[dofs,:]
+        if val.ndim is not 2:
+            # cast to 2d array
+            val = val[None,:]
+
+        self.numeric = numeric
+        self.displ = displ
+        self.dofs = dofs
+        self.fs = fs
+        self.ns = val.shape[1]
+        self.tol_slice = 1e-2
+
+        # displacement. Differentiate
+        if self.displ:
+            y = val
+            dy = np.empty(val.shape)
+            self.ddy = np.empty(val.shape)
+            for i in range(val.shape[0]):
+                dy[i,:] , self.ddy[i,:] = myfilter.differentiate(y[i,:],
+                                                                 self.fs, numeric=self.numeric)
+        else:
+            # accelerations. Integrate
+            self.ddy = val
+            y = np.empty(val.shape)
+            dy = np.empty(val.shape)
+            for i in range(val.shape[0]):
+                y[i,1:-1] , dy[i,1:] = myfilter.integrate(self.ddy[i,:],
+                                                          self.fs, numeric=self.numeric)
+
+        # import scipy.io
+        # directory = 'data/T03a_Data/'
+        # mat =  scipy.io.loadmat(directory + 'f16_x.mat')
+
+        # y = mat['x'][dofs,:]
+        # dy = mat['xd'][dofs,:]
+        # ddy = mat['xdd'][dofs,:]
+
+        # g( x_i - x_j, dx_i - dx_j) = -ddx_i
+        if val.shape[0] is 2:
+            # connected to another dof
+            self.y = y[0,:] - y[1,:]
+            self.dy = dy[0,:] - dy[1,:]
+        else:
+            # connected to ground
+            self.y = y[0,:]
+            self.dy = dy[0,:]
+
+
+    def update_sel(self, id0, id1=-1, show_damped=False):
+        """ Update RFS for the given selection
+
+        Parameters:
+        ----------
+        id0/id1 : int
+            index start/end for the selection
+        """
+        #t = self.t( id0:di1 );
+        y = self.y[id0:id1]
+        dy = self.dy[id0:id1]
+        ddy = self.ddy[0,id0:id1]
+
+        if show_damped:
+            tol =  self.tol_slice * max( np.abs(y))
+            ind_tol = np.where(np.abs(y) < tol)
+        else:
+            tol =  self.tol_slice * max( np.abs(dy))
+            ind_tol = np.where(np.abs(dy) < tol)
+        y_tol = y[ind_tol]
+        dy_tol = dy[ind_tol]
+        ddy_tol = ddy[ind_tol]
+
+        return y, dy, ddy, y_tol, dy_tol, ddy_tol
+
+
+
+# from mpl_toolkits.mplot3d import Axes3D
+
+# plt.figure(2)
+# plt.clf()
+# ax = plt.axes(projection='3d')
+# ax.plot(y1, dy, -ddy, '.k', markersize=10)
+# ax.plot(y1_tol, y1_tol, -ddy_tol, '.r', markersize=12)
+# ax.set_title("Restoring force surface")
+# ax.set_xlabel('Displacement (m)')
+# ax.set_ylabel('Velocity (m/s)')
+# ax.set_zlabel('-Acceleration (m/s²)')
+
+
+# plt.figure(3)
+# plt.clf()
+# plt.title('Stiffness curve')
+# plt.xlabel('Displacement (m)')
+# plt.ylabel('-Acceleration (m/s²)')
+# plt.plot(y1_tol,-ddy_tol,'.k', markersize=12)
+
+# #plt.show()

@@ -13,9 +13,14 @@ import sys
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 
 # Perodicity stuff
-from signal_cut import periodicity
+# from vib.common import db
+# from vib.signal2 import Signal
+# from vib.frf import FRF
+# from vib.rfs import RFS
 from common import db
-import frf
+from signal2 import Signal
+from frf import FRF
+from rfs import RFS
 
 saveplot = True
 nonlin = '0e00'
@@ -50,17 +55,12 @@ ido = 0
 # don't include first measurement as the first force point is not repeated.
 relpath = '/../plots/' + 'duffing_periodicity_' + nonlin + ftype + forcing
 filename = abspath + relpath
-periodicity(y[1:], nsper, fs, ido, savefig={'save':saveplot,'fname':filename})
+
+signal = Signal(u, y, fs)
+# signal.periodicity(nsper, ido, offset=1, savefig={'save':saveplot,'fname':filename})
 
 fmin = 5
 fmax = 150
-def ensure2d(y):
-    if y.ndim != 2:
-        # recast to 2d-array
-        y = y.reshape(-1,y.shape[0])
-    return y
-# cast to 2d. Format is now y[ndofs,ns]. For 1d cases ndof=0
-y = ensure2d(y)
 
 # select periods to include in FRF. Chosen visually from periodicity plot.
 # Remember that it is zero-based
@@ -68,8 +68,11 @@ per=[0]
 per=[6,7]
 #per = np.arange(15,20)
 
-frf = frf.FRF(u, y, fs, fmin, fmax)
-freq, H = frf.periodic(nsper, nper, per)
+# choose which periods to use
+signal.cut(nsper, per, offset=1)
+frf = FRF(signal, fmin, fmax)
+freq, H = frf.periodic()
+
 H = H[ido,:]
 
 fig1 = plt.figure()
@@ -109,4 +112,4 @@ if saveplot:
     fig2.savefig(filename + '.pdf')
     print('plot saved as {}'.format(relpath))
 
-plt.show()
+# plt.show()

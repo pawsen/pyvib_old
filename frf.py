@@ -2,48 +2,50 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
+from signal2 import Signal
 
-class FRF(object):
-    def __init__(self, u, y, fs, fmin, fmax):
+class FRF(Signal):
+    def __init__(self, signal, fmin, fmax):
 
-        self.u = u
-        self.y = y
-        self.fs = fs
+        self.signal = signal
+        # self.u = signal.u
+        # self.y = signal.y
+        # self.fs = signal.fs
         self.fmin = fmin
         self.fmax = fmax
 
-    def periodic(self, nsper, _nper, per):
+    def periodic(self, fmin=None, fmax=None, nper=None):
         """Interface to periodic FRF
 
         Extract periodic signal from original signal and call periodic FRF
 
         Parameters
         ----------
-        nsper : int
-            Number of samples per period
-        _nper : int
-            Number of periods in original measurement
-        per : list
-            List of periods to use. 0-based. Ie. [0,1,2] etc
-
+        nper : int (optional)
+            Number of periods in measurement
         """
-        if any(p > _nper- 1 for p in per):
-            raise ValueError('Period too high. Only {} periods in data.'.format(nper),per)
+        if fmin != None:
+            self.fmin = fmin
+        if fmax != None:
+            self.fmax = fmax
 
-        ndof = self.y.shape[0]
-        nper = len(per)
-        y = np.empty((ndof, nper*nsper))
-        u = np.empty(nper*nsper)
+        # Call signal.cut before this. Or call signal.cut from here?
 
-        # extract periodic signal
-        for i, p in enumerate(per):
-            # remember we dont want first point included
-            y[:,i*nsper : (i+1)*nsper] = self.y[:, p*nsper+1 : (p+1)*nsper+1]
-            u[i*nsper : (i+1)*nsper] = self.u[p*nsper+1 : (p+1)*nsper+1]
+        # If signal is cut, used that. Otherwise use the full signal.
+        if self.signal._cut:
+            u = self.signal.u_per
+            y = self.signal.y_per
+            nper = self.signal.nper
+        else:
+            u = self.signal.u
+            y = self.signal.y
 
-
+        fs = self.signal.fs
+        ndof = y.shape[0]
         for i in range(ndof):
-            freq, H1, sigN = periodic(u, y[i,:], nper, self.fs, self.fmin, self.fmax)
+            # TODO maybe save sigN (and freq) in matrix as well. sigN is
+            # different for each dof, while freq is not.
+            freq, H1, sigN = periodic(u, y[i,:], nper, fs, self.fmin, self.fmax)
 
             if i == 0:
                 H = np.empty((ndof, len(freq)), dtype=complex)
