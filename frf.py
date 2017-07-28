@@ -3,6 +3,57 @@
 
 import numpy as np
 
+class FRF(object):
+    def __init__(self, u, y, fs, fmin, fmax):
+
+        self.u = u
+        self.y = y
+        self.fs = fs
+        self.fmin = fmin
+        self.fmax = fmax
+
+    def periodic(self, nsper, _nper, per):
+        """Interface to periodic FRF
+
+        Extract periodic signal from original signal and call periodic FRF
+
+        Parameters
+        ----------
+        nsper : int
+            Number of samples per period
+        _nper : int
+            Number of periods in original measurement
+        per : list
+            List of periods to use. 0-based. Ie. [0,1,2] etc
+
+        """
+        if any(p > _nper- 1 for p in per):
+            raise ValueError('Period too high. Only {} periods in data.'.format(nper),per)
+
+        ndof = self.y.shape[0]
+        nper = len(per)
+        y = np.empty((ndof, nper*nsper))
+        u = np.empty(nper*nsper)
+
+        # extract periodic signal
+        for i, p in enumerate(per):
+            # remember we dont want first point included
+            y[:,i*nsper : (i+1)*nsper] = self.y[:, p*nsper+1 : (p+1)*nsper+1]
+            u[i*nsper : (i+1)*nsper] = self.u[p*nsper+1 : (p+1)*nsper+1]
+
+
+        for i in range(ndof):
+            freq, H1, sigN = periodic(u, y[i,:], nper, self.fs, self.fmin, self.fmax)
+
+            if i == 0:
+                H = np.empty((ndof, len(freq)), dtype=complex)
+            H[i,:] = H1
+
+        return freq, H
+
+    def nonperiodic():
+        """Interface to nonperiodic FRF"""
+
 def periodic( u, y, nper, fs, fmin, fmax):
     """ Calculate FRF for a periodic signal.
 

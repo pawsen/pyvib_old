@@ -30,14 +30,14 @@ gamma = 0
 
 # forcing parameters
 vrms = 100
-fs = 750
 f1 = 5
 f2 = 150
+fs = 1000  #750
 nsper = 8192
-nper = 5
+nper = 10
 vsweep = 10
 ftype = 'sweep'
-#ftype = 'multisine'
+ftype = 'multisine'
 inctype = ''
 
 # get external forcing
@@ -159,7 +159,8 @@ if saveacc:
     a = recover_acc(t, y, v)
 abspath =  os.path.dirname(os.path.realpath(sys.argv[0]))
 forcing = str(vrms).replace('.','')
-relpath =  '/../data/' + 'duffing_' + ftype + forcing
+nonlin = "{:.0e}".format(gamma).replace('+','')
+relpath =  '/../data/' + 'duffing_' + nonlin + ftype + forcing
 filename = abspath + relpath
 if savedata:
     np.savez(
@@ -195,7 +196,7 @@ plt.title('Force type: {}, periods:{:d}'.format(ftype, nper) )
 
 if saveplot == True:
 
-    relpath = '/../plots/' + 'duffing_' + ftype + forcing
+    relpath = '/../plots/' + 'duffing_' + nonlin + ftype + forcing
     filename = abspath + relpath
     plt.savefig(filename + '.pdf')
     plt.savefig(filename + '.png')

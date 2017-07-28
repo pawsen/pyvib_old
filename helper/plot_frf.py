@@ -18,11 +18,13 @@ from common import db
 import frf
 
 saveplot = True
+nonlin = '0e00'
+#nonlin = '5e08'
 forcing = '100'
 ftype = 'multisine'
-ftype = 'sweep'
+# ftype = 'sweep'
 abspath =  os.path.dirname(os.path.realpath(sys.argv[0]))
-mat = np.load(abspath + '/../data/' + 'duffing_' + ftype + forcing + '.npz')
+mat = np.load(abspath + '/../data/' + 'duffing_' + nonlin + ftype + forcing + '.npz')
 
 t = mat['t']
 y = mat['y']
@@ -46,7 +48,7 @@ if len(u) != len(y):
 # which dof to show:
 ido = 0
 # don't include first measurement as the first force point is not repeated.
-relpath = '/../plots/' + 'duffing_periodicity_' + ftype + forcing
+relpath = '/../plots/' + 'duffing_periodicity_' + nonlin + ftype + forcing
 filename = abspath + relpath
 periodicity(y[1:], nsper, fs, ido, savefig={'save':saveplot,'fname':filename})
 
@@ -59,45 +61,21 @@ def ensure2d(y):
     return y
 # cast to 2d. Format is now y[ndofs,ns]. For 1d cases ndof=0
 y = ensure2d(y)
-ndof = y.shape[0]
 
 # select periods to include in FRF. Chosen visually from periodicity plot.
 # Remember that it is zero-based
 per=[0]
-per=[3,4]
+per=[6,7]
 #per = np.arange(15,20)
 
-
-if any(p > nper- 1 for p in per):
-    raise ValueError('Period too high. Only {} periods in data.'.format(nper),per)
-
-nper = len(per)
-ymat = y
-umat = u
-y = np.empty((ndof, nper*nsper))
-u = np.empty(nper*nsper)
-
-# extract periodic signal
-for i, p in enumerate(per):
-    # remember we dont want first point included
-    y[:,i*nsper : (i+1)*nsper] = ymat[:, p*nsper+1 : (p+1)*nsper+1]
-    u[i*nsper : (i+1)*nsper] = umat[p*nsper+1 : (p+1)*nsper+1]
-
-
-for i in range(ndof):
-    freq, H1, sigN = frf.periodic(u, y[i,:], nper, fs, fmin, fmax)
-
-    if i == 0:
-        H = np.empty((ndof, len(freq)), dtype=complex)
-    H[i,:] = H1
-
-
+frf = frf.FRF(u, y, fs, fmin, fmax)
+freq, H = frf.periodic(nsper, nper, per)
 H = H[ido,:]
 
 fig1 = plt.figure()
 plt.clf()
 plt.plot(freq, np.angle(H)/ np.pi * 180 )
-plt.title('FRF for dof {}. Periods included {}'.format(ido,nper))
+plt.title('FRF for dof {}. Periods included {}'.format(ido,', '.join(map(str,per))))
 plt.xlabel('Frequency (Hz)')
 plt.ylabel('Phase angle (deg)')
 #plt.ylim([-180, 180])
@@ -114,18 +92,18 @@ plt.yticks(np.linspace(-180,180,360/90))
 fig2 = plt.figure()
 plt.clf()
 plt.plot(freq, db(np.abs(H)))
-plt.title('FRF for dof {}. Periods included {}'.format(ido,nper))
+plt.title('FRF for dof {}. Periods included {}'.format(ido,', '.join(map(str,per))))
 plt.xlabel('Frequency (Hz)')
 # For linear scale: 'Amplitude (m/N)'
 plt.ylabel('Amplitude (dB)')
 
 if saveplot:
-    relpath = '/../plots/' + 'duffing_frfphase_' + ftype + forcing
+    relpath = '/../plots/' + 'duffing_frfphase_' + nonlin + ftype + forcing
     filename = abspath + relpath
     fig1.savefig(filename + '.png')
     fig1.savefig(filename + '.pdf')
     print('plot saved as {}'.format(relpath))
-    relpath = '/../plots/' + 'duffing_frfamp_' + ftype + forcing
+    relpath = '/../plots/' + 'duffing_frfamp_' + nonlin + ftype + forcing
     filename = abspath + relpath
     fig2.savefig(filename + '.png')
     fig2.savefig(filename + '.pdf')
