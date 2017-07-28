@@ -1,0 +1,19 @@
+[mesh]
+file= eigen_beam.msh
+
+[mat]
+[[10020]]
+E=2e11
+nu=0.0
+rho=8e3
+thk=1e-3
+
+
+[boundary]
+[[10005]]
+dir=0
+val=0
+
+[[10006]]
+dir=1
+val=0
