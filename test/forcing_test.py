@@ -79,6 +79,14 @@ plt.xlabel('Instantaneous frequency (Hz)')
 plt.ylabel( 'Sine sweep excitation (N)')
 plt.grid()
 
+plt.figure()
+plt.clf()
+plt.plot(t, finst, '-k' )
+plt.title('Frequency history for sineSweep signal, type: {}'.format(inctype))
+plt.xlabel('Time (s)')
+plt.ylabel('Instantaneous frequency (Hz)')
+plt.grid()
+
 U = np.fft.fft(u)
 idx = len(U)//2
 U_plot = db(np.abs(U[0:idx]))

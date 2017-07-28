@@ -4,7 +4,7 @@ from matplotlib.widgets import Slider
 import matplotlib.pyplot as plt
 import numpy as np
 
-class rfsPlotBuilder(object):
+class _rfsPlotBuilder(object):
     """
     Could be update to not clear and redraw, but instead just update the
     points.
@@ -204,72 +204,51 @@ class rfsPlotBuilder(object):
         self.ax2d.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
 
 
-import filter as myfilter
-class RFS(object):
-    def __init__(self,val, fs, dofs=None, show_damped = False, displ = False,
-                 numeric = False):
-        """
+from signal2 import Signal
+class RFS(Signal):
+    def __init__(self, signal, dofs=[0], show_damped = False):
+        """ Show a Restoring Force Surface, which gives a visual idea of the
+        type of nonlinearity(if any)
+
+        Simply found as
+         # g( x_i - x_j, dx_i - dx_j) ~ -ddx_i
+
+
         Parameters:
         -----------
-        val : ndarray(ns)
-            either accelerations or displacements
-        dofs : int(2)
-            dofs to compare. If none, then compare to ground, ie. zero signal
+        dofs : list: [dof_i], [dof_i, dof_j] or empty
+            dofs to compare. If none, then compare to ground. If [dof_i], then
+            compare dof_i to ground. Else compare dof_i to dof_j
         show_damp : bool
             show stifness or damping coeff.
-        displ : bool
-            Is the signal accelerations or displacements
         """
 
-        if dofs is None and val.ndim is 2:
-            val = val[0,:]
-        else:
-            val = val[dofs,:]
-        if val.ndim is not 2:
-            # cast to 2d array
-            val = val[None,:]
+        if not isinstance(dofs, list):
+            raise TypeError('dofs not a list. Should be [dof1, dof2]', type(dofs))
+        if len(dofs) > 2:
+            raise ValueError('List of dofs is too long. Max two dofs', len(dofs))
 
-        self.numeric = numeric
-        self.displ = displ
         self.dofs = dofs
-        self.fs = fs
-        self.ns = val.shape[1]
+        self.ns = signal.ns
+        self.fs = signal.fs
         self.tol_slice = 1e-2
+        self.signal = signal
 
-        # displacement. Differentiate
-        if self.displ:
-            y = val
-            dy = np.empty(val.shape)
-            self.ddy = np.empty(val.shape)
-            for i in range(val.shape[0]):
-                dy[i,:] , self.ddy[i,:] = myfilter.differentiate(y[i,:],
-                                                                 self.fs, numeric=self.numeric)
-        else:
-            # accelerations. Integrate
-            self.ddy = val
-            y = np.empty(val.shape)
-            dy = np.empty(val.shape)
-            for i in range(val.shape[0]):
-                y[i,1:-1] , dy[i,1:] = myfilter.integrate(self.ddy[i,:],
-                                                          self.fs, numeric=self.numeric)
-
-        # import scipy.io
-        # directory = 'data/T03a_Data/'
-        # mat =  scipy.io.loadmat(directory + 'f16_x.mat')
-
-        # y = mat['x'][dofs,:]
-        # dy = mat['xd'][dofs,:]
-        # ddy = mat['xdd'][dofs,:]
-
-        # g( x_i - x_j, dx_i - dx_j) = -ddx_i
-        if val.shape[0] is 2:
-            # connected to another dof
-            self.y = y[0,:] - y[1,:]
-            self.dy = dy[0,:] - dy[1,:]
-        else:
+        y = signal.y  #[dofs,:]
+        dy = signal.dy  #[dofs,:]
+        if len(dofs) == 1:
             # connected to ground
-            self.y = y[0,:]
-            self.dy = dy[0,:]
+            self.y = y[dofs,:]
+            self.dy = dy[dofs,:]
+        else:
+            # connected to another dof
+            self.y = y[dofs[0],:] - y[dofs[1],:]
+            self.dy = dy[dofs[0],:] - dy[dofs[1],:]
+
+        self.ddy = signal.ddy[dofs,:]
+
+
+
 
 
     def update_sel(self, id0, id1=-1, show_damped=False):
@@ -297,6 +276,8 @@ class RFS(object):
 
         return y, dy, ddy, y_tol, dy_tol, ddy_tol
 
+    def plot(self, show_damped=False):
+        _rfsPlotBuilder(self)
 
 
 # from mpl_toolkits.mplot3d import Axes3D

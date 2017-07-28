@@ -35,9 +35,12 @@ class Signal(object):
         # total sample points
         self.ns = self.y.shape[1]
 
+        self.dy = None
+        self.ddy = None
         self.y_per = None
         self.u_per = None
-        self._cut = False
+        self.iscut = False
+        self.isnumeric = False
 
     def cut(self, nsper, per, offset=0):
         """Extract periodic signal from original signal
@@ -56,7 +59,7 @@ class Signal(object):
         if any(p > _nper- 1 for p in per):
             raise ValueError('Period too high. Only {} periods in data.'.format(nper),per)
 
-        self._cut = True
+        self.iscut = True
         ndof = self.ndof
         self.nper = len(per)
         self.nsper = nsper
@@ -144,3 +147,44 @@ class Signal(object):
             print('plot saved as {}'.format(fname))
 
         plt.show()
+
+    def get_displ(self, isnumeric=False):
+        """Integrate signals to get velocity and displacement"""
+
+        self.isnumeric = isnumeric
+        ddy = self.ddy
+        ndof = self.ndof
+        fs = self.fs
+
+        y = np.zeros(ddy.shape)
+        dy = np.zeros(ddy.shape)
+        for i in range(ndof):
+            # TODO. fix some index stuff here.
+            y[i,1:-1], dy[i,1:] = myfilter.integrate(ddy[i,:], fs, numeric=numeric)
+
+        self.y = y
+        self.dy = y
+
+    def get_accel(self, numeric=False):
+        """ Differentiate signals to get velocity and accelerations
+        """
+        self.isnumeric = isnumeric
+        y = self.y
+        ndof = self.ndof
+        fs = self.fs
+
+        dy = np.empty(val.shape)
+        ddy = np.empty(val.shape)
+        for i in range(ndof):
+            dy[i,:], ddy[i,:] = myfilter.differentiate(y[i,:], fs, numeric=numeric)
+
+        self.dy = dy
+        self.ddy = ddy
+
+    def set_values(self, y=None, dy=None, ddy=None):
+        if y is not None:
+            self.y = y
+        if dy is not None:
+            self.dy = dy
+        if ddy is not None:
+            self.ddy = ddy

@@ -23,6 +23,8 @@ from frf import FRF
 from rfs import RFS
 
 saveplot = True
+saveplot = False
+
 nonlin = '0e00'
 #nonlin = '5e08'
 forcing = '100'
@@ -113,3 +115,28 @@ if saveplot:
     print('plot saved as {}'.format(relpath))
 
 # plt.show()
+
+
+import scipy.io
+relpath = '/../data/T03a_Data/'
+path = abspath + relpath
+mat =  scipy.io.loadmat(path + 'f16_x.mat')
+# mat =  scipy.io.loadmat(path + 'f16.mat')
+
+fs =400
+dofs = [66, 102]
+# y = mat['x'][dofs,:]
+# dy = mat['xd'][dofs,:]
+# ddy = mat['xdd'][dofs,:]
+y = mat['x']
+dy = mat['xd']
+ddy = mat['xdd']
+
+print(y.shape)
+y[dofs,:]
+
+signal = Signal(y, y, fs)
+signal.set_values(y=y, dy=dy, ddy=ddy)
+
+rfs = RFS(signal, dofs)
+rfs.plot()

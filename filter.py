@@ -194,9 +194,18 @@ def resample(y,fs_in, fs_out, cutoff, order = 3, numeric=False):
     b, a = signal.butter(order, normal_cutoff, 'lowpass')
     y = signal.filtfilt(b, a, y)
 
-    n_outsamples = int(round(len(y) * fs_out/fs_in))
-    y_out = signal.resample(y, n_outsamples)
-    t_out = np.arange(0,len(y_out)) / fs_out
+    import scipy, math
+    R = math.ceil(fs_in/fs_out)
+    pad_size = math.ceil(float(y.size)/R)*R - y.size
+    y_padded = np.append(y, np.zeros(pad_size)*np.NaN)
+    y_out = scipy.nanmean(y.reshape(-1,R), axis=1)
+    fs_out = fs_in/R
+    print('filter',R, fs_in, fs_out,len(y_out),len(y),len(y_padded))
+
+    # n_outsamples = int(round(len(y) * fs_out/fs_in))
+    # y_out = signal.resample(y, n_outsamples)
+
+    t_out = np.arange(0,len(y_out))/fs_out
     return t_out, y_out
 
 """

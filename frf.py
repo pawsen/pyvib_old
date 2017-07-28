@@ -32,7 +32,7 @@ class FRF(Signal):
         # Call signal.cut before this. Or call signal.cut from here?
 
         # If signal is cut, used that. Otherwise use the full signal.
-        if self.signal._cut:
+        if self.signal.iscut:
             u = self.signal.u_per
             y = self.signal.y_per
             nper = self.signal.nper
