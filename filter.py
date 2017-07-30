@@ -6,7 +6,7 @@ from scipy import signal
 from scipy import integrate as sp_integrate
 
 
-def integrate(ddy, fs, order=3, lowcut=0.1, highcut=0.6, numeric=False):
+def integrate(ddy,fs, lowcut, highcut, order=3, isnumeric=False):
     """Integrate acceleration to get vel and displacement.
 
     Numerical integration is prone to low-frequency problems.
@@ -38,26 +38,37 @@ def integrate(ddy, fs, order=3, lowcut=0.1, highcut=0.6, numeric=False):
     K. Worden: Nonlinearity in structural dynamics. Appendix I
 
     """
-
-    if numeric:
-        dy = sp_integrate.cumtrapz(ddy)/fs
-        y = sp_integrate.cumtrapz(dy)/fs
+    import matplotlib.pyplot as plt
+    if isnumeric:
+        dy = sp_integrate.cumtrapz(ddy,initial=0)/fs
+        y = sp_integrate.cumtrapz(dy,initial=0)/fs
     else:
-        #TODO: skal det være samme cutoff-freq for begge filtre?
-        # Create an order bandpass butterworth filter:
+        fn = 0.5 * fs
+        if highcut > fn:
+            raise ValueError('Highcut frequency is higher than nyquist frequency of \
+            the signal', highcut, fn)
+        elif lowcut <= 0:
+            raise ValueError('Lowcut frequency is 0 or lower', lowcut, fn)
+
+
+        # Normalized cutoff freqs
+        highcut =  highcut / fn
+        lowcut =  lowcut / fn
+
         b, a = signal.butter(order, highcut, btype='lowpass')
         ddy = signal.filtfilt(b, a, ddy)
 
-        b, a = signal.butter(order, lowcut, btype='highpass')
+        dy = sp_integrate.cumtrapz(ddy,initial=0)/fs
+        y = sp_integrate.cumtrapz(dy,initial=0)/fs
 
-        dy = sp_integrate.cumtrapz(ddy)/fs
+        b, a = signal.butter(order, lowcut, btype='highpass')
         dy = signal.filtfilt(b, a, dy)
-        y = sp_integrate.cumtrapz(dy)/fs
         y = signal.filtfilt(b, a, y)
 
+        print(np.linalg.norm(y), np.linalg.norm(dy))
     return y, dy
 
-def differentiate(y, fs, order = 3, cutoff=0.5, numeric=False):
+def differentiate(y, fs, order = 3, cutoff=0.5, isnumeric=False):
     """ Differentiate y twice to get vel and acc
 
     5-point stencil offers fairly good results in most cases [1]_
@@ -87,7 +98,7 @@ def differentiate(y, fs, order = 3, cutoff=0.5, numeric=False):
     [1]
     K. Worden: Nonlinearity in structural dynamics. Appendix I
     """
-    if numeric:
+    if isnumeric:
         pass
     else:
         # Create an order lowpass butterworth filter:
@@ -143,7 +154,7 @@ def differentiate(y, fs, order = 3, cutoff=0.5, numeric=False):
     return dy, ddy
 
 
-def resample(y,fs_in, fs_out, cutoff, order = 3, numeric=False):
+def resample(y,fs_in, fs_out, cutoff, order = 3, isnumeric=False):
     """Downsampling can be done like this:
 
     Parameters:

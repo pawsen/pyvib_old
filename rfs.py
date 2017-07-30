@@ -1,6 +1,6 @@
 import matplotlib.patches as patches
 from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.widgets import Slider
+from matplotlib.widgets import Slider, CheckButtons
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -66,9 +66,16 @@ class _rfsPlotBuilder(object):
         rect = patches.Rectangle((x1, ymin), dx, ymax-ymin, alpha=0.4,fc='y')
         ax.add_patch(rect)
 
+        # ax position rect [left, bottom, width, height] in fractions of figure
+        # width and height.
+        # checkbutton showing stiffness or damping
+        buttonax = fig.add_axes([0.8, 0.02, 0.15, 0.06]) #, fc='white')
+        button = CheckButtons(buttonax, ('Damping',), (False,))
+        button.on_clicked(self.checkbox_clicked)
+
         # set slider
         sliderax = fig.add_axes([0.1, 0.02, 0.6, 0.03], fc='white')
-        slider = Slider(sliderax, 'Tol', 0, 0.5, valinit= 0.05)
+        slider = Slider(sliderax, 'Tol', 0, 1.0, valinit= 0.05)
         slider.on_changed(self.slider_update)
         slider.drawon = True
 
@@ -77,6 +84,7 @@ class _rfsPlotBuilder(object):
         self.rect = rect
         self.axes = rect.axes
         self.ind = None
+        self.show_damped = False
 
         # show rfs for the initial selection
         self.update_rfs()
@@ -90,7 +98,7 @@ class _rfsPlotBuilder(object):
     def slider_update(self, value):
 
         self.rfs.tol_slice = value
-        y, dy, ddy, y_tol, dy_tol, ddy_tol = self.rfs.update_sel(self.idx1, self.idx2)
+        # y, dy, ddy, y_tol, dy_tol, ddy_tol = self.rfs.update_sel(self.idx1, self.idx2)
         self.update_rfs()
 
         # TODO: works, even if the canvas belong to rect. ie canvas = rect.canvas
@@ -176,6 +184,13 @@ class _rfsPlotBuilder(object):
         self.axes.draw_artist(self.rect)
         self.canvas.blit(self.axes.bbox)
 
+    def checkbox_clicked(self, label):
+        # Flip value
+        self.show_damped = not self.show_damped
+        self.update_rfs()
+        self.rect.figure.canvas.draw()
+
+
     def set_postion(self, x, width):
         self.rect.set_x(x)
         self.rect.set_width(width)
@@ -184,6 +199,7 @@ class _rfsPlotBuilder(object):
     def update_rfs(self):
         # plot RFS
 
+        show_damped = self.show_damped
         # get index of selection
         x1, width = self.rect.get_x(), self.rect.get_width()
         x2 = x1 + width
@@ -192,14 +208,12 @@ class _rfsPlotBuilder(object):
         self.idx1 = int(np.floor( self.rfs.ns * (x1 - xx[0]) / np.diff(xx)))
         self.idx2 = int(np.ceil( self.rfs.ns * (x2 - xx[0]) / np.diff(xx)))
 
-        y, dy, ddy, y_tol, dy_tol, ddy_tol = self.rfs.update_sel(self.idx1, self.idx2)
+        y, dy, ddy, y_tol, dy_tol, ddy_tol = self.rfs.update_sel(self.idx1,
+                                                                 self.idx2,
+                                                                 show_damped)
         self.ax3d.clear()
         self.ax3d.plot(y,dy,-ddy, '.k', markersize=2)
         self.ax3d.plot(y_tol,dy_tol,-ddy_tol, '.r', markersize=10)
-        self.ax2d.clear()
-        self.ax2d.plot(y_tol,-ddy_tol, '.k', markersize=8)
-        self.ax2d.axhline(y=0, ls='--', lw='0.5',color='k')
-        self.ax2d.axvline(x=0, ls='--', lw='0.5',color='k')
 
         self.ax3d.set_title("Restoring force surface")
         self.ax3d.set_xlabel('Displacement (m)')
@@ -207,8 +221,17 @@ class _rfsPlotBuilder(object):
         self.ax3d.set_zlabel('-Acceleration (m/s²)')
         self.ax3d.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
 
-        self.ax2d.set_title('Stiffness curve')
-        self.ax2d.set_xlabel('Displacement (m)')
+        self.ax2d.clear()
+        if show_damped:
+            self.ax2d.plot(dy_tol,-ddy_tol, '.k', markersize=8)
+            self.ax2d.set_title('Damping curve')
+            self.ax2d.set_xlabel('Velocity (m/s)')
+        else:
+            self.ax2d.plot(y_tol,-ddy_tol, '.k', markersize=8)
+            self.ax2d.set_title('Stiffness curve')
+            self.ax2d.set_xlabel('Displacement (m)')
+        self.ax2d.axhline(y=0, ls='--', lw='0.5',color='k')
+        self.ax2d.axvline(x=0, ls='--', lw='0.5',color='k')
         self.ax2d.set_ylabel('-Acceleration (m/s²)')
         self.ax2d.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
 

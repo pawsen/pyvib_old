@@ -6,6 +6,7 @@ import numpy as np
 from scipy import linalg
 import matplotlib.pylab as plt
 from common import db
+from filter import integrate, differentiate
 
 
 class Signal(object):
@@ -148,7 +149,7 @@ class Signal(object):
 
         plt.show()
 
-    def get_displ(self, isnumeric=False):
+    def get_displ(self, lowcut, highcut, isnumeric=False):
         """Integrate signals to get velocity and displacement"""
 
         self.isnumeric = isnumeric
@@ -156,16 +157,15 @@ class Signal(object):
         ndof = self.ndof
         fs = self.fs
 
-        y = np.zeros(ddy.shape)
-        dy = np.zeros(ddy.shape)
+        y = np.empty(ddy.shape)
+        dy = np.empty(ddy.shape)
         for i in range(ndof):
-            # TODO. fix some index stuff here.
-            y[i,1:-1], dy[i,1:] = myfilter.integrate(ddy[i,:], fs, numeric=numeric)
+            y[i,:], dy[i,:] = integrate(ddy[i,:], fs, lowcut, highcut, isnumeric=isnumeric)
 
         self.y = y
-        self.dy = y
+        self.dy = dy
 
-    def get_accel(self, numeric=False):
+    def get_accel(self, isnumeric=False):
         """ Differentiate signals to get velocity and accelerations
         """
         self.isnumeric = isnumeric
@@ -176,19 +176,21 @@ class Signal(object):
         dy = np.empty(val.shape)
         ddy = np.empty(val.shape)
         for i in range(ndof):
-            dy[i,:], ddy[i,:] = myfilter.differentiate(y[i,:], fs, numeric=numeric)
+            dy[i,:], ddy[i,:] = differentiate(y[i,:], fs, isnumeric=isnumeric)
 
         self.dy = dy
         self.ddy = ddy
 
     def set_values(self, y=None, dy=None, ddy=None):
         if y is not None:
+            #print(np.linalg.norm(y), np.linalg.norm(self.y))
             # cast to 2d. Format is now y[ndofs,ns]. For 1d cases ndof=0
             if y.ndim != 2:
                 self.y = y.reshape(-1,y.shape[0])
             else:
                 self.y = y
         if dy is not None:
+            #print(np.linalg.norm(dy), np.linalg.norm(self.dy))
             if dy.ndim != 2:
                 self.dy = dy.reshape(-1,dy.shape[0])
             else:
