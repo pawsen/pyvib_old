@@ -183,8 +183,15 @@ class Signal(object):
 
     def set_values(self, y=None, dy=None, ddy=None):
         if y is not None:
+            # cast to 2d. Format is now y[ndofs,ns]. For 1d cases ndof=0
+            if y.ndim != 2:
+                self.y = y.reshape(-1,y.shape[0])
             self.y = y
         if dy is not None:
+            if dy.ndim != 2:
+                self.dy = dy.reshape(-1,dy.shape[0])
             self.dy = dy
         if ddy is not None:
+            if ddy.ndim != 2:
+                self.ddy = ddy.reshape(-1,ddy.shape[0])
             self.ddy = ddy
