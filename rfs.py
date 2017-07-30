@@ -28,6 +28,7 @@ class _rfsPlotBuilder(object):
 
         self.rfs = rfs
 
+
         fig= plt.figure()
         ax = fig.add_subplot(211)
         ax2 = fig.add_subplot(223, projection='3d')
@@ -37,18 +38,24 @@ class _rfsPlotBuilder(object):
         self.fig = fig
         # fig.subplots_adjust(wspace=0.7)
         # fig.subplots_adjust(hspace=0.5)
+        #plt.suptitle('RFS for DOF {}'.format(self.rfs.dofs[0]))
         fig.tight_layout()
         fig.subplots_adjust(bottom=0.2)
 
         # plot acceleration signal
         t = np.arange(self.rfs.ns)/self.rfs.fs
-        ax.plot(t, self.rfs.ddy[0,:],'-k')
+        ax.plot(t, self.rfs.ddy,'-k')
         #ax.plot(t, self.rfs.y,'-k')
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel(r'Acceleration (m/s²)')
+        ax.set_title('Acceleration, for DOF {}'.format(self.rfs.dofs[0]))
 
         #¤ back to rectangular settings
         ymin, ymax = ax.get_ylim()
         xmin, xmax = ax.get_xlim()
         xx = [xmin,xmax]
+        # Mouse should be within 2% of line.
+        self.epsilon = np.diff(xx) * 0.02
 
         # Set initial selection and add rectangle
         start_sel = 0.45
@@ -104,14 +111,14 @@ class _rfsPlotBuilder(object):
         # distance
         self.press = event.xdata, x, width
 
-        epsilon = 10
+        epsilon = self.epsilon
         # only move if cursor is sufficiently close to line or over rect
         if d1 < epsilon:
-            return 0
+            return 'left'
         elif d2 < epsilon:
-            return 1
+            return 'right'
         elif event.xdata > x and event.xdata < x+width:
-            return 2
+            return 'move'
         else:
             return None
 
@@ -157,12 +164,12 @@ class _rfsPlotBuilder(object):
         x_event, x_rect, w_rect = self.press
         x, y = event.xdata, event.ydata
         dx = x - x_event
-        if self.ind is 0:
+        if self.ind == 'left':
             self.rect.set_x(x)
             self.rect.set_width(w_rect - dx)
-        elif self.ind is 1:
+        elif self.ind == 'right':
             self.rect.set_width(x-x_rect)
-        else:
+        else:  #move
             self.rect.set_x(x_rect + dx)
 
         self.canvas.restore_region(self.background)
@@ -187,10 +194,12 @@ class _rfsPlotBuilder(object):
 
         y, dy, ddy, y_tol, dy_tol, ddy_tol = self.rfs.update_sel(self.idx1, self.idx2)
         self.ax3d.clear()
-        self.ax3d.plot(y,dy,-ddy, '.k', markersize=10)
+        self.ax3d.plot(y,dy,-ddy, '.k', markersize=2)
         self.ax3d.plot(y_tol,dy_tol,-ddy_tol, '.r', markersize=10)
         self.ax2d.clear()
-        self.ax2d.plot(y_tol,-ddy_tol, '.k', markersize=12)
+        self.ax2d.plot(y_tol,-ddy_tol, '.k', markersize=8)
+        self.ax2d.axhline(y=0, ls='--', lw='0.5',color='k')
+        self.ax2d.axvline(x=0, ls='--', lw='0.5',color='k')
 
         self.ax3d.set_title("Restoring force surface")
         self.ax3d.set_xlabel('Displacement (m)')
@@ -238,14 +247,14 @@ class RFS(Signal):
         dy = signal.dy  #[dofs,:]
         if len(dofs) == 1:
             # connected to ground
-            self.y = y[dofs,:]
-            self.dy = dy[dofs,:]
+            self.y = y[dofs[0],:]  #.squeeze()
+            self.dy = dy[dofs[0],:]  #.squeeze()
         else:
             # connected to another dof
             self.y = y[dofs[0],:] - y[dofs[1],:]
             self.dy = dy[dofs[0],:] - dy[dofs[1],:]
 
-        self.ddy = signal.ddy[dofs,:]
+        self.ddy = signal.ddy[dofs[0],:]
 
 
 
@@ -262,7 +271,7 @@ class RFS(Signal):
         #t = self.t( id0:di1 );
         y = self.y[id0:id1]
         dy = self.dy[id0:id1]
-        ddy = self.ddy[0,id0:id1]
+        ddy = self.ddy[id0:id1]
 
         if show_damped:
             tol =  self.tol_slice * max( np.abs(y))
