@@ -6,8 +6,8 @@ from scipy import signal
 from scipy import integrate as sp_integrate
 
 
-def integrate(ddy,fs, lowcut, highcut, order=3, isnumeric=False):
-    """Integrate acceleration to get vel and displacement.
+def integrate(ddy,fs, lowcut=None, highcut=None, order=3, isnumeric=False):
+    """Integrate acceleration to get velocity and displacement.
 
     Numerical integration is prone to low-frequency problems.
     Trapez-rule only have problems with low-freq, but is imprecise from
@@ -18,17 +18,29 @@ def integrate(ddy,fs, lowcut, highcut, order=3, isnumeric=False):
 
     Instead of using band-pass filter, using low pass filter for measurement
     (acceleration) to remove noise and then high pass filter for integrated
-    signals (velocity and position) yields better integrated signals.
-    The filter on the integrated signal removes drift.
+    signals (velocity and position) for removing drift, yields better
+    integrated signals.
+
+    Only filter ẏ (dy) after y have been calculated: In reality ẏ is zero-mean,
+    but a finite sampling will cause it to be non-zero mean. If we now:
+    ∫ ẏ(t) - ẏ_mean dt = y - ẏ_mean*t + k1
+    Ie. filtering ẏ before integration, introduce a linear trend in y
+    (ẏ_mean*t) that then has to be removed somehow. k1 is the integration
+    constant. We choose y(0) = 0, ie k1 = 0.
+
+    The cutoff frequencies are normalized with the Nyquist frequency (ie. 1 is
+    the nyquist frequency). After filtering, they are the frequencies where the
+    gain drops to 1/sqrt(2) of that of the passband (the "-3 dB point").
 
     Parameters:
     ----------
-    cutoff : scalar (0-1)
-        The freq where the gain drops to 1/sqrt(2) that of the passband (the
-        "-3 dB point"). Normalized from 0 to 1, where 1 is the Nyquist
-        frequency
-
-    numeric : bool
+    lowcut : float
+        Cutoff frequency in Hz for the highpass filtering of integrated
+        signals.
+    Highcut : float
+        Cutoff frequency in Hz for the lowpass filtering of acceleration signal
+        before integrating.
+    isnumeric : bool
         Only filter 'real data'. Simulated data without noise should not be
         filtered
     Notes
@@ -45,8 +57,8 @@ def integrate(ddy,fs, lowcut, highcut, order=3, isnumeric=False):
     else:
         fn = 0.5 * fs
         if highcut > fn:
-            raise ValueError('Highcut frequency is higher than nyquist frequency of \
-            the signal', highcut, fn)
+            raise ValueError('Highcut frequency is higher than nyquist\
+            frequency of the signal', highcut, fn)
         elif lowcut <= 0:
             raise ValueError('Lowcut frequency is 0 or lower', lowcut, fn)
 
