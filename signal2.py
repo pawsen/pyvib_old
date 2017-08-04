@@ -63,7 +63,7 @@ class Signal(object):
         self.iscut = True
         ndof = self.ndof
         self.nper = len(per)
-        self.nsper = nsper
+        self.nsper = int(nsper)
         # number of sample for cut'ed signal
         ns = self.nper * self.nsper
 
