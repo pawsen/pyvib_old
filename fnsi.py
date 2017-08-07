@@ -121,7 +121,7 @@ class FNSI():
             if (enl[j] % 2 == 0):
                 x12 = np.abs(x12)
 
-            fnl[j,:] = knl[j] * np.abs(x12)**enl[j] * np.sign(x12)
+            fnl[j,:] = knl[j] * x12**enl[j]
 
         return fnl
 
@@ -214,6 +214,7 @@ class FNSI():
         W = self.W
 
         # dimensions
+        # l: measured applied displacements
         m = np.shape(E)[0]
         l = np.shape(Y)[0]
         F = len(flines)
