@@ -16,6 +16,92 @@ import sys
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from scipy import io
 
+def plots():
+
+    dof = 0
+    gtype = 'displ'
+    # gtype = 'acc'
+    if gtype == 'displ':
+        y = hb_signal(c, phi, omegap, tp)
+        ystr = 'Displacement (m)'
+    elif gtype == 'vel':
+        y = hb_signal(cd, phid, omegap, tp)
+        ystr = 'Velocity (m/s)'
+    else:
+        y = hb_signal(cdd, phidd, omegap, tp)
+        ystr = 'Acceleration (m/s²)'
+
+    fig = plt.figure(1)
+    fig_steady = fig
+    fig.clf()
+    ax = fig.add_subplot(111)
+    #fig, ax = plt.subplots()
+
+    ax.plot(tp,y[dof],'-')
+    ax.axhline(y=0, ls='--', lw='0.5',color='k')
+    ax.set_title('Displacement vs time, dof: {}'.format(dof))
+    ax.set_xlabel('Time (t)')
+    ax.set_ylabel(ystr)
+    # use sci format on y axis when figures are out of the [0.01, 99] bounds
+    ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+
+    nh = cnorm.shape[1] -1
+
+    fig = plt.figure(2)
+    fig_har = fig
+    fig.clf()
+    ax = fig.add_subplot(111)
+    ax.clear()
+    ax.bar(np.arange(nh+1), cnorm[dof])
+    ax.set_title('Displacement harmonic component, dof: {}'.format(dof))
+    ax.set_xlabel('Order')
+    # use double curly braces to "escape" literal curly braces...
+    ax.set_ylabel(r'$C_{{{dof}-h}}$'.format(dof=dof))
+    ax.set_xlim([-0.5, nh+0.5])
+    ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+
+
+
+    x = hb_signal(c, phi, omegap, tp)
+    xd = hb_signal(cd, phid, omegap, tp)
+
+    fig  =plt.figure(3)
+    fig_phase = fig
+    fig.clf()
+    ax = fig.add_subplot(111)
+    ax.plot(x[dof],xd[dof])
+    ax.set_title('Phase space, dof: {}'.format(dof))
+    ax.set_xlabel('Displacement (m)')
+    ax.set_ylabel('Velocity (m/s)')
+    ax.ticklabel_format(axis='both', style='sci', scilimits=(-2,2))
+    # ax.axis('equal')
+
+
+    relpath = 'plots/hb/'
+    path = abspath + relpath
+    if inl.size != 0:
+        str1 = 'nonlin' + str(len(inl))
+    else:
+        str1 = 'lin'
+    if savefig:
+        fig_steady.savefig(path + 'steady_' +str1 + '.png')
+        fig_har.savefig(path + 'har_' +str1 + '.png')
+        fig_phase.savefig(path + 'phase_' +str1 + '.png')
+
+
+
+
+    # fig = plt.figure(3)
+    # ax = fig.add_subplot(111)
+    # ax.clear()
+    # ax.plot(x,xd)
+    # ax.set_title('Configuration space, dof: {}'.format(dof))
+    # ax.set_xlabel('Displacement x₁ (m)')
+    # ax.set_ylabel('Displacement x₂ (m)')
+
+
+    plt.show()
+
 
 def state_sys(z, force):
     """Calculate the system matrix h(z,ω) = A(ω)z - b(z), given by eq. (21).
@@ -46,7 +132,7 @@ def state_sys(z, force):
     H = A @ z - b
     return H
 
-def hjac(z):
+def hjac(z, force=None):
     """ Computes the jacobian matrix of h wrt Fourier coefficients z, denoted
     h_z.
 
@@ -61,13 +147,17 @@ def hjac(z):
     if inl.size == 0:
         return A
     else:
-        x = ifft_coeff(z, n, N, NH)
-        dFnl_dx_tot_mat = der_force_nl(x_vec*scale_x) * scale_x
-
+        x = ifft_coeff(z, n, Nt, NH)
+        dFnl_dx_tot_mat = der_force_nl(x * scale_x) * scale_x
         # the derivative ∂b/∂z
-        b_jac, *_ = - sparse.linalg.lsqr(mat_func_form_sparse,
-                                   dFnl_dx_tot_mat @ mat_func_form_sparse)
-        bjac= b_jac.todense()
+        bjac = np.empty((nZ, nZ))
+        full_rhs = dFnl_dx_tot_mat @ mat_func_form_sparse
+
+        for j in range(nZ):
+            rhs = np.squeeze(np.asarray(full_rhs[:,j].todense()))
+            return_values = sparse.linalg.lsmr(mat_func_form_sparse, rhs)
+            x = - return_values[0]
+            bjac[:,j] = x
 
         hjac = A - bjac
         return hjac
@@ -80,6 +170,7 @@ def der_force_nl(x):
 
     ndof, ns = x.shape
     nbln = inl.shape[0]
+    idof = np.arange(ndof)
 
     dfnl = np.zeros((ndof+1, ns*(ndof+1)))
     x = np.vstack((x, np.zeros((1,ns)) ))
@@ -90,22 +181,25 @@ def der_force_nl(x):
         i2 = inl[j,1]
 
         # Convert to the right index
-        idx1 = np.where(i1==idof)
+        idx1 = np.where(i1==idof)[0][0]
         x1 = x[idx1]
 
         # if connected to ground
         if i2 == -1:
-            idx2 = ndof+1
+            idx2 = ndof
             x2 = 0
         else:
-            idx2 = np.where(i2==idof)
+            idx2 = np.where(i2==idof)[0][0]
             x2 = x[idx2]
         x12 = x1 - x2
+
+        df12 = knl[j] * enl[j] * np.abs(x12)**(enl[j]-1)
+
         # in case of even functional
         if (enl[j] % 2 == 0):
-            x12 = np.abs(x12)
-
-        df12 = knl[j] * enl[j] * x12**(enl[j]-1)
+            idx = np.where(x12 < 0)
+            df12[idx] = -df12[idx]
+            #x12 = np.abs(x12)
 
         # add the nonlinear force to the right dofs
         dfnl[idx1, idx1::ndof+1] += df12
@@ -121,20 +215,23 @@ def der_force_nl(x):
     # TODO: dont create dfnl in the first place...:)
     ind = np.arange(ns*(ndof+1))
     ind = np.delete(ind, np.s_[ndof::ndof+1])
-    df_nl = df_nl[:ndof, ind]
-    df_nl = np.reshape(df_nl, (ndof*2,ns))
+    dfnl = dfnl[:ndof, ind]
+    dfnl = np.reshape(dfnl, (ndof**2,ns), order='F')
     # dont ask...
-    ind = np.ones((ndof,1)) * np.arange(ndof) * ns*ndof + \
-          np.transpose(np.arange(1,ndof+1)) * np.ones((1, ndof))
-    ind = ind.ravel() * np.ones((1,ns)) + \
-          ns*ndof * np.ones((ndof**2,1)) * np.arange(0,(ns-1)*ndof+1, ndof) + \
-          ndof * np.ones((ndof**2,1)) * np.arange(ns)
+    ind = np.outer(np.ones(ndof), np.arange(ndof)) * ns*ndof + \
+          np.outer(np.arange(ndof), np.ones(ndof))
+    ind = np.outer(ind.T, np.ones(ns)) + \
+          ns*ndof * np.outer(np.ones(ndof**2), np.arange(0,(ns-1)*ndof+1, ndof)) + \
+          ndof * np.outer(np.ones(ndof**2), np.arange(ns))
 
-    ind = ind.ravel()
+    ind = ind.ravel(order='F').astype('int')
 
     #https://stackoverflow.com/questions/28995146/matlab-ind2sub-equivalent-in-python
-    ii, jj = np.unravel_index(ns*ndof*np.array([1,1]), ind)
-    dfnl_s = sparse.csr(ii, jj, df_nl.ravel())
+    arr = ns*ndof*np.array([1,1])
+    ii, jj = np.unravel_index(ind, tuple(arr), order='F')
+    dfnl_s = sparse.coo_matrix((dfnl.ravel(order='F'), (ii, jj)),
+                               shape=(ndof*ns, ndof*ns)).tocsr()
+
     return dfnl_s
 
 
@@ -142,11 +239,13 @@ def force_nl(x):
     if inl.size == 0:
         return np.array([0])
 
-    ndof, ns = x.shape
+    # ns = Nt
+    ndof, Nt = x.shape
     nbln = inl.shape[0]
+    idof = np.arange(ndof)
 
-    fnl = np.zeros((ndof+1, ns*(ndof+1)))
-    x = np.vstack((x, np.zeros((1,ns)) ))
+    fnl = np.zeros((ndof+1, Nt))
+    x = np.vstack((x, np.zeros((1,Nt)) ))
     nbln = inl.shape[0]
 
     for j in range(nbln):
@@ -161,7 +260,7 @@ def force_nl(x):
 
         # if connected to ground
         if i2 == -1:
-            idx2 = ndof+1
+            idx2 = ([ndof],)
             x2 = 0
         else:
             idx2 = np.where(i2==idof)
@@ -172,8 +271,8 @@ def force_nl(x):
             x12 = np.abs(x12)
 
         f12 = knl[j] * x12**enl[j]
-        fnl[idx1,:] += f12
-        fnl[idx2,:] -= f12
+        fnl[idx1] += f12
+        fnl[idx2] -= f12
     fnl = fnl[:ndof,:]
     return fnl
 
@@ -269,11 +368,15 @@ abspath='/home/paw/ownCloud/speciale/code/python/vib/'
 relpath = 'data/T05_Data/'
 path = abspath + relpath
 
+savefig = True
+savefig = False
+
 mat =  io.loadmat(path + 'NLBeam.mat')
 
-inl = np.array([[]])
-enl = np.array([3,2,5])
-knl = np.array([1,1,1])
+inl = np.array([[27,-1], [27,-1]])
+# inl = np.array([])
+enl = np.array([3,2])
+knl = np.array([8e9,-1.05e7])
 
 scale_x = 5e-6
 scale_t = 3000
@@ -281,13 +384,13 @@ scale_t = 3000
 ## Force parameters
 # location of harmonic force
 fdofs = np.array([7])
-f_amp = 3
+f_amp = 10
 
 ## HB parameters
 # number of harmonic retained in the Fourier series
 NH = 5
 # number of time samples in the Fourier transform, ie. 2^8=256 samples
-npow2 = 8
+npow2 = 9
 # Excitation frequency. lowest sine freq in Hz
 f0 = 34
 # nu accounts for subharmonics of excitation freq w0
@@ -319,7 +422,7 @@ force = sineforce(f_amp, omega, t, n, Nt)
 
 # Assemble A, describing the linear dynamics. eq (20)
 A = K
-for i in range(NH):
+for i in range(1,NH+1):
     #tt = transpose( i * omega * t );
     blk = np.vstack((
         np.hstack((K - ( i * omega2 )**2 * M, -i * omega2 * C)),
@@ -381,33 +484,39 @@ print('Newton-Raphson iterative solution')
 
 relpath = 'data/'
 path = abspath + relpath
-
-mat =  io.loadmat(path + 'nr_it1.mat')
+mat =  io.loadmat(path + 'jac_sys.mat')
 
 Obj = 1
 it_NR = 1
 # machine precision for float
 eps = np.finfo(float).eps
 z = z_guess
+
 while (Obj > tol_NR ) and (it_NR <= max_it_NR):
     H = state_sys(z, force)
     jac_sys = hjac(z)
 
     zsol, *_ = lstsq(jac_sys,H)
+    zsol = linalg.pinv(jac_sys) @ H
     z = z - zsol
+
+    # print('H', norm(H))
+    # print('jac_sys', norm(jac_sys))
+    # print('zsol',norm(zsol))
 
     Obj = linalg.norm(H) / (eps + linalg.norm(z))
     print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
     it_NR = it_NR + 1
 
-if it_NR >= max_it_NR:
-    raise ValueError('Number of iterations exceeded {}. Change Harmonic Balance\
+if it_NR > max_it_NR:
+    print('Number of iterations exceeded {}. Change Harmonic Balance\
     parameters.'.format(max_it_NR))
+    #raise ValueError("""Number of iterations exceeded {}. Change Harmonic Balance
+    #parameters.""".format(max_it_NR))
 
 
 if stability:
     pass
-
 
 
 c, cnorm, phi = hb_components(scale_x*z, n, NH)
@@ -428,69 +537,4 @@ omegap = omega/scale_t
 omega2p = omega2/scale_t
 zp = z*scale_x
 
-
-dof = 0
-gtype = 'displ'
-# gtype = 'acc'
-if gtype == 'displ':
-    y = hb_signal(c, phi, omegap, tp)
-    ystr = 'Displacement (m)'
-elif gtype == 'vel':
-    y = hb_signal(cd, phid, omegap, tp)
-    ystr = 'Velocity (m/s)'
-else:
-    y = hb_signal(cdd, phidd, omegap, tp)
-    ystr = 'Acceleration (m/s²)'
-
-
-fig = plt.figure(1)
-ax = fig.add_subplot(111)
-#fig, ax = plt.subplots()
-
-ax.clear()
-ax.plot(tp,y[dof],'-*')
-ax.axhline(y=0, ls='--', lw='0.5',color='k')
-ax.set_title('Displacement vs time, dof: {}'.format(dof))
-ax.set_xlabel('Time (t)')
-ax.set_ylabel(ystr)
-# use sci format on y axis when figures are out of the [0.01, 99] bounds
-ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
-
-nh = cnorm.shape[1] -1
-
-fig = plt.figure(2)
-ax = fig.add_subplot(111)
-ax.clear()
-ax.bar(np.arange(nh+1), cnorm[dof])
-ax.set_title('Displacement harmonic component, dof: {}'.format(dof))
-ax.set_xlabel('Order')
-# use double curly braces to "escape" literal curly braces...
-ax.set_ylabel(r'$C_{{{dof}-h}}$'.format(dof=dof))
-ax.set_xlim([-0.5, nh+0.5])
-
-
-
-x = hb_signal(c, phi, omegap, tp)
-xd = hb_signal(cd, phid, omegap, tp)
-
-fig = plt.figure(3)
-ax = fig.add_subplot(111)
-ax.clear()
-ax.plot(x[dof],xd[dof])
-ax.set_title('Phase space, dof: {}'.format(dof))
-ax.set_xlabel('Displacement (m)')
-ax.set_ylabel('Velocity (m/s)')
-ax.ticklabel_format(axis='both', style='sci', scilimits=(-2,2))
-
-# ax.axis('equal')
-
-# fig = plt.figure(3)
-# ax = fig.add_subplot(111)
-# ax.clear()
-# ax.plot(x,xd)
-# ax.set_title('Configuration space, dof: {}'.format(dof))
-# ax.set_xlabel('Displacement x₁ (m)')
-# ax.set_ylabel('Displacement x₂ (m)')
-
-
-plt.show()
+plots()
