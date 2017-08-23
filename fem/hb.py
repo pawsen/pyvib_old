@@ -77,6 +77,52 @@ def plots():
     # ax.axis('equal')
 
 
+    fig  =plt.figure(4)
+    fig_stab = fig
+    fig.clf()
+    ax = fig.add_subplot(111)
+
+    lamb = B
+    gtype = 'multipliers'
+    gtype = 'exp'
+    if gtype == 'multipliers':
+        str1 = 'Floquet multipliers'
+        str2 = '$\sigma$'
+        T = 1/f0
+        sigma = np.exp(lamb*T)
+        xx = np.real(sigma)
+        yy = np.imag(sigma)
+        idx_s = np.where(np.abs(sigma) <= 1)
+        idx_u = np.where(np.abs(sigma) > 1)
+
+        circ = plt.Circle((0, 0), radius=1, ec='k', fc='None', ls='-')
+        ax.add_patch(circ)
+
+    else:
+        str1 = 'Floquet exponent'
+        str2 = '$\lambda$'
+        xx = np.real(lamb)
+        yy = np.imag(lamb)
+        idx_s = np.where(xx <= 0)
+        idx_u = np.where(xx > 0)
+
+        ax.axhline(y=0, color='k')
+        ax.axvline(x=0, color='k')
+
+    if len(idx_u[0]) == 0:
+        ax.plot(xx[idx_u],yy[idx_u],'ro', label='unstable')
+    ax.plot(xx[idx_s],yy[idx_s],'bx', label='stable')
+    ax.set_title('Stability ({}), dof: {}'.format(str1, dof))
+    ax.set_xlabel(r'Real({})'.format(str2))
+    ax.set_ylabel(r'Imag({})'.format(str2))
+    ax.set_legend()
+
+    xmax = max(np.max(np.abs(xx))*1.1, 1.1)
+    ymax = max(np.max(np.abs(yy))*1.1, 1.1)
+    ax.set_xlim(xmax * np.array([-1,1]))
+    ax.set_ylim(ymax * np.array([-1,1]))
+    ax.grid(True, which='both')
+
     relpath = 'plots/hb/'
     path = abspath + relpath
     if inl.size != 0:
@@ -397,7 +443,9 @@ f0 = 34
 nu = 1
 # amplitude of first guess
 amp0 = 1e-3
-stability = False
+stability = True
+rmc_permute = False
+
 tol_NR = 1e-6 * scale_x  # == 5e-12
 max_it_NR = 15
 
@@ -442,6 +490,35 @@ for i in range(Nt):
 
     # Stack the kron prod, so each block row is for time(i)
     mat_func_form[i*n:(i+1)*n,:] = kron(Q.T, np.eye(n))
+mat_func_form_sparse = sparse.csr_matrix(mat_func_form)
+
+
+# Assemble Δs of the quadratic eigenvalue problem, eq. 43.
+if stability:
+    # eq. 38
+    Delta1 = C0
+    for i in range(1,NH+1):
+        blk = np.vstack((
+            np.hstack((C0, - 2*i * omega2/scale_t * M0)),
+            np.hstack((2*i * omega2/scale_t * M0, C0)) ))
+        Delta1 = block_diag(Delta1, blk)
+
+    Delta2 = M0
+    M_inv = linalg.inv(M0)
+    Delta2_inv = M_inv
+
+    for i in range(1,NH+1):
+        Delta2 = block_diag(Delta2, M0, M0)
+        Delta2_inv = block_diag(Delta2_inv, M_inv, M_inv)
+
+    # eq. 45
+    b2 = np.vstack((
+        np.hstack((Delta2, np.zeros(Delta2.shape))),
+        np.hstack((np.zeros(Delta2.shape), np.eye(Delta2.shape[0]))) ))
+
+    b2_inv = - np.vstack((
+        np.hstack((Delta2_inv, np.zeros(Delta2_inv.shape))),
+        np.hstack((np.zeros(Delta2_inv.shape), np.eye(Delta2.shape[0]))) ))
 
 
 # Initial guess for x. Here calculated by broadcasting. np.outer could be used
@@ -469,10 +546,6 @@ x_guess = amp[:,None] * np.sin(omega * t)/scale_x
 z_guess, *_ = lstsq(mat_func_form, x_guess.ravel())
 # Ztronc =linalg.pinv(mat_func_form) @ x_guess.ravel()
 
-mat_func_form_sparse = sparse.csr_matrix(mat_func_form)
-
-if stability:
-    pass
 
 # Solve h(z,ω)=A(ω)-b(z)=0 (ie find z that is root of this eq), eq. (21)
 # NR solution: (h_z is the derivative of h wrt z)
@@ -516,7 +589,25 @@ if it_NR > max_it_NR:
 
 
 if stability:
-    pass
+    A0 = jac_sys/scale_x
+    A1 = Delta1
+    A2 = Delta2
+    b1 = np.vstack((
+        np.hstack((A1, A0)),
+        np.hstack((-np.eye(A0.shape[0]), np.zeros(A0.shape))) ))
+    mat_B = b2_inv @ b1
+    if rmc_permute:
+        # permute B to get smaller bandwidth which gives faster linalg comp.
+        p = sparse.csgraph.reverse_cuthill_mckee(mat_B)
+        B_tilde = mat_B[p]
+    else:
+        B_tilde = mat_B
+    B, *_ = linalg.eig(B_tilde)
+
+    if np.max(np.real(B)) <= 0:
+        stab = True
+    else:
+        stab = False
 
 
 c, cnorm, phi = hb_components(scale_x*z, n, NH)
