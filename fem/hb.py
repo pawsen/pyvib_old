@@ -16,6 +16,60 @@ import sys
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from scipy import io
 
+def anim_init(omegas, amps):
+
+    dof = 0
+    xx = np.asarray(omegas)/scale_t
+    yy = np.asarray(amps).T[dof]
+
+    fig = plt.figure(5)
+    fig.clf()
+    ax = fig.add_subplot(111)
+    #ax.clear()
+    #fig, ax = plt.subplots(1, 1)
+    #ax.hold(True)
+    ax.set_title('Nonlinear FRF')
+    ax.set_xlabel('Frequency (Hz)')
+    ax.set_ylabel('Amplitude (m)')
+    ax.set_xlim((25,omega_cont_max/2/np.pi))
+    ax.set_ylim((0,np.max(yy)*1.5))
+    ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+    fig.canvas.draw()
+
+    # cache the background
+    background = fig.canvas.copy_from_bbox(ax.bbox)
+
+    points = ax.plot(xx/2/np.pi, yy, '-')[0]
+    cur_point = ax.plot(xx[-1]/2/np.pi, yy[-1], 'o')[0]
+    return (fig, ax, background, points, cur_point)
+
+def anim_update(x,y,  fig, ax, background, points, cur_point): #*kwargs):
+
+    dof = 0
+    xx = np.asarray(x)/scale_t
+    yy = np.asarray(y).T[dof]
+    # print(xx/2/np.pi)
+    # fig, ax, background, points = kwargs
+    points.set_data(xx/2/np.pi, yy)
+    cur_point.set_data(xx[-1]/2/np.pi, yy[-1])
+
+    # recompute the ax.dataLim
+    #ax.relim()
+    # update ax.viewLim using the new dataLim
+    #ax.autoscale_view(scalex=False)
+    #ylim = ax.get_ylim()
+
+    ax.set_ylim((0,max(yy)*1.1))
+
+    # restore background
+    fig.canvas.restore_region(background)
+    # redraw just the points
+    ax.draw_artist(points)
+    ax.draw_artist(cur_point)
+    # fill in the axes rectangle
+    fig.canvas.blit(ax.bbox)
+
+
 def plots():
 
     dof = 0
@@ -109,13 +163,13 @@ def plots():
         ax.axhline(y=0, color='k')
         ax.axvline(x=0, color='k')
 
-    if len(idx_u[0]) == 0:
+    if len(idx_u[0]) != 0:
         ax.plot(xx[idx_u],yy[idx_u],'ro', label='unstable')
     ax.plot(xx[idx_s],yy[idx_s],'bx', label='stable')
     ax.set_title('Stability ({}), dof: {}'.format(str1, dof))
     ax.set_xlabel(r'Real({})'.format(str2))
     ax.set_ylabel(r'Imag({})'.format(str2))
-    ax.set_legend()
+    ax.legend()
 
     xmax = max(np.max(np.abs(xx))*1.1, 1.1)
     ymax = max(np.max(np.abs(yy))*1.1, 1.1)
@@ -207,6 +261,22 @@ def hjac(z, force=None):
 
         hjac = A - bjac
         return hjac
+
+
+def hjac_omega(omega, K, M, C, NH, z):
+    """ Calculate the derivative of h wrt ω, h_ω.
+
+    From eq. 32,
+    h_ω = ∂A/∂ω*z
+    """
+    A = np.zeros(K.shape)
+    for i in range(1,NH+1):
+        blk = np.vstack((
+            np.hstack((-2*i**2 * omega * M, -i * C)),
+            np.hstack((i * C, -2*i**2 * omega * M)) ))
+        A = block_diag( A, blk )
+
+    return A @ z
 
 def der_force_nl(x):
     """Derivative of nonlinear functional
@@ -401,6 +471,28 @@ def hb_signal(c, phi, omega, t):
 
     return x
 
+def B_reduc(B_tilde, n):
+
+    w = linalg.eigvals(B_tilde)
+    idx = np.argsort(np.abs(np.imag(w)))[:2*n]
+
+    return w[idx]
+
+def assembleA(omega2,M,C,K,NH):
+    """Assemble A, describing the linear dynamics. eq (20)
+    """
+
+    A = K
+    for i in range(1,NH+1):
+        blk = np.vstack((
+            np.hstack((K - ( i * omega2 )**2 * M, -i * omega2 * C)),
+            np.hstack((i * omega2 * C, K - (i * omega2)**2 * M)) ))
+        A = block_diag( A, blk )
+    return A
+
+def assemblet(omega2):
+    return np.arange(2**npow2) / 2**npow2 * 2*np.pi / omega2
+
 # parameters
 #def __init__(scale_x, scale_t):
 """
@@ -430,7 +522,7 @@ scale_t = 3000
 ## Force parameters
 # location of harmonic force
 fdofs = np.array([7])
-f_amp = 10
+f_amp = 3
 
 ## HB parameters
 # number of harmonic retained in the Fourier series
@@ -438,13 +530,13 @@ NH = 5
 # number of time samples in the Fourier transform, ie. 2^8=256 samples
 npow2 = 9
 # Excitation frequency. lowest sine freq in Hz
-f0 = 34
+f0 = 25
 # nu accounts for subharmonics of excitation freq w0
 nu = 1
 # amplitude of first guess
 amp0 = 1e-3
 stability = True
-rmc_permute = False
+rcm_permute = False
 
 tol_NR = 1e-6 * scale_x  # == 5e-12
 max_it_NR = 15
@@ -467,16 +559,8 @@ Nt = len(t)
 nZ = n * (2 * NH + 1)
 force = sineforce(f_amp, omega, t, n, Nt)
 
-
 # Assemble A, describing the linear dynamics. eq (20)
-A = K
-for i in range(1,NH+1):
-    #tt = transpose( i * omega * t );
-    blk = np.vstack((
-        np.hstack((K - ( i * omega2 )**2 * M, -i * omega2 * C)),
-        np.hstack((i * omega2 * C, K - (i * omega2)**2 * M)) ))
-    A = block_diag( A, blk )
-
+A = assembleA(omega2,M,C,K,NH)
 
 # Form Q(t), eq (8). Q is orthogonal trigonometric basis(harmonic terms)
 # Then use Q to from the kron product Q(t) ⊗ Iₙ, eq (6)
@@ -493,7 +577,8 @@ for i in range(Nt):
 mat_func_form_sparse = sparse.csr_matrix(mat_func_form)
 
 
-# Assemble Δs of the quadratic eigenvalue problem, eq. 43.
+# Assemble Δs of the linear eigenvalue problem, eq. 44.
+# B2 is assembled now. B1 requires hz, thus assembled after sol is found
 if stability:
     # eq. 38
     Delta1 = C0
@@ -570,7 +655,6 @@ while (Obj > tol_NR ) and (it_NR <= max_it_NR):
     jac_sys = hjac(z)
 
     zsol, *_ = lstsq(jac_sys,H)
-    zsol = linalg.pinv(jac_sys) @ H
     z = z - zsol
 
     # print('H', norm(H))
@@ -582,27 +666,30 @@ while (Obj > tol_NR ) and (it_NR <= max_it_NR):
     it_NR = it_NR + 1
 
 if it_NR > max_it_NR:
-    print('Number of iterations exceeded {}. Change Harmonic Balance\
-    parameters.'.format(max_it_NR))
+    print('Number of iterations exceeded {}. Change Harmonic Balance'
+          'parameters.'.format(max_it_NR))
     #raise ValueError("""Number of iterations exceeded {}. Change Harmonic Balance
     #parameters.""".format(max_it_NR))
 
 
 if stability:
+    # eq. 45
     A0 = jac_sys/scale_x
     A1 = Delta1
     A2 = Delta2
     b1 = np.vstack((
         np.hstack((A1, A0)),
         np.hstack((-np.eye(A0.shape[0]), np.zeros(A0.shape))) ))
+    # eq. 46
     mat_B = b2_inv @ b1
-    if rmc_permute:
+    if rcm_permute:
         # permute B to get smaller bandwidth which gives faster linalg comp.
         p = sparse.csgraph.reverse_cuthill_mckee(mat_B)
         B_tilde = mat_B[p]
     else:
         B_tilde = mat_B
-    B, *_ = linalg.eig(B_tilde)
+    # Get 2n eigenvalues with lowest imaginary modulus
+    B = B_reduc(B_tilde, n)
 
     if np.max(np.real(B)) <= 0:
         stab = True
@@ -610,6 +697,7 @@ if stability:
         stab = False
 
 
+### ONly needed for single hb solution
 c, cnorm, phi = hb_components(scale_x*z, n, NH)
 
 iw = np.arange(NH+1) * omega2
@@ -628,4 +716,183 @@ omegap = omega/scale_t
 omega2p = omega2/scale_t
 zp = z*scale_x
 
+plt.ion()
 plots()
+### END
+
+### Continuation
+omega_cont_min = 0.001*2*np.pi #par['omega_cont_min']
+omega_cont_max = 40*2*np.pi #par['omega_cont_max']
+cont_dir = 1 #par['cont_direction']
+opt_it_NR = 3 #par['opt_it_NR']
+step = 0.1 #scale_t * 0.1 #par['stepsize']
+step_min = scale_t * 0.1 #par['stepsize_min']
+step_max = scale_t * 20 #par['stepsize_max']
+angle_max_pred = 90*np.pi/180 #par['angle_max_pred']
+it_cont_max = 1e4 #par['it_cont_max']
+adaptative_stepsize = True
+
+xamp_vec =[]
+omega_vec = []
+stab_vec = []
+lamb_vec = []
+step_vec = []
+
+# amplitude of hb components
+c, cnorm, phi = hb_components(scale_x*z, n, NH)
+x = hb_signal(c, phi, omega, t)
+xamp = np.max(x, axis=1)
+
+xamp_vec.append(xamp)
+omega_vec.append(omega)
+stab_vec.append(stab)
+lamb_vec.append(B)
+
+anim = anim_init(omega_vec, xamp_vec)
+fig, ax, background, points, cur_point = anim
+
+print('\n-------------------------------------------')
+print('|  Continuation of the periodic solution  |')
+print('-------------------------------------------\n')
+
+
+it_last_turn = 0
+it_cont = 1
+z_cont = z
+omega_cont = omega
+point_prev = 0
+point_pprev = 0
+branch_switch = False
+
+relpath = 'data/'
+path = abspath + relpath
+#mat =  io.loadmat(path + 'hb.mat')
+
+while( it_cont <= it_cont_max  and
+       omega / scale_t < omega_cont_max and
+       omega / scale_t > omega_cont_min ):
+
+    print('[Iteration]:    {}'.format(it_cont))
+
+    ## Predictor step
+    J_z = hjac(z)
+    J_w = hjac_omega(omega, K, M, C, NH, z)
+
+    # Assemble A from eq. 31
+    if it_cont == 1:
+        A_pred = np.vstack((
+            np.hstack((J_z, J_w[:,None])),
+            np.ones(nZ+1) ))
+    else:
+        A_pred = np.vstack((
+            np.hstack((J_z, J_w[:,None])),
+            tangent))
+
+    # Tangent vector at iteration point, eq. 31 (search direction)
+    # tangent = [z, omega].T
+    tangent = linalg.solve(A_pred, np.append(np.zeros(nZ),1) )
+    tangent = tangent/linalg.norm(tangent)
+    tangent_pred = cont_dir * step * tangent
+
+    z = z_cont + tangent_pred[:nZ]
+    omega = omega_cont + tangent_pred[nZ]
+
+    point = np.append(z,omega)
+    if ( it_cont >= 4 and False and
+         ( (point  - point_prev) @ (point_prev - point_pprev) /
+           (norm(point - point_prev) * norm(point_prev-point_pprev)) <
+           np.cos(angle_max_pred)) ):# and
+         # (it_cont >= index_LP+1) and
+         # (it_cont >= index_BP+2) ):
+
+        it_last_turn = it_cont
+
+        tangent_pred = -tangent_pred
+        z = z_cont + tangent_pred[:nZ]
+        omega = omega_cont + tangent_pred[nZ]
+        print('| Max angle reached. Predictor tangent is reversed. |')
+
+    if branch_switch:
+        pass
+
+    ## Corrector step. NR iterations
+    # Follow eqs. 31-34
+    omega2 = omega/nu
+    t = assemblet(omega2)
+    A = assembleA(omega2,M,C,K,NH)
+    force = sineforce(f_amp, omega, t, n, Nt)
+
+    it_NR = 1
+    V = tangent
+    H = state_sys(z, force)
+    Obj = linalg.norm(H) / linalg.norm(z)
+    #print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
+
+    # TODO: consider modified NR for increased performance
+    # https://stackoverflow.com/a/44710451
+    while (Obj > tol_NR ) and (it_NR <= max_it_NR):
+        H = state_sys(z, force)
+        H = np.append(H,0)
+        J_z = hjac(z)
+        J_w = hjac_omega(omega, K, M, C, NH, z)
+        Hx = np.vstack((
+            np.hstack((J_z, J_w[:,None])),
+            V))
+        R = np.append(np.hstack((J_z, J_w[:,None])) @ V, 0)
+
+        dNR = linalg.solve(Hx, H)
+        dV = linalg.solve(Hx,R)
+        #lu, piv = linalg.lu_factor(Hx)
+        #dNR = linalg.lu_solve((lu, piv), H)
+        #dV = linalg.lu_solve((lu, piv), R)
+
+        dz = dNR[:nZ]
+        domega = dNR[nZ]
+        z = z - dz
+        omega = omega - domega
+        omega2 = omega/nu
+        V = (V-dV) / norm(V-dV)
+        t = assemblet(omega2)
+        force = sineforce(f_amp, omega, t, n, Nt)
+
+
+        A = assembleA(omega2,M,C,K,NH)
+        H = state_sys(z, force)
+        Obj = linalg.norm(H) / linalg.norm(z)
+        #print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
+        it_NR = it_NR + 1
+
+    if it_NR > max_it_NR:
+        print('The maximum number of iterations is reached without convergence.'
+              'Step size decreased by factor 10')
+        z = z_cont
+        omega = omega_cont
+        step = step / 10
+        continue
+
+    if stability:
+        pass
+
+    z_cont = z
+    omega_cont = omega
+    point_pprev = point_prev
+    point_prev = point
+    c, _, phi = hb_components(scale_x*z, n, NH)
+    x = hb_signal(c, phi, omega, t)
+    xamp = np.max(x, axis=1)
+    xamp_vec.append(xamp)
+    omega_vec.append(omega)
+    step_vec.append(step)
+
+    dof = 0
+    print(' NR: {}\tFreq: {:f}\tAmp: {:0.3e}\tStep: {:0.2f}'.
+          format(it_NR-1, omega/2/np.pi / scale_t, xamp[dof], step))
+
+    anim_update(omega_vec,xamp_vec, fig, ax, background, points, cur_point)
+
+    if adaptative_stepsize:
+        step = step * opt_it_NR/it_NR
+        step = min(step_max, step)
+        step = max(step_min, step)
+
+    it_cont += 1
