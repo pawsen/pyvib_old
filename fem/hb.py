@@ -82,6 +82,10 @@ class HB():
         f_amp: float
             Forcing amplitude
         """
+        self.f0 = f0
+        self.f_amp = f_amp
+        self.fdofs = fdofs
+
         nu = self.nu
         NH = self.NH
         n = self.n
@@ -103,7 +107,7 @@ class HB():
         force = sineForce(f_amp, omega, t, n, fdofs)
 
         # Assemble A, describing the linear dynamics. eq (20)
-        self.A = assembleA(self, omega2)
+        A = assembleA(self, omega2)
 
         # Form Q(t), eq (8). Q is orthogonal trigonometric basis(harmonic terms)
         # Then use Q to from the kron product Q(t) ⊗ Iₙ, eq (6)
@@ -139,13 +143,13 @@ class HB():
         it_NR = 1
         z = z_guess
         while (Obj > tol_NR ) and (it_NR <= max_it_NR):
-            H = state_sys(self, z, force)
-            H_z = hjac(self, z)
+            H = state_sys(self, z, A, force)
+            H_z = hjac(self, z, A)
 
             zsol, *_ = lstsq(H_z,H)
             z = z - zsol
 
-            Obj = linalg.norm(H) / linalg.norm(z)
+            Obj = linalg.norm(H) / (eps + linalg.norm(z))
             print('It. {} - Convergence test: {:e} ({:e})'.
                   format(it_NR, Obj, tol_NR))
             it_NR = it_NR + 1
@@ -169,7 +173,7 @@ class HB():
         self.stab_vec.append(stab)
         self.lamb_vec.append(B)
 
-        return z, omega, stab, B
+        return omega, z, stab, B
 
 
     def continuation(self, omega_min, omega_max,
@@ -206,7 +210,7 @@ class HB():
             omega = self.omega_vec[-1]
             z = self.z_vec[-1]
 
-        c, cnorm, phi = hb_components(scale_x*z, n, NH)
+        c, phi, cnorm = hb_components(scale_x*z, n, NH)
 
         omega2 = omega/nu
         iw = np.arange(NH+1) * omega2
@@ -229,7 +233,7 @@ class HB():
 
 
 
-def state_sys(self, z, force):
+def state_sys(self, z, A, force):
     """Calculate the system matrix h(z,ω) = A(ω)z - b(z), given by eq. (21).
 
     b is calculated from an alternating Frequency/Time domain (AFT) technique,
@@ -250,7 +254,6 @@ def state_sys(self, z, force):
     NH = self.NH
     scale_x = self.scale_x
     nonlin = self.nonlin
-    A = self.A
 
     x = ifft_coeff(z, n, nt, NH)
     fnl = force_nl(x*scale_x, *nonlin)
@@ -260,7 +263,7 @@ def state_sys(self, z, force):
     H = A @ z - b
     return H
 
-def hjac(self, z, force=None):
+def hjac(self, z, A, force=None):
     """ Computes the jacobian matrix of h wrt Fourier coefficients z, denoted
     h_z.
 
@@ -279,7 +282,6 @@ def hjac(self, z, force=None):
     scale_x = self.scale_x
     mat_func_form_sparse = self.mat_func_form_sparse
     nonlin = self.nonlin
-    A = self.A
 
     if inl.size == 0:
         return A
@@ -369,7 +371,7 @@ def hb_components(z, n, NH):
 
     cnorm = np.abs(c) / (np.max(np.abs(c)))
 
-    return c, cnorm, phi
+    return c, phi, cnorm
 
 def hb_signal(omega, t, c, phi):
     n = c.shape[0]
@@ -659,14 +661,13 @@ par_cont = {
 }
 
 
-savefig = True
-savefig = False
-
 inl = np.array([[27,-1], [27,-1]])
 # inl = np.array([])
 enl = np.array([3,2])
 knl = np.array([8e9,-1.05e7])
 nonlin = (inl, knl, enl)
+# machine precision for float
+eps = np.finfo(float).eps
 
 ## Force parameters
 # location of harmonic force
@@ -675,8 +676,8 @@ f0 = 25
 f_amp = 3
 
 hb = HB(M0,C0,K0,nonlin,**par_hb)
-z, omega, stab, B = hb.periodic(f0, f_amp, fdofs)
-t, omega,z, cnorm, c, cd, cdd = hb.get_components()
+omega, z, stab, B = hb.periodic(f0, f_amp, fdofs)
+tp, omegap, zp, cnorm, c, cd, cdd = hb.get_components()
 
 #hb.continuation(,**par_cont)
 
@@ -684,4 +685,201 @@ import matplotlib.pyplot as plt
 plt.ion()
 from hb_plots import plots
 dof = 0
-plots(t, omega, cnorm, c, cd, cdd, dof, B, inl, gtype='displ')
+plot = False
+if plot:
+    plots(tp, omegap, cnorm, c, cd, cdd, dof, B, inl, gtype='displ', savefig=False)
+
+
+#!!! CONT !!!#
+from hb_plots import anim_init, anim_update
+
+self = hb
+f0 = self.f0
+f_amp = self.f_amp
+fdofs = self.fdofs
+nu = self.nu
+NH = self.NH
+n = self.n
+nz = self.nz
+scale_x = self.scale_x
+scale_t = self.scale_t
+amp0 = self.amp0
+stability = self.stability
+tol_NR = self.tol_NR
+max_it_NR = self.max_it_NR
+
+omega_cont_min = 0.001*2*np.pi #par['omega_cont_min']
+omega_cont_max = 40*2*np.pi #par['omega_cont_max']
+cont_dir = 1 #par['cont_direction']
+opt_it_NR = 3 #par['opt_it_NR']
+step = 0.1 #scale_t * 0.1 #par['stepsize']
+step_min = scale_t * 0.1 #par['stepsize_min']
+step_max = scale_t * 20 #par['stepsize_max']
+angle_max_pred = 90*np.pi/180 #par['angle_max_pred']
+it_cont_max = 1e4 #par['it_cont_max']
+adaptative_stepsize = True
+
+xamp_vec =[]
+omega_vec = []
+stab_vec = []
+lamb_vec = []
+step_vec = []
+
+omega2 = omega/nu
+t = assemblet(self, omega2)
+x = hb_signal(omega, t, *c)
+xamp = np.max(x, axis=1)
+xamp_vec.append(xamp)
+omega_vec.append(omega)
+stab_vec.append(stab)
+lamb_vec.append(B)
+
+anim = anim_init(omega_vec, xamp_vec, scale_t, omega_cont_max)
+
+
+print('\n-------------------------------------------')
+print('|  Continuation of the periodic solution  |')
+print('-------------------------------------------\n')
+
+it_cont = 1
+z_cont = z
+omega_cont = omega
+point_prev = 0
+point_pprev = 0
+branch_switch = False
+
+relpath = 'data/'
+path = abspath + relpath
+#mat =  io.loadmat(path + 'hb.mat')
+
+omega2 = omega/nu
+A = assembleA(self, omega2)
+while( it_cont <= it_cont_max  and
+       omega / scale_t < omega_cont_max and
+       omega / scale_t > omega_cont_min ):
+
+    print('[Iteration]:    {}'.format(it_cont))
+
+    ## Predictor step
+    J_z = hjac(self, z, A)
+    J_w = hjac_omega(self, omega, z)
+
+    # Assemble A from eq. 31
+    if it_cont == 1:
+        A_pred = np.vstack((
+            np.hstack((J_z, J_w[:,None])),
+            np.ones(nz+1) ))
+    else:
+        A_pred = np.vstack((
+            np.hstack((J_z, J_w[:,None])),
+            tangent))
+
+    # Tangent vector at iteration point, eq. 31 (search direction)
+    # tangent = [z, omega].T
+    tangent = linalg.solve(A_pred, np.append(np.zeros(nz),1) )
+    tangent = tangent/linalg.norm(tangent)
+    tangent_pred = cont_dir * step * tangent
+
+    z = z_cont + tangent_pred[:nz]
+    omega = omega_cont + tangent_pred[nz]
+
+    point = np.append(z,omega)
+    if ( it_cont >= 4 and True and
+         ( (point  - point_prev) @ (point_prev - point_pprev) /
+           (norm(point - point_prev) * norm(point_prev-point_pprev)) <
+           np.cos(angle_max_pred)) ):# and
+         # (it_cont >= index_LP+1) and
+         # (it_cont >= index_BP+2) ):
+
+        tangent_pred = -tangent_pred
+        z = z_cont + tangent_pred[:nz]
+        omega = omega_cont + tangent_pred[nz]
+        point = np.append(z,omega)
+        print('| Max angle reached. Predictor tangent is reversed. |')
+
+    if branch_switch:
+        pass
+
+    ## Corrector step. NR iterations
+    # Follow eqs. 31-34
+    omega2 = omega/nu
+    t = assemblet(self, omega2)
+    A = assembleA(self, omega2)
+    force = sineForce(f_amp, omega, t, n, fdofs)
+
+    it_NR = 1
+    V = tangent
+    H = state_sys(self, z, A, force)
+    Obj = linalg.norm(H) / linalg.norm(z)
+    print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
+
+    # break
+
+    # TODO: consider modified NR for increased performance
+    # https://stackoverflow.com/a/44710451
+    while (Obj > tol_NR ) and (it_NR <= max_it_NR):
+        H = state_sys(self, z, A, force)
+        H = np.append(H,0)
+        J_z = hjac(self, z, A)
+        J_w = hjac_omega(self, omega, z)
+        Hx = np.vstack((
+            np.hstack((J_z, J_w[:,None])),
+            V))
+        R = np.append(np.hstack((J_z, J_w[:,None])) @ V, 0)
+
+        dNR = linalg.solve(Hx, H)
+        dV = linalg.solve(Hx,R)
+        #lu, piv = linalg.lu_factor(Hx)
+        #dNR = linalg.lu_solve((lu, piv), H)
+        #dV = linalg.lu_solve((lu, piv), R)
+
+        dz = dNR[:nz]
+        domega = dNR[nz]
+        z = z - dz
+        omega = omega - domega
+        omega2 = omega/nu
+        V = (V-dV) / norm(V-dV)
+        t = assemblet(self, omega2)
+        force = sineForce(f_amp, omega, t, n, fdofs)
+
+
+        A = assembleA(self, omega2)
+        H = state_sys(self, z, A, force)
+        Obj = linalg.norm(H) / linalg.norm(z)
+        print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
+        it_NR = it_NR + 1
+
+    if it_NR > max_it_NR:
+        z = z_cont
+        omega = omega_cont
+        step = step / 10
+        print('The maximum number of iterations is reached without convergence.'
+              'Step size decreased by factor 10: {:0.2f}'.format(step))
+        continue
+
+    if stability:
+        pass
+
+    z_cont = z
+    omega_cont = omega
+    point_pprev = point_prev
+    point_prev = point
+    c, phi, _ = hb_components(scale_x*z, n, NH)
+    x = hb_signal(omega, t, c, phi)
+    xamp = np.max(x, axis=1)
+    xamp_vec.append(xamp)
+    omega_vec.append(omega)
+    step_vec.append(step)
+
+    dof = 0
+    print(' NR: {}\tFreq: {:f}\tAmp: {:0.3e}\tStep: {:0.2f}'.
+          format(it_NR-1, omega/2/np.pi / scale_t, xamp[dof], step))
+
+    if adaptative_stepsize:
+        step = step * opt_it_NR/it_NR
+        step = min(step_max, step)
+        step = max(step_min, step)
+
+
+    anim_update(omega_vec,xamp_vec, scale_t, *anim)
+    it_cont += 1

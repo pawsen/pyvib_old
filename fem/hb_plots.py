@@ -20,7 +20,7 @@ def hb_signal(omega, t, c, phi):
 
     return x
 
-def anim_init(omegas, amps):
+def anim_init(omegas, amps, scale_t, omega_cont_max):
 
     dof = 0
     xx = np.asarray(omegas)/scale_t
@@ -47,13 +47,13 @@ def anim_init(omegas, amps):
     cur_point = ax.plot(xx[-1]/2/np.pi, yy[-1], 'o')[0]
     return (fig, ax, background, points, cur_point)
 
-def anim_update(x,y,  fig, ax, background, points, cur_point): #*kwargs):
+def anim_update(x,y, scale_t, *kwargs):# fig, ax, background, points, cur_point): #*kwargs):
 
     dof = 0
     xx = np.asarray(x)/scale_t
     yy = np.asarray(y).T[dof]
     # print(xx/2/np.pi)
-    # fig, ax, background, points = kwargs
+    fig, ax, background, points, cur_point = kwargs
     points.set_data(xx/2/np.pi, yy)
     cur_point.set_data(xx[-1]/2/np.pi, yy[-1])
 
