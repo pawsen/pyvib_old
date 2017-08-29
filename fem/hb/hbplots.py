@@ -3,45 +3,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-#from hb import hb_signal
-
-def hb_signal(omega, t, c, phi):
-    n = c.shape[0]
-    NH = c.shape[1]-1
-    nt = len(t)
-    tt = np.arange(1,NH+1)[:,None] * omega * t
-
-    x = np.zeros((n, nt))
-    for i in range(n):
-
-        tmp = tt + np.outer(phi[i,1:],np.ones(nt))
-        tmp = c[i,0]*np.ones(nt) + c[i,1:] @ np.sin(tmp)
-        x[i] = tmp #np.sum(tmp, axis=0)
-
-    return x
-
-def hb_components(z, n, NH):
-    z = np.hstack([np.zeros(n), z])
-    # reorder so first column is zeros, then one column for each dof
-    z = np.reshape(z, (n,2*(NH+1)), order='F')
-
-    # first column in z is zero, thus this will a 'division by zero' warning.
-    # Instead we just set the first column in phi to pi/2 (arctan(inf) = pi/2)
-    # phi = np.arctan(z[:,1::2] / z[:,::2])
-    phi = np.empty((n, NH+1))
-    phi[:,1:] =np.arctan(z[:,3::2] / z[:,2::2])
-    phi[:,0] = np.pi/2
-
-    c = z[:,::2] / np.cos(phi)
-    c[:,0] = z[:,1]
-
-    cnorm = np.abs(c) / (np.max(np.abs(c)))
-
-    return c, phi, cnorm
-
-def assemblet(self, omega2):
-    npow2 = self.npow2
-    return np.arange(2**npow2) / 2**npow2 * 2*np.pi / omega2
+from hbcommon import hb_signal, hb_components
 
 class Anim(object):
 
@@ -258,7 +220,7 @@ class PointBrowser(object):
     https://matplotlib.org/examples/event_handling/data_browser.html
     """
 
-    def __init__(self, omega_vec, z_vec, xamp_vec, dof, hb, fig, ax, line):
+    def __init__(self, omega_vec, z_vec, xamp_vec, dof, hb, fig, ax, lines):
         print('0')
         self.hb = hb
         self.fig = fig
@@ -267,7 +229,7 @@ class PointBrowser(object):
         self.z_vec = z_vec
         self.xamp_vec = xamp_vec
         self.dof = dof
-        self.line = line
+        self.lines = lines
 
         self.lastind = 0
         self.selected, = self.ax.plot([self.omega_vec[0]], [self.xamp_vec[0]],
@@ -289,8 +251,10 @@ class PointBrowser(object):
         self.update()
 
     def onpick(self, event):
-        if event.artist != self.line:
+        if event.artist not in self.lines:
             return True
+        # if event.artist != self.line:
+        #     return True
 
         N = len(event.ind)
         if not N:
@@ -326,31 +290,33 @@ class PointBrowser(object):
         c, phi, cnorm = hb_components(z*scale_x, n, NH)
 
         try:
-            if not plt.fignum_exists(fig_hb.number):
+            if not plt.fignum_exists(self.fig_hb.number):
                 pass
-        except NameError:
-            fig_hb = plt.figure(2)
-            ax1, ax2 = fig_hb.add_subplot(211), fig_hb.add_subplot(212)
+        except AttributeError: #NameError:
+            self.fig_hb, (self.ax1, self.ax2) = plt.subplots(2,1)
+            plt.show()
+            # fig_hb = plt.figure(7)
+            # ax1, ax2 = fig_hb.add_subplot(211), fig_hb.add_subplot(212)
 
         omega2 = omega / self.hb.nu
-        t = assemblet(self.hb, omega2)
+        t = self.hb.assemblet(omega2)
         c = (c, phi)
-        periodic(t, omega, c, dof,fig=fig_hb, ax=ax1)
-        harmonic(cnorm, dof, fig, ax2)
+        periodic(t, omega, c, dof,fig=self.fig_hb, ax=self.ax1)
+        harmonic(cnorm, dof, self.fig_hb, self.ax2)
 
         self.selected.set_visible(True)
         self.selected.set_data(omega_vec[dataind], xamp_vec[dataind])
 
         self.fig.canvas.draw()
-        fig_hb.tight_layout()
-        fig_hb.canvas.draw()
+        self.fig_hb.tight_layout()
+        self.fig_hb.canvas.draw()
 
 
-def nonlin_frf(hb, omega_vec2, z_vec, xamp_vec2, stab_vec2, dof=0):
+def nonlin_frf(hb, omega_vec, z_vec, xamp_vec, stab_vec, dof=0):
 
     scale_t = hb.scale_t
-    omega_vec2 = np.asarray(omega_vec)/scale_t / 2 / np.pi
-    xamp_vec2 = np.asarray(xamp_vec).T[dof]
+    omega_vec = np.asarray(omega_vec)/scale_t / 2 / np.pi
+    xamp_vec = np.asarray(xamp_vec).T[dof]
 
 
     fig, ax = plt.subplots()
@@ -360,16 +326,16 @@ def nonlin_frf(hb, omega_vec2, z_vec, xamp_vec2, stab_vec2, dof=0):
     ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
 
     # picker: 5 points tolerance
-    stab_vec2 = np.array(stab_vec)
-    idx1 = ~stab_vec2
-    idx2 = stab_vec2
-    line, line_uns = ax.plot(np.ma.masked_where(idx1, omega_vec2),
-                             np.ma.masked_where(idx1, xamp_vec2), '-ok',
-                             np.ma.masked_where(idx2, omega_vec2),
-                             np.ma.masked_where(idx2, xamp_vec2), '--ok',
-                             ms=1, picker=5)
+    stab_vec = np.array(stab_vec)
+    idx1 = ~stab_vec
+    idx2 = stab_vec
+    lines = ax.plot(np.ma.masked_where(idx1, omega_vec),
+                    np.ma.masked_where(idx1, xamp_vec), '-ok',
+                    np.ma.masked_where(idx2, omega_vec),
+                    np.ma.masked_where(idx2, xamp_vec), '--ok',
+                    ms=1, picker=5)
 
-    browser = PointBrowser(omega_vec2, z_vec, xamp_vec2, dof, hb, fig, ax, line)
+    browser = PointBrowser(omega_vec, z_vec, xamp_vec, dof, hb, fig, ax, lines)
 
     fig.canvas.mpl_connect('pick_event', browser.onpick)
     fig.canvas.mpl_connect('key_press_event', browser.onpress)
