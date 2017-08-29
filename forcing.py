@@ -135,3 +135,35 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1 ):
     u = arms * u / rms
 
     return u, t
+
+
+def sineForce(A, omega, t, n=1, fdofs=0, phi_f=0):
+    """
+    Parameters
+    ----------
+    A: float
+        Amplitude in N
+    omega: float
+        Forcing frequency in (rad/s)
+    t: ndarray
+        Time array
+    n: int
+        Number of DOFs
+    fdofs: int or ndarray of int
+        DOF location of force(s)
+    phi_f: float
+        Phase in degree
+    """
+
+    fdofs = np.atleast_1d(np.asarray(fdofs))
+    if any(fdofs) > n-1:
+        raise ValueError('Some fdofs are greater than system size(n-1), {}>{}'.
+                         format(fdofs, n-1))
+    phi = phi_f / 180 * np.pi
+
+    f = np.zeros((n, len(t)))
+    # add force to dofs
+    for dof in fdofs:
+        f[dof] = f[dof] + A * np.sin(omega*t + phi)
+
+    return f
