@@ -63,7 +63,7 @@ class HB():
         self.z_vec = []
         self.xamp_vec = []
         self.omega_vec = []
-        self.step_vec = []
+        self.step_vec = [0]
         self.stab_vec = []
         self.lamb_vec = []
 
@@ -213,7 +213,6 @@ class HB():
         # omega_cont_min = omega_cont_min*2*np.pi
         # omega_cont_max = omega_cont_max*2*np.pi
         angle_max_pred = angle_max_pred*np.pi/180
-        self.step_vec.append(step)
 
         anim = Anim(self.omega_vec, self.xamp_vec, omega_cont_min,
                     omega_cont_max, dof=dof, scale_t=scale_t)
