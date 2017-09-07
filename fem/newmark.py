@@ -3,278 +3,170 @@
 
 import numpy as np
 from scipy import linalg
-from scipy.sparse.linalg import eigs
+from scipy.linalg import norm, solve
 
-class nonlinearity(object):
-    def __init__(self, dof, order, value):
-        self.dof = dof
-        self.order = order
-        self.value = value
-
-
-class pseudo_random(object):
-    """
-    Periodic random signal with user controlled amplitude spectrum, and a
-    random phase spectrum drawn from a uniform distribution.
-    Band limited by f_min and f_max
-
-    Input:
-        RMS (Root mean square) amplitude of signal
-        n: number of periods. [Integer]
-        f_min, f_max: lower and upper frequency bound.
-    """
-    def __init__(self, rms, n, band):
-        self.rms = rms
-        self.n = n
-        self.band = band
-
-    def eval_force(self, u, t):
-        return
-
-class Sweep(object):
-    """
-    Sine sweep
-
-    Input:
-        n: sweep rate
-        f_min, f_max: lower and upper bound for frequency sweep.
-    """
-    def __init__(self, A, n, omega):
-        self.A = A
-        self.n = n
-        self.omega = omega
-
-    def eval_force(self, u, t):
-        return self.A * np.sin(self.omega * t)
-
-class Sine(object):
-    """
-    Constant frequency sine excitation.
-
-    Input:
-        omega: angular frequency (rad/s)
-    """
-    def __init__(self, dof, A, omega):
-        self.dof = dof
-        self.A = A
-        self.omega = omega
-
-    def eval_force(self, u, du, t):
-        return self.A * np.sin(np.pi * self.omega * t)
-
-class Solver(object):
-    def __init__(self, M, C, K):
+class Newmark():
+    def __init__(self, M, C, K, nonlin, gtype=None):
         self.M = M
         self.C = C
         self.K = K
-
-        self.list_nonlin = []
-        self.list_dfnonlin = []
-        self.list_force = []
-
-        self.w0 = []
-        self.w0d = []
-        self.phi = []
-
-    def add_nonlin(self, dof, order, value):
-        self.list_nonlin.append(nonlinearity(dof, order, value))
-        # derivative of the nonlinearity
-        self.list_dfnonlin.append(nonlinearity(dof, order - 1, value * order))
-
-    def add_force(self, ftype):
-        self.list_force.append(ftype)
-
-    def integrate(self, x0, dx0, t):
-        return Newmark.newmark_beta(self, x0, dx0, t)
-
-    def eigen(self):
-        """Calculate damped and undamped eigenfrequencies in (rad/s).
-        See Jakob S. Jensen & Niels Aage: "Lecture notes: FEMVIB", eq. 3.50 for
-        the state space formulation of the EVP.
-
-        Use eigs (Works on sparse matrices and calls Arpack under the hood)
-
-        Undamped frequencies can be found directly from (matlab syntax). Remove
-        diag when using python.
-        * [phi, w2] = eigs(K,M,6,'sm');
-        * f = sort(sqrt(diag(w2))) / (2*pi)
-
-        """
-
-        dim = np.shape(self.K)
-        # stupid way of doing A = [zeros(size(K)),K; K, C]; and
-        # B = [K, zeros(size(K)); zeros(size(K)), -M]; in matlab.
-        A = np.column_stack([np.zeros(dim), self.K])
-        A = np.row_stack((A, np.column_stack([self.K, self.C])))
-        B = np.column_stack([self.K, np.zeros(dim)])
-        B = np.row_stack((B, np.column_stack([np.zeros(dim), -self.M])))
-
-        # For SDOF eigs is not useful.
-        if dim[0] < 12:
-            """
-            vals: The eigenvalues, each repeated according to its multiplicity. 
-                The eigenvalues are not necessarily ordered.
-
-            vesc: he normalized (unit “length”) eigenvectors, such that the
-                column vals[:,i] is the eigenvector corresponding to the
-                eigenvalue vecs[i]."""
-            vals, vesc = linalg.eig(A, b=B)
-
-            # remove complex conjugate elements(ie. cut vector/2d array in half)
-            # Be sure to remove conjugate and the ones we want to keep!
-            # vals = np.split(vals,2)[0]
-            # vesc = np.hsplit(vesc,2)[0]
+        self.nonlin = nonlin
+        if gtype is None:
+            self.gamma = 1/2
+            self.beta = 1/4
         else:
-            vals, vecs = eigs(A, k=6, M=B, which='SM')
+            self.gamma, self.beta = self._params(gtype)
 
-        # NB! Remember when sorting the eigenvalues, that the eigenvectors
-        # should be sorted accordingly, so they still match
-        idx = vals.argsort()[::1]
-        w2_complex = vals[idx]
-        vecs = vecs[:,idx]
+    def integrate_nl(self, x0, xd0, dt, fext, sensitivity=False):
+        return newmark_beta_nl(self.M, self.C, self.K, x0, xd0, dt, fext,
+                               self.nonlin, sensitivity, self.gamma, self.beta)
 
-        # extract complex eigenvalues.
-        # taking the absolute is simply: sqrt(real(w2)**2 + imag(w2)**2)
-        self.w0 = np.abs(w2_complex)
-        self.w0d = np.abs(np.imag(w2_complex))
-        # damping ration
-        self.psi = -np.real(w2_complex) / self.w0
+    def _params(self, gtype):
+        # (gamma, beta)
+        d = {
+            'explicit':    (0,   0),
+            'central':     (1/2, 0),
+            'fox-goodwin': (1/2, 1/12),
+            'linear':      (1/2, 1/6),
+            'average':     (1/2, 1/4)
+            }
+        try:
+            gamma, beta = d[gtype]
+        except KeyError as err:
+            raise Exception('Wrong key {}. Should be one of {}'.
+                            format(gtype, d.keys())) from err
 
-        return self.w0, self.w0d, self.psi
+        return gamma, beta
 
-    def convert_freqs(self):
-        """ Returns undamped damped and eigenfrequencies in (Hz)"""
-        return \
-            self.w0 / (2 * np.pi), \
-            self.w0d / (2 * np.pi)
+def newmark_beta_nl(M, C, K, x0, xd0, dt, fext, nonlin, sensitivity=False,
+                    gamma=1/2, beta=1/4):
+    '''Newmark-beta nonlinear integration.
 
-class Newmark(Solver):
-    def f(self, u):
-        ndof = len(u)
-        force = np.zeros(ndof)
-        for nonlin in self.list_nonlin:
-            dof = nonlin.dof
-            value = nonlin.value
-            order = nonlin.order
-            force[dof-1] = force[dof-1] + value * u[dof-1]**order
-        return force
+    With gamma = 1/2, beta = 1/4, this correspond to the "Average
+    acceleration" Method. Unconditional stable. Convergence: O(dt**2).
 
-    def df(self, u):
-        ndof = len(u)
-        force = np.zeros(ndof)
-        for nonlin in self.list_dfnonlin:
-            dof = nonlin.dof
-            value = nonlin.value
-            order = nonlin.order
-            force[dof-1] = force[dof-1] + value * u[dof-1]**order
-        return force
+    No enforcing of boundary conditions, eg. only solves IVP.
+    Input:
+        xo, xd0
+        - Initial conditions. Size [ndof]
+        t
+        - Time vector. Size[nsteps]
+        r_ext(t)
+        - External force function.
+        - Takes the current time as input.
+        - Returns an array. Size [ndof]
 
-    def r_ext(self, u, du, t):
-        ndof = len(u)
-        fvec = np.zeros(ndof)
-        for force in self.list_force:
-            dof = force.dof
-            fvec[dof-1] = fvec[dof-1] + \
-                          force.eval_force(u[dof-1], du[dof-1], t)
+    Output:
+        x, xd, xdd
+        - State arrays. Size [nsteps, ndof]
 
-        return fvec
+    Equations are from Krenk: "Non-linear Modeling and analysis of Solids
+        and Structures"
+    See also: Cook: "Concepts and applications of FEA, chap 11 & 17"
 
-    def newmark_beta(self, x0, dx0, t):
-        '''
-        Newmark-beta nonlinear integration.
-        With gamma = 1/2, beta = 1/4, this correspond to the "Average acceleration"
-        Method. Unconditional stable. Convergence: O(dt**2).
+    '''
+    tol = 1e-10
+    itmax = 50
 
-        No enforcing of boundary conditions, eg. only solves IVP.
-        Input:
-            xo, dx0
-            - Initial conditions. Size [ndof]
-            t
-            - Time vector. Size[nsteps]
-            r_ext(t)
-            - External force function.
-            - Takes the current time as input.
-            - Returns an array. Size [ndof]
+    A1 = (1 - gamma) * dt
+    B1 = (1/2 - beta) * dt**2
+    A2 = 1 / beta / dt**2
+    B2 = gamma / beta / dt
 
-        Output:
-            x, dx, ddx
-            - State arrays. Size [nsteps, ndof]
+    fext = fext.T
+    ns = fext.shape[0]
+    ndof = K.shape[0]
+    # Pre-allocate arrays.
+    xdd = np.empty((ns, ndof))
+    xd = np.empty((ns, ndof))
+    x = np.empty((ns, ndof))
+    S_lin = K + gamma / beta / dt * C + M / beta / dt**2
 
-        Equations are from Krenk: "Non-linear Modeling and analysis of Solids
-            and Structures"
-        See also: Cook: "Concepts and applications of FEA, chap 11 & 17"
-        '''
-        gamma = 1./2
-        beta = 1./4
+    x[0] = x0
+    xd[0] = xd0
+    # initial acceleration. eq. 11.12-13
+    fl = C @ xd[0] + K @ x[0]
+    fnl = nonlin.force(x[0], xd[0])
+    xdd[0] = solve(M, fext[0] - fl - fnl)
 
-        nsteps = len(t)
-        ndof = len(self.K)
-        # Pre-allocate arrays. Use empty
-        ddx = np.zeros([nsteps, ndof], dtype=float)
-        dx = np.zeros([nsteps, ndof], dtype=float)
-        x = np.zeros([nsteps, ndof], dtype=float)
-        delta_x = np.zeros([nsteps, ndof], dtype=float)
+    if sensitivity:
+        V = np.append(np.eye(ndof), np.zeros((ndof, ndof)))
+        dV = np.append(np.zeros((ndof, ndof)), np.eye(ndof))
+        dfnl = nonlin.dforce(x[0], xd[0], is_force=True)
+        dfnl_d = nonlin.dforce(x[0], xd[0], is_force=False)
+        rhs = -(C + dfnl_d) * dV - (K + dfnl) * V
+        ddV = solve(M, rhs)
+        V = V + dt**2 * beta * ddV
+        dV = dV + dt * gamma * ddV
 
-        x[0,:] = x0
-        dx[0,:] = dx0
-        # initial acceleration. eq. 11.12-13
-        f = Newmark.f(self, x[0,:])
-        r_ext = Newmark.r_ext(self, x[0,:], dx[0,:], t[0])
-        r_int = np.dot(self.K,x[0,:]) + np.dot(self.C,dx[0,:]) + f
-        ddx[0,:] = linalg.solve(self.M, r_ext - r_int)
+    # time stepping
+    for j in range(1, ns):
+        #dt = t[j] - t[j-1]
+        # Prediction step
+        xd[j] = xd[j-1] + A1 * xdd[j-1]
+        x[j] = x[j-1] + dt * xd[j-1] + B1 * xdd[j-1]
+        xdd[j] = 0  # xdd[j-1]
 
-        # time stepping
-        for j in range(1, nsteps):
-            dt = t[j] - t[j-1]
-            # Prediction step
-            ddx[j,:] = ddx[j-1,:]
-            dx[j,:] = dx[j-1,:] + dt * ddx[j-1,:]
-            x[j,:] = x[j-1,:] + dt * dx[j-1,:] + 1/2 * dt**2 * ddx[j-1,:]
+        # force at current step
+        fl = C @ xd[j] + K @ x[j]
+        fnl = nonlin.force(x[j], xd[j])
+        res = M @ xdd[j] + fl + fnl - fext[j]
 
-            # correct prediction step
-            for i in range(0,20):
-                # system matrices and increment correction
-                """ calculate tangent stiffness.
-                r(u) : residual
-                Kt   : Tangent stiffness. Kt = ∂r/∂u
+        it = 0
+        dx = 1
+        # correct prediction step
+        # TODO break-criterion: norm(res)> eps*norm(f_glob)
+        while(norm(res) > tol and it < itmax):
+            # system matrices and increment correction
+            """ calculate tangent stiffness.
+            r(u) : residual
+            Kt   : Tangent stiffness. Kt = ∂r/∂u
 
-                r(u,u̇) = Cu̇ + Ku + f(u,u̇) - p
-                Kt = ∇{u}r = K + ∇{u}f
-                Ct = ∇{u̇}r = C + ∇{u̇}f
-                """
-                # residual calculation
-                f = Newmark.f(self, x[j,:])
-                res = Newmark.r_ext(self, x[j,:], dx[j,:], t[j]) - \
-                      np.dot(self.M, ddx[j,:]) - \
-                      np.dot(self.C, dx[j,:]) - np.dot(self.K, x[j,:]) - f
+            r(u,u̇) = Cu̇ + Ku + f(u,u̇) - p
+            Kt = ∇{u}r = K + ∇{u}f
+            Ct = ∇{u̇}r = C + ∇{u̇}f
+            """
 
-                df = Newmark.df(self, x[j,:])
-                Kt = self.K + np.diag(df)
-                Keff = 1 / (beta * dt**2) * self.M + \
-                       gamma * dt / (beta * dt**2) * self.C + Kt
+            dfnl = nonlin.dforce(x[j], xd[j], is_force=True)
+            dfnl_d = nonlin.dforce(x[j], xd[j], is_force=False)
 
-                delta_x = linalg.solve(Keff, res)
+            Seff = dfnl + dfnl_d * B2 + S_lin
+            dx = -linalg.solve(Seff, res)
+            xdd[j] += A2 * dx
+            xd[j] += B2 * dx
+            x[j] += dx
 
-                x[j,:] = x[j,:] + delta_x
-                dx[j,:] = dx[j,:] + gamma * dt / (beta * dt**2) * delta_x
-                ddx[j,:] = ddx[j,:] + 1 / (beta * dt**2) * delta_x
+            fl = C @ xd[j] + K @ x[j]
+            fnl = nonlin.force(x[j], xd[j])
+            res = M @ xdd[j] + fl + fnl - fext[j]
 
-                res_norm = (linalg.norm(res))
-                delta_x_norm = (linalg.norm(delta_x))
-                #print("j: {}, i: {}, delta_x: {}, res: {}, dx_norm: {}".
-                #      format(j,i,delta_x,res_norm,delta_x_norm))
-                if (res_norm <= 1e-10) or (delta_x_norm <= 1e-10):
-                    break
-
-                # energy norm. Could be used instead. Eq: Cook: 17.7-6
-                # conv = dt * np.dot(dx1, res)
-                # if (conv) <= 1e-6:
-                #    break
-
-        return x, dx, ddx
+            if sensitivity:
+                dfnl = nonlin.dforce(x[j], xd[j], is_force=True)
+                dfnl_d = nonlin.dforce(x[j], xd[j], is_force=False)
+                V = V + dt * dV + (0.5 - beta) * dt**2 * ddV
+                dV = dV + (1 - gamma) * dt * ddV
+                S = dfnl + S_lin + gamma / beta / dt * dfnl_d
+                S = dt**2 * beta * S
+                rhs = -(C + dfnl_d) @ dV - (K + dfnl) @ V
+                ddV = solve(S, rhs)
+                V = V + dt**2 * beta * ddV
+                dV = dV + dt * gamma * ddV
 
 
-def newmark_beta_lin(M, C, K, x0, dx0, t, r_ext):
+            it += 1
+            #print("j: {}, i: {}, delta_x: {}, res: {}, xd_norm: {}".
+            #      format(j,i,delta_x,res_norm,delta_x_norm))
+
+        if it == itmax:
+            raise ValueError('Max iteration reached')
+
+    if sensitivity:
+        return x.T, xd.T, xdd.T, np.vstack((V, dV))  # V, dV
+    else:
+        return x.T, xd.T, xdd.T
+
+
+def newmark_beta_lin(M, C, K, x0, xd0, t, r_ext):
     '''
     Newmark-beta linear integration.
     With gamma = 1/2, beta = 1/4, this correspond to the "Average acceleration"
@@ -284,13 +176,13 @@ def newmark_beta_lin(M, C, K, x0, dx0, t, r_ext):
     Input:
         M, C, K
         - System matrices. Size [ndof, ndof]
-        xo, dx0
+        xo, xd0
         - Initial conditions. Size [ndof]
         t
         - Time vector. Size[nsteps]
 
     Output:
-        x, dx, ddx
+        x, xd, xdd
         - State arrays. Size [nsteps, ndof]
 
     Equations are from Cook: "Concepts and applications of FEA"
@@ -299,17 +191,17 @@ def newmark_beta_lin(M, C, K, x0, dx0, t, r_ext):
     beta = 1./4
 
     nsteps = len(t)
-    ndof = len(K)
+    ndof = M.shape[0]
     # Pre-allocate arrays
-    ddx = np.zeros([nsteps, ndof], dtype=float)
-    dx = np.zeros([nsteps, ndof], dtype=float)
+    xdd = np.zeros([nsteps, ndof], dtype=float)
+    xd = np.zeros([nsteps, ndof], dtype=float)
     x = np.zeros([nsteps, ndof], dtype=float)
 
     x[0,:] = x0
-    dx[0,:] = dx0
+    xd[0,:] = xd0
     # initial acceleration. eq. 11.12-13
-    r_int = np.dot(K,x[0,:]) + np.dot(C,dx[0,:])
-    ddx[0,:] = linalg.solve(M, r_ext(0) - r_int)
+    r_int = np.dot(K,x[0,:]) + np.dot(C,xd[0,:])
+    xdd[0,:] = linalg.solve(M, r_ext(0) - r_int)
 
     # time stepping
     for j in range(1, nsteps):
@@ -324,17 +216,11 @@ def newmark_beta_lin(M, C, K, x0, dx0, t, r_ext):
         # 11.13-5b
         Keff = a0 * M + a3 * C + K
         # 11.13-5a
-        M_int = np.dot(M, a0 * x[j-1,:] + a1 * dx[j-1,:] + a2 * ddx[j-1,:])
-        C_int = np.dot(C, a3 * x[j-1,:] + a4 * dx[j-1,:] + a5 * ddx[j-1,:])
+        M_int = np.dot(M, a0 * x[j-1,:] + a1 * xd[j-1,:] + a2 * xdd[j-1,:])
+        C_int = np.dot(C, a3 * x[j-1,:] + a4 * xd[j-1,:] + a5 * xdd[j-1,:])
         x[j,:] = linalg.solve(Keff, M_int + C_int + r_ext(t[j]))
 
         # update vel and accel, eq. 11.13-4a & 11.13-4b
-        ddx[j,:] = a0 * (x[j,:] - x[j-1,:] - dt*dx[j-1,:]) - a2 * ddx[j-1,:]
-        dx[j,:] = a3 * (x[j,:] - x[j-1,:]) - a4 * dx[j-1,:] - dt * a5 * ddx[j-1,:]
-    return x, dx, ddx
-# M, C, K = np.array([[2]]), np.array([[10]]), np.array([[100e3]])
-# k3 = 100e6
-# sys = Solver(M, C, K)
-# sys.add_nonlin(1, 3, k3)
-# sys.add_force(Sine(1,1,1))
-# x, dx, ddx = sys.integrate(x0, y0, t)
+        xdd[j,:] = a0 * (x[j,:] - x[j-1,:] - dt*xd[j-1,:]) - a2 * xdd[j-1,:]
+        xd[j,:] = a3 * (x[j,:] - x[j-1,:]) - a4 * xd[j-1,:] - dt * a5 * xdd[j-1,:]
+    return x, xd, xdd
