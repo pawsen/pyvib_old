@@ -3,13 +3,25 @@
 
 import numpy as np
 
+class color:
+    PURPLE = '\033[95m'
+    CYAN = '\033[96m'
+    DARKCYAN = '\033[36m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    END = '\033[0m'
+
 def db(x):
     """relative value in dB
 
     TODO: Maybe x should be rescaled to ]0..1].?
     log10(0) = inf.
     """
-    return 20*np.log10( np.abs(x **2 ))
+    return 20*np.log10(np.abs(x **2))
 
 def rescale(x, mini=None, maxi=None):
     """Rescale x to 0-1.
