@@ -12,15 +12,14 @@ import sys
 sys.path.insert(1, os.path.join(sys.path[0], '../..'))
 from scipy import io
 
-from forcing import sineForce
+from forcing import sineForce, toMDOF
 from hbplots import Anim, nonlin_frf
 from hbcommon import fft_coeff, ifft_coeff, hb_signal, hb_components
 from stability import Hills
-from nlforce import force_nl, der_force_nl
+from nlforce import NL_force, NL_polynomial
 from bifurcation import Fold
 
 class HB():
-
     def __init__(self, M0, C0, K0, nonlin,
                  NH=3, npow2=8, nu=1, scale_x=1, scale_t=1,
                  amp0=1e-3, tol_NR=1e-6, max_it_NR=15,
@@ -76,8 +75,8 @@ class HB():
         # NR solution: (h_z is the derivative of h wrt z)
         # zⁱ⁺¹ = zⁱ - h(zⁱ,ω)/h_z(zⁱ,ω)
         # h_z = A(ω) - b_z(z) = A - Γ⁺ ∂f/∂x Γ
-        # where the last exp. is in time domain. df/dx is thus available analytical.
-        # See eq (30)
+        # where the last exp. is in time domain. df/dx is thus available
+        # analytical. See eq (30)
 
         Parameters
         ----------
@@ -85,6 +84,7 @@ class HB():
             Forcing frequency in Hz
         f_amp: float
             Forcing amplitude
+
         """
         self.f0 = f0
         self.f_amp = f_amp
@@ -101,14 +101,14 @@ class HB():
         tol_NR = self.tol_NR
         max_it_NR = self.max_it_NR
 
-        w0 = f0 *2*np.pi
+        w0 = f0 * 2*np.pi
         omega = w0*scale_t
         omega2 = omega / nu
 
         t = self.assemblet(omega2)
         nt = len(t)
-
-        force = sineForce(f_amp, omega, t, n, fdofs)
+        u, _ = sineForce(f_amp, omega=omega, t=t)
+        force = toMDOF(u, n, fdofs)
 
         # Assemble A, describing the linear dynamics. eq (20)
         A = self.assembleA(omega2)
@@ -147,7 +147,7 @@ class HB():
         Obj = 1
         it_NR = 1
         z = z_guess
-        while (Obj > tol_NR ) and (it_NR <= max_it_NR):
+        while (Obj > tol_NR) and (it_NR <= max_it_NR):
             H = self.state_sys(z, A, force)
             H_z = self.hjac(z, A)
 
@@ -165,7 +165,7 @@ class HB():
                              format(max_it_NR))
 
         if stability:
-             B, stab = hills.stability(omega, H_z)
+            B, stab = hills.stability(omega, H_z)
 
         # amplitude of hb components
         c, cnorm, phi = hb_components(scale_x*z, n, NH)
@@ -180,7 +180,6 @@ class HB():
 
         return omega, z, stab, B
 
-
     def continuation(self, omega_min, omega_max,
                      step=0.1,step_min=0.1, step_max=20, cont_dir=1,
                      opt_it_NR=3, it_cont_max=1e4, adaptive_stepsize=True,
@@ -189,7 +188,6 @@ class HB():
 
         Based on tangent prediction and Moore-Penrose correction.
         """
-
         z = self.z
         omega = self.omega
         scale_x = self.scale_x
@@ -206,8 +204,8 @@ class HB():
     def state_sys(self, z, A, force):
         """Calculate the system matrix h(z,ω) = A(ω)z - b(z), given by eq. (21).
 
-        b is calculated from an alternating Frequency/Time domain (AFT) technique,
-        eq. (23).
+        b is calculated from an alternating Frequency/Time domain (AFT)
+        technique, eq. (23).
 
             not known
           z +--------> b(z)
@@ -217,16 +215,17 @@ class HB():
          x(t)+---->f(x,ẋ,ω,t)
 
         The Fourier coefficients of the nonlinear forces b(z) are found
+
         """
 
         n = self.n
         nt = self.nt
         NH = self.NH
         scale_x = self.scale_x
-        nonlin = self.nonlin
 
         x = ifft_coeff(z, n, nt, NH)
-        fnl = force_nl(x*scale_x, *nonlin)
+        xd_dummy = 0
+        fnl = self.nonlin.force(x*scale_x, xd_dummy)
 
         b = fft_coeff(force - fnl, NH)
         # eq. 21
@@ -234,35 +233,36 @@ class HB():
         return H
 
     def hjac(self, z, A, force=None):
-        """ Computes the jacobian matrix of h wrt Fourier coefficients z, denoted
+        """Computes the jacobian matrix of h wrt Fourier coefficients z, denoted
         h_z.
 
         From eq. (30)
         h_z = ∂h/∂z = A - ∂b/∂z = A - Γ⁺ ∂f/∂x Γ
         ∂f/∂x is available analytical in time domain
 
-        It is only necessary to calculate the jacobian ∂b/∂z for nonlinear forces
-        (ie. it is zero for linear forces).
+        It is only necessary to calculate the jacobian ∂b/∂z for nonlinear
+        forces (ie. it is zero for linear forces).
 
         """
-        nz  =self.nz
+        nz =self.nz
         nt = self.nt
         NH = self.NH
         n = self.n
         scale_x = self.scale_x
         mat_func_form_sparse = self.mat_func_form_sparse
-        nonlin = self.nonlin
 
         if inl.size == 0:
             return A
         else:
             x = ifft_coeff(z, n, nt, NH)
-            dFnl_dx_tot_mat = der_force_nl(x*scale_x, *nonlin) * scale_x
+            xd_dummy = 0
+            dFnl_dx_tot_mat = self.nonlin.dforce(x*scale_x, xd_dummy) * scale_x
             # the derivative ∂b/∂z
             bjac = np.empty((nz, nz))
             full_rhs = dFnl_dx_tot_mat @ mat_func_form_sparse
 
-            # TODO try use linear solver instead! Check if mat_func is square.
+            # TODO: mat_func_form is not square. But some factorization would
+            # be nice
             for j in range(nz):
                 rhs = np.squeeze(np.asarray(full_rhs[:,j].todense()))
                 return_values = sparse.linalg.lsmr(mat_func_form_sparse, rhs)
@@ -271,7 +271,6 @@ class HB():
 
             hjac = A - bjac
             return hjac
-
 
     def hjac_omega(self, omega, z):
         """ Calculate the derivative of h wrt ω, h_ω.
@@ -282,16 +281,15 @@ class HB():
         M = self.M
         C = self.C
         K = self.K
-        NH  = self.NH
+        NH = self.NH
         A = np.zeros(K.shape)
         for i in range(1,NH+1):
             blk = np.vstack((
                 np.hstack((-2*i**2 * omega * M, -i * C)),
-                np.hstack((i * C, -2*i**2 * omega * M)) ))
-            A = block_diag( A, blk )
+                np.hstack((i * C, -2*i**2 * omega * M))))
+            A = block_diag(A, blk)
 
         return A @ z
-
 
     def assembleA(self, omega2):
         """Assemble A, describing the linear dynamics. eq (20)
@@ -304,16 +302,14 @@ class HB():
         A = K
         for i in range(1,NH+1):
             blk = np.vstack((
-                np.hstack((K - ( i * omega2 )**2 * M, -i * omega2 * C)),
-                np.hstack((i * omega2 * C, K - (i * omega2)**2 * M)) ))
-            A = block_diag( A, blk )
+                np.hstack((K - (i * omega2)**2 * M, -i * omega2 * C)),
+                np.hstack((i * omega2 * C, K - (i * omega2)**2 * M))))
+            A = block_diag(A, blk)
         return A
-
 
     def assemblet(self, omega2):
         npow2 = self.npow2
         return np.arange(2**npow2) / 2**npow2 * 2*np.pi / omega2
-
 
     def get_components(self, omega=None, z=None):
         scale_x = self.scale_x
@@ -356,31 +352,31 @@ f0 = 1e-3
 fdofs = 0
 
 inl = np.array([[0,-1]])
-# inl = np.array([])
 enl = np.array([3])
 knl = np.array([1])
 
 par_hb ={
-    'NH': 5,
-    'npow2': 9,
+    'NH': 3,
+    'npow2': 8,
     'nu': 1,
     'stability': True,
     'rcm_permute': False,
     'tol_NR': 1e-6,
     'max_it_NR': 15,
     'scale_x': 1,
-    'scale_t': 1
+    'scale_t': 1,
+    'amp0':1e-4
 }
 par_cont = {
     'omega_cont_min': 1e-5*2*np.pi,
-    'omega_cont_max': 0.5*2*np.pi,
+    'omega_cont_max': 1*2*np.pi,
     'cont_dir': 1,
     'opt_it_NR': 3,
-    'step': 0.1,
+    'step': 0.001,
     'step_min': 0.001,
     'step_max': 0.1,
     'angle_max_pred': 90,
-    'it_cont_max': 1e4,
+    'it_cont_max': 1e6,
     'adaptive_stepsize': True
 }
 
@@ -430,12 +426,14 @@ mat =  io.loadmat(path + 'NLBeam.mat')
 # knl = np.array([8e9,-1.05e7])
 
 
-nonlin = (inl, knl, enl)
+nl_pol = NL_polynomial(inl, enl, knl)
+nl = NL_force()
+nl.add(nl_pol)
 # machine precision for float
 eps = np.finfo(float).eps
 
 
-hb = HB(M0,C0,K0,nonlin,**par_hb)
+hb = HB(M0,C0,K0,nl, **par_hb)
 omega, z, stab, B = hb.periodic(f0, f_amp, fdofs)
 tp, omegap, zp, cnorm, c, cd, cdd = hb.get_components()
 
@@ -512,7 +510,7 @@ idx_NS = [0]
 
 if stability:
     detect = {
-        'fold':False,#True
+        'fold':False,
         'NS':False,
         'BP':False
     }
@@ -520,9 +518,9 @@ if stability:
     q0_BP = np.ones(nz+1)
     p0_BP = np.ones(nz+1)
     inl_tmp = np.array([0])
-    inl_ext = np.kron(inl_tmp, np.ones(2*NH+1)) + \
-        np.kron(np.ones((len(inl_tmp),1)), np.arange(2*NH+1)*n)
-    ind_f = 0
+    nldofs_ext = np.kron(inl_tmp, np.ones(2*NH+1)) + \
+                 np.kron(np.ones((len(inl_tmp),1)), np.arange(2*NH+1)*n)
+    tangent_LP = [0]
 
 
 relpath = 'data/'
@@ -533,9 +531,9 @@ path = abspath + relpath
 omega2 = omega/nu
 # samme A som fra periodic calculation
 A = self.assembleA(omega2)
-while( it_cont <= it_cont_max  and
-       omega / scale_t <= omega_cont_max and
-       omega / scale_t >= omega_cont_min ):
+while(it_cont <= it_cont_max and
+      omega / scale_t <= omega_cont_max and
+      omega / scale_t >= omega_cont_min):
 
     print('[Iteration]:    {}'.format(it_cont))
 
@@ -547,7 +545,7 @@ while( it_cont <= it_cont_max  and
     if it_cont == 1:
         A_pred = np.vstack((
             np.hstack((J_z, J_w[:,None])),
-            np.ones(nz+1) ))
+            np.ones(nz+1)))
     else:
         A_pred = np.vstack((
             np.hstack((J_z, J_w[:,None])),
@@ -563,10 +561,10 @@ while( it_cont <= it_cont_max  and
     omega = omega_cont + tangent_pred[nz]
 
     point = np.append(z,omega)
-    if ( it_cont >= 4 and True and
-         ( (point  - point_prev) @ (point_prev - point_pprev) /
+    if (it_cont >= 4 and True and
+         ((point  - point_prev) @ (point_prev - point_pprev) /
            (norm(point - point_prev) * norm(point_prev-point_pprev)) <
-           np.cos(angle_max_pred)) ):# and
+           np.cos(angle_max_pred))):# and
          # (it_cont >= index_LP+1) and
          # (it_cont >= index_BP+2) ):
 
@@ -584,19 +582,20 @@ while( it_cont <= it_cont_max  and
     omega2 = omega/nu
     t = self.assemblet(omega2)
     A = self.assembleA(omega2)
-    force = sineForce(f_amp, omega, t, n, fdofs)
+    u, _ = sineForce(f_amp, omega=omega, t=t)
+    force = toMDOF(u, n, fdofs)
 
     it_NR = 1
     V = tangent
     H = self.state_sys(z, A, force)
     Obj = linalg.norm(H) / linalg.norm(z)
-    print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
+    #print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
 
     # break
 
     # TODO: consider modified NR for increased performance
     # https://stackoverflow.com/a/44710451
-    while (Obj > tol_NR ) and (it_NR <= max_it_NR):
+    while (Obj > tol_NR) and (it_NR <= max_it_NR):
         H = self.state_sys(z, A, force)
         H = np.append(H,0)
         J_z = self.hjac(z, A)
@@ -619,13 +618,13 @@ while( it_cont <= it_cont_max  and
         omega2 = omega/nu
         V = (V-dV) / norm(V-dV)
         t = self.assemblet(omega2)
-        force = sineForce(f_amp, omega, t, n, fdofs)
-
+        u, _ = sineForce(f_amp, omega=omega, t=t)
+        force = toMDOF(u, n, fdofs)
 
         A = self.assembleA(omega2)
         H = self.state_sys(z, A, force)
         Obj = linalg.norm(H) / linalg.norm(z)
-        print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
+        # print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
         it_NR = it_NR + 1
 
     if it_NR > max_it_NR:
@@ -647,12 +646,17 @@ while( it_cont <= it_cont_max  and
         G = np.vstack((
             np.hstack((J_z, J_w[:,None])),
             tangent))
-        tt_LP = tangent
+        tangent_LP.append(tangent[-1])
         # t_BP, p0_BP, q0_BP = test_func(G, p0_BP, q0_BP,'BP')
         # tt_BP = np.real(t_BP)
 
-        if detect['fold'] and it_cont > fold.idx[-1] + 1:
-            fold.detect(omega, z, A, J_z, B, ind_f, force, it_cont)
+        # Fold bifurcation is detected when tangent prediction for omega
+        # changes sign
+        if (detect['fold'] and it_cont > fold.idx[-1] + 1 and
+            tangent_LP[it_cont-1] * tangent_LP[it_cont-2] < 0):
+            B_tilde = J_z
+            fold.detect(omega, z, A, J_z, B_tilde, fdofs, nldofs_ext, force, it_cont)
+            print('## FOLD detection in progress')
         # if detect['NS'] and it_cont > idx_NS[-1] + 1:
         #     detect_NS()
         # if detect['BP'] and it_cont > idx_BP[-1] + 1:

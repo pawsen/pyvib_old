@@ -36,7 +36,7 @@ def sineSweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
     dt = 1/fs
 
     if inctype == 'log':
-        tend = np.log2(f2 / f1 ) * (60/vsweep) + t0
+        tend = np.log2(f2 / f1) * (60/vsweep) + t0
     else:
         tend = (f2 - f1) / vsweep * 60 + t0
 
@@ -56,7 +56,7 @@ def sineSweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
     if inctype == 'log':
         psi = (2*np.pi * f1*60/(np.log(2)*vsweep)) * (2**(vsweep*((t-t0)/60)) - 1)
     else:
-        psi = 2*np.pi *f1*(t-t0) + 2*np.pi*vsweep/60*(t-t0)**2 / 2
+        psi = 2*np.pi * f1*(t-t0) + 2*np.pi*vsweep/60*(t-t0)**2 / 2
 
     u = amp * np.sin(psi)
     if nrep > 1:
@@ -71,7 +71,7 @@ def sineSweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
 
 
 
-def randomPeriodic(arms, fs, f1, f2, ns, nrep=1 ):
+def randomPeriodic(arms, fs, f1, f2, ns, nrep=1):
     """Random periodic excitation
 
     Random phase multisine signal is a periodic random signal with a
@@ -103,20 +103,18 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1 ):
     R. Pintelon and J. Schoukens. System Identification: A Frequency Domain
     Approach. IEEE Press, Piscataway, NJ, 2001
     """
-
     dt = 1/fs
 
     # uniform distribution
-    u = 2*np.random.rand(ns+1) -1
+    u = 2*np.random.rand(ns+1) - 1
     u = u - np.mean(u)
 
     freq = np.linspace(0,fs, ns+1)
 
     # create desired frequency content, by modifying the phase.
     U = np.fft.fft(u)
-    U[ freq < f1] = 0
-    U[ freq > f2] = 0
-
+    U[freq < f1] = 0
+    U[freq > f2] = 0
 
     u = np.real(np.fft.ifft(U)) * (ns+1)
 
@@ -130,21 +128,20 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1 ):
     else:
         t = np.arange(0, ns+1) / fs
 
-
     rms = np.sqrt(np.mean(np.square(u)))
     u = arms * u / rms
 
     return u, t
 
 
-def sineForce(A, omega, t, n=1, fdofs=0, phi_f=0):
+def sineForce(A, f1=None, omega=None, t=None, fs=None, ns=None, phi_f=0):
     """
     Parameters
     ----------
     A: float
         Amplitude in N
-    omega: float
-        Forcing frequency in (rad/s)
+    f1: float
+        Forcing frequency in (Hz/s)
     t: ndarray
         Time array
     n: int
@@ -155,15 +152,46 @@ def sineForce(A, omega, t, n=1, fdofs=0, phi_f=0):
         Phase in degree
     """
 
-    fdofs = np.atleast_1d(np.asarray(fdofs))
-    if any(fdofs) > n-1:
-        raise ValueError('Some fdofs are greater than system size(n-1), {}>{}'.
-                         format(fdofs, n-1))
-    phi = phi_f / 180 * np.pi
+    if t is None:
+        t = np.arange(ns)/fs
+    if f1 is not None:
+        omega = f1 * 2*np.pi
 
-    f = np.zeros((n, len(t)))
+    phi = phi_f / 180 * np.pi
+    u = A * np.sin(omega*t + phi)
+
+    return u, t
+
+def toMDOF(u, ndof, fdof):
+
+    fdofs = np.atleast_1d(np.asarray(fdof))
+    if any(fdofs) > ndof-1:
+        raise ValueError('Some fdofs are greater than system size(n-1), {}>{}'.
+                         format(fdofs, ndof-1))
+
+    ns = len(u)
+    f = np.zeros((ndof, ns))
     # add force to dofs
     for dof in fdofs:
-        f[dof] = f[dof] + A * np.sin(omega*t + phi)
+        f[dof] = f[dof] + u
 
     return f
+
+#class Force():
+def force(dt, t0=0, tf=1):
+
+    ns = round((tf-t0)/dt)
+    fs = 1/dt
+    t = np.arange(ns)*dt
+
+    f1 = 1
+    A = 1
+    ndof = 1
+    fdof = 0
+    # do some force
+    # u,_ = sineSweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0)
+    # u,_ = randomPeriodic(arms, fs, f1, f2, ns, nrep=1)
+    u,_ = sineForce(A, fs, f1, ns, phi_f=0)
+    fext = toMDOF(u, ndof, fdof)
+
+    return fext

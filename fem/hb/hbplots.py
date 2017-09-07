@@ -221,7 +221,6 @@ class PointBrowser(object):
     """
 
     def __init__(self, omega_vec, z_vec, xamp_vec, dof, hb, fig, ax, lines):
-        print('0')
         self.hb = hb
         self.fig = fig
         self.ax = ax

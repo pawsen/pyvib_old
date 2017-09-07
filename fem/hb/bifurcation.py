@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
+import sys
+sys.path.insert(1, os.path.join(sys.path[0], '../..'))
+from scipy import io
+
 import numpy as np
-from scipy.linalg import solve
+from scipy.linalg import solve, svd, norm, pinv, lstsq
 from scipy import sparse
+from forcing import sineForce, toMDOF
+
+from scipy import linalg
 
 class Bifurcation():
     def __init__(self, hb, max_it_secant=10, tol_sec=1e-5):
@@ -21,7 +29,7 @@ class Fold(Bifurcation):
     def __init__(self,*args, **kwargs):
         Bifurcation.__init__(self, *args, **kwargs)
 
-    def detect(self, omega, z, A, J_z, B, ind_f, force, it_cont):
+    def detect(self, omega, z, A, J_z, B, fdofs, nldofs_ext, force, it_cont):
         """Fold bifurcation traces the lotus of the frequency response peaks
 
         At a fold bifurcation these four conditions are true:
@@ -46,39 +54,82 @@ class Fold(Bifurcation):
         fdofs = self.hb.fdofs
 
         G = J_z;
+
+        abspath='/home/paw/ownCloud/speciale/code/python/vib/'
+        relpath = 'data/'
+        path = abspath + relpath
+        mat =  io.loadmat(path + 'bif.mat')
+
+        # G = mat['G'].squeeze()
+        # A = mat['A'].squeeze()
+        # z = mat['z_it_NR'].squeeze()
+        # omega = mat['param_it_NR'].squeeze()
+        # force = mat['force'].squeeze()
+
+        B = G
+        omega2 = omega/nu
+        A = self.hb.assembleA(omega2)
+
         Gq0 = null_approx(G, 'LP2')
         Gp0 = null_approx(G.T, 'LP2')
 
         print('-----> Detecting LP bifurcation...')
-        H = state_sys(self.hb, z, A, force)
-        # really extended_state_sys
-        F_it_NR, M_ext, w = test_func(G, Gp0, Gq0, 'LP2', H)
-
+        H = self.hb.state_sys(z, A, force)
+        F_it_NR, M_ext, w = extended_state_sys(H, G, Gp0, Gq0, 'LP2')
         print('Test function = {}'.format(norm(F_it_NR) / norm(z)))
 
-        it = 1
-        while (it < max_it_secant and norm(F_it_NR)/norm(z) > tol_sec):
+        relpath = 'data/'
+        path = abspath + relpath
+        mat =  io.loadmat(path + 'J_ext.mat')
+        J_ext_mat = mat['J_ext_mat'].squeeze()
+        A_mat = mat['A_mat'].squeeze()
+        J_z_mat = mat['J_z_mat'].squeeze()
+        F_mat = mat['F_mat'].squeeze()
+        H_mat = mat['H_mat'].squeeze()
+        force_mat = mat['force_mat'].squeeze()
+        z_mat = mat['z_mat'].squeeze()
+        omega_vec = mat['omega_vec'].squeeze()
 
-            J_ext = extended_jacobian5_detect(omega, z, A, B, M_ext, w, ind_f,
-                                              'LP2')
+        it = 0
+        while (it < max_it_secant*10 and norm(F_it_NR)/norm(z) > tol_sec):
 
+            J_ext = extended_jacobian5_detect(self.hb, omega, z, A, B, M_ext, w,
+                                              fdofs, nldofs_ext, 'LP2')
+
+            #J_ext = J_ext_mat[...,it]
             #idx = np.s_[:,:nz,nz]
-            delta_NR = pinv(J_ext[:,:nz+1]) @ -F_it_NR
-            z = z + delta_NR[:nz]
-            omega = omega + delta_NR[nz+1]
+            delta_NR, *_ = lstsq(J_ext[:,:nz+1] , F_it_NR)
+            z = z - delta_NR[:nz]
+            omega = omega - delta_NR[nz]
+
+            # z = z_mat[...,it]
+            # omega = omega_vec[it]
+
             omega2 = omega / nu
-            t = assemblet(self.hb, omega2)
-            force = sineForce(f_amp, omega, t, n, fdofs)
-            A = assembleA(self.hb, omega2)
-            J_z = jac_sys(self.hb, z, A) / scale_x
+            t = self.hb.assemblet(omega2)
+            u, _ = sineForce(f_amp, omega=omega, t=t)
+            force = toMDOF(u, n, fdofs)
+            A = self.hb.assembleA(omega2)
+
+            # A = A_mat[:,:,it]
+
+            J_z = self.hb.hjac(z, A) / scale_x
+
+            # J_z = J_z_mat[:,:,it]
+            # force = force_mat[...,it]
+
             G = J_z
             Gq0 = null_approx(G, 'LP2')
             Gp0 = null_approx(G.T, 'LP2')
-            H = state_sys(self.hb, z, A, force)
-            F_it_NR, M_ext, w = test_func(G, Gp0, Gq0, 'LP2', H)
+            H = self.hb.state_sys(z, A, force)
+
+            # H = H_mat[...,it]
+
+            F_it_NR, M_ext, w = extended_state_sys(H, G, Gp0, Gq0, 'LP2')
             print('Test function = {}'.format(norm(F_it_NR)))
             it = it + 1
 
+            #import pdb; pdb.set_trace()
         if it >= max_it_secant:
             print('-----> LP bifurcation detection failed')
         else:
@@ -88,7 +139,11 @@ class Fold(Bifurcation):
             self.isbif = True
 
 
-def test_func(G, p0, q0, bif_type, f=None):
+def extended_state_sys(H, G, p0, q0, bif_type):
+
+    return _something(G, p0, q0, bif_type, H)
+
+def test_func(G, p0, q0, bif_type):
     """
     If f=None, then the test_func is returned.
     Else the extended state sys is returned.
@@ -97,15 +152,15 @@ def test_func(G, p0, q0, bif_type, f=None):
     ----------
 
     """
+    q0 = np.zeros(q0.shape)
+    q0[0] = 1
+    p0 = np.zeros(p0.shape)
+    p0[0] = 1
 
+    return _something(G, p0, q0, bif_type)
+
+def _something(G, p0, q0, bif_type, H=None):
     nG = G.shape[1]
-
-    if f is None:
-        q0 = np.zeros(q0.shape)
-        q0[0] = 1
-        p0 = np.zeros(p0.shape)
-        p0[0] = 1
-
     if bif_type == 'LP' or bif_type == 'NS':
 
         # data = np.diag(G)
@@ -135,25 +190,28 @@ def test_func(G, p0, q0, bif_type, f=None):
 
     w = wg[:nG]
     g = wg[nG]
-    if f is None:
+    if H is None:
         return g, q0, p0
 
-    f = np.append(f,g)
-    return f, M, w
+    H = np.append(H,g)
+    return H, M, w
 
 
 def null_approx(A, bif_type):
     if bif_type == 'LP2' or bif_type == 'BP':
 
-        U, s, V = linalg.svd(A, lapack_driver='gesvd')
+        U, s, V = svd(A, lapack_driver='gesvd')
         # In case of multiple occurrences of the minimum values, the indices
-        # corresponding to the first occurrence are returned.
+        # corresponding to the first occurrence is returned.
         idx = np.argmin(np.abs(s))
         eig_sm = np.abs(s[idx])
         if eig_sm > 5e-3:
-            print('The approximation of the bifurcation point has to be improved'
+            # raise ValueError('The approximation of the bifurcation point has to be improved\n'
+            #                  'The smallest eigenvalue of the matrix is {:.2e}'.format(eig_sm))
+
+            print('The approximation of the bifurcation point has to be improved\n'
                   'The smallest eigenvalue of the matrix is {:.2e}'.format(eig_sm))
-            return
+            #return
 
         # V: Unitary matrix having right singular vectors as rows.
         nullvec = V[idx]
@@ -170,45 +228,61 @@ def null_approx(A, bif_type):
 
     return nullvec
 
-def extended_jacobian5_detect(self, omega, z, A, B, M_ext, w, ind_f, bif_type):
+def extended_jacobian5_detect(self, omega, z, A, B, M_ext, w, fdofs, nldofs_ext, bif_type):
     n = self.n
     nG = M_ext.shape[1] -1
     nz = self.nz
 
-    J_z_f = jac_sys(self, A, omega, z)
-    J_w = jac_w(self, omega)
+    abspath='/home/paw/ownCloud/speciale/code/python/vib/'
+    relpath = 'data/'
+    path = abspath + relpath
+    mat =  io.loadmat(path + 'jac_detect.mat')
+
+    # z = mat['Z'].squeeze()
+    # omega = mat['omega'].squeeze()
+    # A = mat['A'].squeeze()
+    # B = mat['B_tilde_init'].squeeze()
+    # M_ext = mat['M'].squeeze()
+    # w = mat['w'].squeeze()
+    # Hess_mat = mat['Hess_mat'].squeeze()
+
+    J_z_f = self.hjac(z, A)
+    J_w = self.hjac_omega(omega, z)
     # jacobian_param2
     btronc = np.zeros(nz)
-    btronc[2*n+ind_f] += 1
+    btronc[2*n+fdofs] += 1
     J_w2 = -btronc
-    J_w_f = np.hstack((J_w, J_w2))
+    J_w_f = np.hstack((J_w[:,None], J_w2[:,None]))
 
     vh = solve(M_ext,np.append(np.zeros(nG),1))
     v = vh[:nG]
 
+    hess_mat = np.empty((nz,nz,nz))
     J_part = np.empty(nz)
     # TODO parallel loop
     for i in range(nz):
-        if i in ind_nl_ext:
+        if i in nldofs_ext:
             hess = hessian4_detect(self, omega, z, A, B, i, 'z', bif_type)
-            J_g_A =- v[:,None] @ hess * w
+            J_g_A =- v @ hess @ w
+            hess_mat[...,i] = hess
         else:
             J_g_A = 0
         J_part[i] = np.real(J_g_A)
 
     # TODO DONT pass 0!!!
     hess = hessian4_detect(self, omega, z, A, B, 0,'omega', bif_type)
-    J_g_p1 = - v[:,None] @ hess * w
+    J_g_p1 = - v @ hess @ w
 
     hess = hessian4_detect(self, omega, z, A, B, 0, 'f', bif_type)
-    J_g_p2 = - v[:,None] @ hess * w
+    J_g_p2 = - v @ hess @ w
 
-    J_part = np.append(J_part, np.real(J_g_p1), np.real(J_g_p2))
+    J_part = np.append(J_part, (np.real(J_g_p1), np.real(J_g_p2)))
 
     J = np.vstack((
         np.hstack((J_z_f, J_w_f)),
         J_part
     ))
+    #import pdb; pdb.set_trace()
     return J
 
 
@@ -224,12 +298,12 @@ def hessian4_detect(self, omega, z, A, B, idx, gtype, bif_type):
             eps = eps * abs(z_pert[idx])
 
         z_pert[idx] = z_pert[idx] + eps
-        J_z_pert = jac_sys(self, z_pert, A) / scale_x
+        J_z_pert = self.hjac(z_pert, A) / scale_x
 
         if bif_type == 'LP2':
             return (J_z_pert - B) / eps
         elif bif_type == 'BP':
-            J_w_pert = jac_w(self, omega, z_pert)
+            J_w_pert = self.hjac_omega(omega, z_pert)
             dG_dalpha = (np.vstack((np.hstack((J_z_pert, J_w_pert[:,None])),
                                    tangent_prev)) - B) / eps
             return dG_dalpha
@@ -242,13 +316,14 @@ def hessian4_detect(self, omega, z, A, B, idx, gtype, bif_type):
             eps = eps * abs(omega)
         omega_pert = omega + eps
 
-        A = assembleA(self, omega/nu)
-        J_z_pert = jac_sys(self, z_pert, A) / scale_x
+        omega2_pert = omega_pert / nu
+        A_pert = self.assembleA(omega2_pert)
+        J_z_pert = self.hjac(z, A_pert) / scale_x
 
         if bif_type == 'LP2':
             return  (J_z_pert - B ) / eps
         elif bif_type == 'BP':
-            J_w_pert = jac_w(self, omega_pert, z_pert)
+            J_w_pert = self.hjac_omega(omega_pert, z_pert)
             dG_dalpha = np.vstack((np.hstack((J_z_pert, J_w_pert[:,None])),
                                    tangent_prev))
             return dG_dalpha
