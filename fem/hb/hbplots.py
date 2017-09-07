@@ -7,14 +7,16 @@ from hbcommon import hb_signal, hb_components
 
 class Anim(object):
 
-    def __init__(self, hb, omegas, amps, omega_cont_min, omega_cont_max,
-                 dof=0):
+    def __init__(self, omegas, amps, omega_cont_min, omega_cont_max,
+                 dof=0, scale_t=1):
 
 
         self.dof = dof
-        self.scale_t = hb.scale_t
-        xx = np.asarray(omegas)/self.scale_t
+        self.scale_t = scale_t
+        xx = np.asarray(omegas)/self.scale_t / 2/np.pi
         yy = np.asarray(amps).T[dof]
+        f_min = omega_cont_min/2/np.pi
+        f_max = omega_cont_max/2/np.pi
 
         fig = plt.figure(5)
         #fig.clf()
@@ -25,15 +27,19 @@ class Anim(object):
         ax.set_title('Nonlinear FRF')
         ax.set_xlabel('Frequency (Hz)')
         ax.set_ylabel('Amplitude (m)')
-        ax.set_xlim((omega_cont_min/2/np.pi, omega_cont_max/2/np.pi))
+        ax.set_xlim((f_min, f_max))
         ax.set_ylim((0,np.max(yy)*1.5))
         ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+
+        plt.show(False)
+        #plt.draw()
+
         fig.canvas.draw()
 
         # cache the background
         self.background = fig.canvas.copy_from_bbox(ax.bbox)
-        self.points = ax.plot(xx/2/np.pi, yy, '-')[0]
-        self.cur_point = ax.plot(xx[-1]/2/np.pi, yy[-1], 'o')[0]
+        self.points = ax.plot(xx, yy, '-')[0]
+        self.cur_point = ax.plot(xx[-1], yy[-1], 'o')[0]
         self.ax = ax
         self.fig = fig
         # return (fig, ax, background, points, cur_point)
@@ -44,10 +50,10 @@ class Anim(object):
         ax = self.ax
         fig = self.fig
 
-        xx = np.asarray(x)/self.scale_t
+        xx = np.asarray(x)/self.scale_t / 2/np.pi
         yy = np.asarray(y).T[dof]
-        self.points.set_data(xx/2/np.pi, yy)
-        self.cur_point.set_data(xx[-1]/2/np.pi, yy[-1])
+        self.points.set_data(xx, yy)
+        self.cur_point.set_data(xx[-1], yy[-1])
 
         # recompute the ax.dataLim
         #ax.relim()
@@ -220,16 +226,19 @@ class PointBrowser(object):
     https://matplotlib.org/examples/event_handling/data_browser.html
     """
 
-    def __init__(self, omega_vec, z_vec, xamp_vec, dof, hb, fig, ax, lines):
+    def __init__(self, hb, dof, fig, ax, lines):
+
+        omega_vec = np.asarray(hb.omega_vec)/hb.scale_t / 2/np.pi
+        xamp_vec = np.asarray(hb.xamp_vec).T[dof]
+
         self.hb = hb
         self.fig = fig
         self.ax = ax
         self.omega_vec = omega_vec
-        self.z_vec = z_vec
+        self.z_vec = hb.z_vec
         self.xamp_vec = xamp_vec
         self.dof = dof
         self.lines = lines
-
         self.lastind = 0
         self.selected, = self.ax.plot([self.omega_vec[0]], [self.xamp_vec[0]],
                                       'o', ms=12, alpha=0.4, color='yellow',
@@ -311,11 +320,10 @@ class PointBrowser(object):
         self.fig_hb.canvas.draw()
 
 
-def nonlin_frf(hb, omega_vec, z_vec, xamp_vec, stab_vec, dof=0):
+def nonlin_frf(hb, dof=0):
 
-    scale_t = hb.scale_t
-    omega_vec = np.asarray(omega_vec)/scale_t / 2 / np.pi
-    xamp_vec = np.asarray(xamp_vec).T[dof]
+    omega_vec = np.asarray(hb.omega_vec)/hb.scale_t / 2/np.pi
+    xamp_vec = np.asarray(hb.xamp_vec).T[dof]
 
 
     fig, ax = plt.subplots()
@@ -325,7 +333,7 @@ def nonlin_frf(hb, omega_vec, z_vec, xamp_vec, stab_vec, dof=0):
     ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
 
     # picker: 5 points tolerance
-    stab_vec = np.array(stab_vec)
+    stab_vec = np.array(hb.stab_vec)
     idx1 = ~stab_vec
     idx2 = stab_vec
     lines = ax.plot(np.ma.masked_where(idx1, omega_vec),
@@ -334,7 +342,7 @@ def nonlin_frf(hb, omega_vec, z_vec, xamp_vec, stab_vec, dof=0):
                     np.ma.masked_where(idx2, xamp_vec), '--ok',
                     ms=1, picker=5)
 
-    browser = PointBrowser(omega_vec, z_vec, xamp_vec, dof, hb, fig, ax, lines)
+    browser = PointBrowser(hb, dof, fig, ax, lines)
 
     fig.canvas.mpl_connect('pick_event', browser.onpick)
     fig.canvas.mpl_connect('key_press_event', browser.onpress)
@@ -342,5 +350,3 @@ def nonlin_frf(hb, omega_vec, z_vec, xamp_vec, stab_vec, dof=0):
     plt.show()
 
     return fig, ax
-
-#nonlin_frf(self,omega_vec, z_vec, xamp_vec)

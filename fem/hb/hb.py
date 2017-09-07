@@ -16,7 +16,6 @@ from forcing import sineForce, toMDOF
 from hbplots import Anim, nonlin_frf
 from hbcommon import fft_coeff, ifft_coeff, hb_signal, hb_components
 from stability import Hills
-from nlforce import NL_force, NL_polynomial
 from bifurcation import Fold
 
 class HB():
@@ -64,6 +63,7 @@ class HB():
         self.z_vec = []
         self.xamp_vec = []
         self.omega_vec = []
+        self.step_vec = []
         self.stab_vec = []
         self.lamb_vec = []
 
@@ -154,7 +154,7 @@ class HB():
             zsol, *_ = lstsq(H_z,H)
             z = z - zsol
 
-            Obj = linalg.norm(H) / (eps + linalg.norm(z))
+            Obj = linalg.norm(H) / linalg.norm(z)
             print('It. {} - Convergence test: {:e} ({:e})'.
                   format(it_NR, Obj, tol_NR))
             it_NR = it_NR + 1
@@ -166,6 +166,8 @@ class HB():
 
         if stability:
             B, stab = hills.stability(omega, H_z)
+            self.stab_vec.append(stab)
+            self.lamb_vec.append(B)
 
         # amplitude of hb components
         c, cnorm, phi = hb_components(scale_x*z, n, NH)
@@ -175,31 +177,239 @@ class HB():
         self.z_vec.append(z)
         self.xamp_vec.append(xamp)
         self.omega_vec.append(omega)
-        self.stab_vec.append(stab)
-        self.lamb_vec.append(B)
 
-        return omega, z, stab, B
+        if stability:
+            return omega, z, stab, B
+        else:
+            return omega, z
 
-    def continuation(self, omega_min, omega_max,
+    def continuation(self, omega_cont_min, omega_cont_max,
                      step=0.1,step_min=0.1, step_max=20, cont_dir=1,
                      opt_it_NR=3, it_cont_max=1e4, adaptive_stepsize=True,
-                     angle_max_pred=90):
+                     angle_max_pred=90, dof=0):
         """ Do continuation of periodic solution.
 
         Based on tangent prediction and Moore-Penrose correction.
         """
-        z = self.z
-        omega = self.omega
+        z = self.z_vec[-1]
+        omega = self.omega_vec[-1]
+
         scale_x = self.scale_x
-        scale_y = self.scale_y
+        scale_t = self.scale_t
+        nu = self.nu
         n = self.n
+        f0 = self.f0
+        f_amp = self.f_amp
+        fdofs = self.fdofs
+
+        tol_NR = self.tol_NR
+        max_it_NR = self.max_it_NR
         NH = self.NH
+        nz = self.nz
+        stability = self.stability
 
         step_min = step_min * scale_t
         step_max = step_max * scale_t
-        omega_min = omega_min*2*np.pi
-        omega_max = omega_max*2*np.pi
+        # omega_cont_min = omega_cont_min*2*np.pi
+        # omega_cont_max = omega_cont_max*2*np.pi
         angle_max_pred = angle_max_pred*np.pi/180
+        self.step_vec.append(step)
+
+        anim = Anim(self.omega_vec, self.xamp_vec, omega_cont_min,
+                    omega_cont_max, dof=dof, scale_t=scale_t)
+
+        print('\n-------------------------------------------')
+        print('|  Continuation of the periodic solution  |')
+        print('-------------------------------------------\n')
+
+        if stability:
+            detect = {
+                'fold':False,
+                'NS':False,
+                'BP':False
+            }
+            fold = Fold(self, max_it_secant=10, tol_sec=1e-5)
+            q0_BP = np.ones(nz+1)
+            p0_BP = np.ones(nz+1)
+            inl_tmp = np.array([0])
+            nldofs_ext = np.kron(inl_tmp, np.ones(2*NH+1)) + \
+                         np.kron(np.ones((len(inl_tmp),1)), np.arange(2*NH+1)*n)
+            tangent_LP = [0]
+
+
+        abspath = '/home/paw/ownCloud/speciale/code/python/vib/'
+        relpath = 'data/'
+        path = abspath + relpath
+        #mat =  io.loadmat(path + 'hb.mat')
+
+        omega2 = omega/nu
+        # samme A som fra periodic calculation
+        A = self.assembleA(omega2)
+
+        it_cont = 1
+        z_cont = z
+        omega_cont = omega
+        point_prev = 0
+        point_pprev = 0
+        branch_switch = False
+        idx_BP = [0]
+        idx_LP2 = [0]
+        idx_NS = [0]
+        while(it_cont <= it_cont_max and
+              omega / scale_t <= omega_cont_max and
+              omega / scale_t >= omega_cont_min):
+
+            print('[Iteration]:    {}'.format(it_cont))
+
+            ## Predictor step
+            J_z = self.hjac(z, A)
+            J_w = self.hjac_omega(omega, z)
+
+            # Assemble A from eq. 31
+            if it_cont == 1:
+                A_pred = np.vstack((
+                    np.hstack((J_z, J_w[:,None])),
+                    np.ones(nz+1)))
+            else:
+                A_pred = np.vstack((
+                    np.hstack((J_z, J_w[:,None])),
+                    tangent))
+
+            # Tangent vector at iteration point, eq. 31 (search direction)
+            # tangent = [z, omega].T
+            tangent = linalg.solve(A_pred, np.append(np.zeros(nz),1) )
+            tangent = tangent/linalg.norm(tangent)
+            tangent_pred = cont_dir * step * tangent
+
+            z = z_cont + tangent_pred[:nz]
+            omega = omega_cont + tangent_pred[nz]
+
+            point = np.append(z,omega)
+            if (it_cont >= 4 and True and
+                 ((point  - point_prev) @ (point_prev - point_pprev) /
+                   (norm(point - point_prev) * norm(point_prev-point_pprev)) <
+                   np.cos(angle_max_pred))):# and
+                 # (it_cont >= index_LP+1) and
+                 # (it_cont >= index_BP+2) ):
+
+                tangent_pred = -tangent_pred
+                z = z_cont + tangent_pred[:nz]
+                omega = omega_cont + tangent_pred[nz]
+                point = np.append(z,omega)
+                print('| Max angle reached. Predictor tangent is reversed. |')
+
+            if branch_switch:
+                pass
+
+            ## Corrector step. NR iterations
+            # Follow eqs. 31-34
+            omega2 = omega/nu
+            t = self.assemblet(omega2)
+            A = self.assembleA(omega2)
+            u, _ = sineForce(f_amp, omega=omega, t=t)
+            force = toMDOF(u, n, fdofs)
+
+            it_NR = 1
+            V = tangent
+            H = self.state_sys(z, A, force)
+            Obj = linalg.norm(H) / linalg.norm(z)
+            #print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
+
+            # break
+
+            # TODO: consider modified NR for increased performance
+            # https://stackoverflow.com/a/44710451
+            while (Obj > tol_NR) and (it_NR <= max_it_NR):
+                H = self.state_sys(z, A, force)
+                H = np.append(H,0)
+                J_z = self.hjac(z, A)
+                J_w = self.hjac_omega(omega, z)
+                Hx = np.vstack((
+                    np.hstack((J_z, J_w[:,None])),
+                    V))
+                R = np.append(np.hstack((J_z, J_w[:,None])) @ V, 0)
+
+                dNR = solve(Hx, H)
+                dV = solve(Hx,R)
+                #lu, piv = linalg.lu_factor(Hx)
+                #dNR = linalg.lu_solve((lu, piv), H)
+                #dV = linalg.lu_solve((lu, piv), R)
+
+                dz = dNR[:nz]
+                domega = dNR[nz]
+                z = z - dz
+                omega = omega - domega
+                omega2 = omega/nu
+                V = (V-dV) / norm(V-dV)
+                t = self.assemblet(omega2)
+                u, _ = sineForce(f_amp, omega=omega, t=t)
+                force = toMDOF(u, n, fdofs)
+
+                A = self.assembleA(omega2)
+                H = self.state_sys(z, A, force)
+                Obj = linalg.norm(H) / linalg.norm(z)
+                # print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
+                it_NR = it_NR + 1
+
+            if it_NR > max_it_NR:
+                z = z_cont
+                omega = omega_cont
+                step = step / 10
+                print('The maximum number of iterations is reached without convergence.'
+                      'Step size decreased by factor 10: {:0.2f}'.format(step))
+                continue
+
+            if stability:
+                if it_NR == 1:
+                    J_z = self.hjac(z, A)
+                B, stab = self.hills.stability(omega, J_z)
+                self.lamb_vec.append(B)
+                self.stab_vec.append(stab)
+
+            if stability and it_cont > 1 and it_cont > idx_BP[-1] + 1:
+                G = np.vstack((
+                    np.hstack((J_z, J_w[:,None])),
+                    tangent))
+                tangent_LP.append(tangent[-1])
+                # t_BP, p0_BP, q0_BP = test_func(G, p0_BP, q0_BP,'BP')
+                # tt_BP = np.real(t_BP)
+
+                # Fold bifurcation is detected when tangent prediction for omega
+                # changes sign
+                if (detect['fold'] and it_cont > fold.idx[-1] + 1 and
+                    tangent_LP[it_cont-1] * tangent_LP[it_cont-2] < 0):
+                    B_tilde = J_z
+                    fold.detect(omega, z, A, J_z, B_tilde, fdofs, nldofs_ext, force, it_cont)
+                    print('## FOLD detection in progress')
+                # if detect['NS'] and it_cont > idx_NS[-1] + 1:
+                #     detect_NS()
+                # if detect['BP'] and it_cont > idx_BP[-1] + 1:
+                #     detect_bp()
+
+
+            z_cont = z
+            omega_cont = omega
+            point_pprev = point_prev
+            point_prev = point
+            c, phi, _ = hb_components(scale_x*z, n, NH)
+            x = hb_signal(omega, t, c, phi)
+            xamp = np.max(x, axis=1)
+            self.xamp_vec.append(xamp)
+            self.omega_vec.append(omega)
+            self.step_vec.append(step)
+            self.z_vec.append(z)
+
+            print(' NR: {}\tFreq: {:f}\tAmp: {:0.3e}\tStep: {:0.2f}\tStable: {}'.
+                  format(it_NR-1, omega/2/np.pi / scale_t, xamp[dof], step, stab))
+
+            if adaptive_stepsize:
+                step = step * opt_it_NR/it_NR
+                step = min(step_max, step)
+                step = max(step_min, step)
+
+
+            anim.update(self.omega_vec,self.xamp_vec)
+            it_cont += 1
 
     def state_sys(self, z, A, force):
         """Calculate the system matrix h(z,ω) = A(ω)z - b(z), given by eq. (21).
@@ -251,7 +461,7 @@ class HB():
         scale_x = self.scale_x
         mat_func_form_sparse = self.mat_func_form_sparse
 
-        if inl.size == 0:
+        if len(self.nonlin.nls) == 0:
             return A
         else:
             x = ifft_coeff(z, n, nt, NH)
@@ -343,352 +553,3 @@ class HB():
 
         return t, omegap, zp, cnorm, (c, phi), (cd, phid), (cdd, phidd)
 
-M0 = 1
-C0 = 0.02
-K0 = 1
-M0, C0, K0 = np.atleast_2d(M0,C0,K0)
-f_amp = 0.1
-f0 = 1e-3
-fdofs = 0
-
-inl = np.array([[0,-1]])
-enl = np.array([3])
-knl = np.array([1])
-
-par_hb ={
-    'NH': 3,
-    'npow2': 8,
-    'nu': 1,
-    'stability': True,
-    'rcm_permute': False,
-    'tol_NR': 1e-6,
-    'max_it_NR': 15,
-    'scale_x': 1,
-    'scale_t': 1,
-    'amp0':1e-4
-}
-par_cont = {
-    'omega_cont_min': 1e-5*2*np.pi,
-    'omega_cont_max': 1*2*np.pi,
-    'cont_dir': 1,
-    'opt_it_NR': 3,
-    'step': 0.001,
-    'step_min': 0.001,
-    'step_max': 0.1,
-    'angle_max_pred': 90,
-    'it_cont_max': 1e6,
-    'adaptive_stepsize': True
-}
-
-
-abspath='/home/paw/ownCloud/speciale/code/python/vib/'
-relpath = 'data/T05_Data/'
-path = abspath + relpath
-mat =  io.loadmat(path + 'NLBeam.mat')
-# M0 = mat['M']
-# C0 = mat['C']
-# K0 = mat['K']
-
-## Force parameters
-# location of harmonic force
-# fdofs = 7
-# f_amp = 3
-# # Excitation frequency. lowest sine freq in Hz
-# f0 = 25
-# par_hb ={
-#     'NH': 5,
-#     'npow2': 9,
-#     'nu': 1,
-#     'stability': True,
-#     'rcm_permute': False,
-#     'tol_NR': 1e-6,
-#     'max_it_NR': 15,
-#     'scale_x': 5e-6, # == 5e-12
-#     'scale_t': 3000
-# }
-
-# par_cont = {
-#     'omega_cont_min': 25*2*np.pi,
-#     'omega_cont_max': 40*2*np.pi,
-#     'cont_dir': 1,
-#     'opt_it_NR': 3,
-#     'step': 0.1,
-#     'step_min': 0.1,
-#     'step_max': 20,
-#     'angle_max_pred': 90,
-#     'it_cont_max': 1e4,
-#     'adaptive_stepsize': True
-# }
-
-# inl = np.array([[27,-1], [27,-1]])
-# # inl = np.array([])
-# enl = np.array([3,2])
-# knl = np.array([8e9,-1.05e7])
-
-
-nl_pol = NL_polynomial(inl, enl, knl)
-nl = NL_force()
-nl.add(nl_pol)
-# machine precision for float
-eps = np.finfo(float).eps
-
-
-hb = HB(M0,C0,K0,nl, **par_hb)
-omega, z, stab, B = hb.periodic(f0, f_amp, fdofs)
-tp, omegap, zp, cnorm, c, cd, cdd = hb.get_components()
-
-#hb.continuation(,**par_cont)
-
-import matplotlib.pyplot as plt
-plt.ion()
-dof = 0
-plot = False
-if plot:
-    plots(tp, omegap, cnorm, c, cd, cdd, dof, B, inl, gtype='displ', savefig=False)
-
-
-#!!! CONT !!!#
-
-self = hb
-f0 = self.f0
-f_amp = self.f_amp
-fdofs = self.fdofs
-nu = self.nu
-NH = self.NH
-n = self.n
-nz = self.nz
-scale_x = self.scale_x
-scale_t = self.scale_t
-amp0 = self.amp0
-stability = self.stability
-tol_NR = self.tol_NR
-max_it_NR = self.max_it_NR
-
-omega_cont_min = par_cont['omega_cont_min']
-omega_cont_max = par_cont['omega_cont_max']
-cont_dir = par_cont['cont_dir']
-opt_it_NR = par_cont['opt_it_NR']
-step = par_cont['step']
-step_min = par_cont['step_min']
-step_max = par_cont['step_max']
-angle_max_pred = par_cont['angle_max_pred']
-it_cont_max = par_cont['it_cont_max']
-adaptive_stepsize = par_cont['adaptive_stepsize']
-
-xamp_vec =[]
-omega_vec = []
-z_vec = []
-stab_vec = []
-lamb_vec = []
-step_vec = []
-
-omega2 = omega/nu
-t = hb.assemblet(omega2)
-x = hb_signal(omega, t, *c)
-xamp = np.max(x, axis=1)
-xamp_vec.append(xamp)
-omega_vec.append(omega)
-stab_vec.append(stab)
-lamb_vec.append(B)
-z_vec.append(z)
-
-anim = Anim(hb, omega_vec, xamp_vec, omega_cont_min, omega_cont_max)
-
-print('\n-------------------------------------------')
-print('|  Continuation of the periodic solution  |')
-print('-------------------------------------------\n')
-
-it_cont = 1
-z_cont = z
-omega_cont = omega
-point_prev = 0
-point_pprev = 0
-branch_switch = False
-idx_BP = [0]
-idx_LP2 = [0]
-idx_NS = [0]
-
-if stability:
-    detect = {
-        'fold':False,
-        'NS':False,
-        'BP':False
-    }
-    fold = Fold(self, max_it_secant=10, tol_sec=1e-5)
-    q0_BP = np.ones(nz+1)
-    p0_BP = np.ones(nz+1)
-    inl_tmp = np.array([0])
-    nldofs_ext = np.kron(inl_tmp, np.ones(2*NH+1)) + \
-                 np.kron(np.ones((len(inl_tmp),1)), np.arange(2*NH+1)*n)
-    tangent_LP = [0]
-
-
-relpath = 'data/'
-path = abspath + relpath
-#mat =  io.loadmat(path + 'hb.mat')
-
-
-omega2 = omega/nu
-# samme A som fra periodic calculation
-A = self.assembleA(omega2)
-while(it_cont <= it_cont_max and
-      omega / scale_t <= omega_cont_max and
-      omega / scale_t >= omega_cont_min):
-
-    print('[Iteration]:    {}'.format(it_cont))
-
-    ## Predictor step
-    J_z = self.hjac(z, A)
-    J_w = self.hjac_omega(omega, z)
-
-    # Assemble A from eq. 31
-    if it_cont == 1:
-        A_pred = np.vstack((
-            np.hstack((J_z, J_w[:,None])),
-            np.ones(nz+1)))
-    else:
-        A_pred = np.vstack((
-            np.hstack((J_z, J_w[:,None])),
-            tangent))
-
-    # Tangent vector at iteration point, eq. 31 (search direction)
-    # tangent = [z, omega].T
-    tangent = linalg.solve(A_pred, np.append(np.zeros(nz),1) )
-    tangent = tangent/linalg.norm(tangent)
-    tangent_pred = cont_dir * step * tangent
-
-    z = z_cont + tangent_pred[:nz]
-    omega = omega_cont + tangent_pred[nz]
-
-    point = np.append(z,omega)
-    if (it_cont >= 4 and True and
-         ((point  - point_prev) @ (point_prev - point_pprev) /
-           (norm(point - point_prev) * norm(point_prev-point_pprev)) <
-           np.cos(angle_max_pred))):# and
-         # (it_cont >= index_LP+1) and
-         # (it_cont >= index_BP+2) ):
-
-        tangent_pred = -tangent_pred
-        z = z_cont + tangent_pred[:nz]
-        omega = omega_cont + tangent_pred[nz]
-        point = np.append(z,omega)
-        print('| Max angle reached. Predictor tangent is reversed. |')
-
-    if branch_switch:
-        pass
-
-    ## Corrector step. NR iterations
-    # Follow eqs. 31-34
-    omega2 = omega/nu
-    t = self.assemblet(omega2)
-    A = self.assembleA(omega2)
-    u, _ = sineForce(f_amp, omega=omega, t=t)
-    force = toMDOF(u, n, fdofs)
-
-    it_NR = 1
-    V = tangent
-    H = self.state_sys(z, A, force)
-    Obj = linalg.norm(H) / linalg.norm(z)
-    #print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
-
-    # break
-
-    # TODO: consider modified NR for increased performance
-    # https://stackoverflow.com/a/44710451
-    while (Obj > tol_NR) and (it_NR <= max_it_NR):
-        H = self.state_sys(z, A, force)
-        H = np.append(H,0)
-        J_z = self.hjac(z, A)
-        J_w = self.hjac_omega(omega, z)
-        Hx = np.vstack((
-            np.hstack((J_z, J_w[:,None])),
-            V))
-        R = np.append(np.hstack((J_z, J_w[:,None])) @ V, 0)
-
-        dNR = solve(Hx, H)
-        dV = solve(Hx,R)
-        #lu, piv = linalg.lu_factor(Hx)
-        #dNR = linalg.lu_solve((lu, piv), H)
-        #dV = linalg.lu_solve((lu, piv), R)
-
-        dz = dNR[:nz]
-        domega = dNR[nz]
-        z = z - dz
-        omega = omega - domega
-        omega2 = omega/nu
-        V = (V-dV) / norm(V-dV)
-        t = self.assemblet(omega2)
-        u, _ = sineForce(f_amp, omega=omega, t=t)
-        force = toMDOF(u, n, fdofs)
-
-        A = self.assembleA(omega2)
-        H = self.state_sys(z, A, force)
-        Obj = linalg.norm(H) / linalg.norm(z)
-        # print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
-        it_NR = it_NR + 1
-
-    if it_NR > max_it_NR:
-        z = z_cont
-        omega = omega_cont
-        step = step / 10
-        print('The maximum number of iterations is reached without convergence.'
-              'Step size decreased by factor 10: {:0.2f}'.format(step))
-        continue
-
-    if stability:
-        if it_NR == 1:
-            J_z = self.hjac(z, A)
-        B, stab = self.hills.stability(omega, J_z)
-        lamb_vec.append(B)
-        stab_vec.append(stab)
-
-    if stability and it_cont > 1 and it_cont > idx_BP[-1] + 1:
-        G = np.vstack((
-            np.hstack((J_z, J_w[:,None])),
-            tangent))
-        tangent_LP.append(tangent[-1])
-        # t_BP, p0_BP, q0_BP = test_func(G, p0_BP, q0_BP,'BP')
-        # tt_BP = np.real(t_BP)
-
-        # Fold bifurcation is detected when tangent prediction for omega
-        # changes sign
-        if (detect['fold'] and it_cont > fold.idx[-1] + 1 and
-            tangent_LP[it_cont-1] * tangent_LP[it_cont-2] < 0):
-            B_tilde = J_z
-            fold.detect(omega, z, A, J_z, B_tilde, fdofs, nldofs_ext, force, it_cont)
-            print('## FOLD detection in progress')
-        # if detect['NS'] and it_cont > idx_NS[-1] + 1:
-        #     detect_NS()
-        # if detect['BP'] and it_cont > idx_BP[-1] + 1:
-        #     detect_bp()
-
-
-    z_cont = z
-    omega_cont = omega
-    point_pprev = point_prev
-    point_prev = point
-    c, phi, _ = hb_components(scale_x*z, n, NH)
-    x = hb_signal(omega, t, c, phi)
-    xamp = np.max(x, axis=1)
-    xamp_vec.append(xamp)
-    omega_vec.append(omega)
-    step_vec.append(step)
-    z_vec.append(z)
-
-    dof = 0
-    print(' NR: {}\tFreq: {:f}\tAmp: {:0.3e}\tStep: {:0.2f}\tStable: {}'.
-          format(it_NR-1, omega/2/np.pi / scale_t, xamp[dof], step, stab))
-
-    if adaptive_stepsize:
-        step = step * opt_it_NR/it_NR
-        step = min(step_max, step)
-        step = max(step_min, step)
-
-
-    anim.update(omega_vec,xamp_vec)
-    it_cont += 1
-
-
-
-plt.ioff()
-nonlin_frf(hb, omega_vec, z_vec, xamp_vec, stab_vec)
