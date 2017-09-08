@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
+from scipy.linalg import eig, norm
 
 class color:
     PURPLE = '\033[95m'
@@ -76,6 +77,17 @@ def meanVar(Y):
 
     return Ymean, W
 
+def undamp_modal_properties(M,K):
+    """Calculate undamped modal properties"""
+    egval, egvec = eig(K,b=M)
+    egval = np.real(egval)
+    idx = np.argsort(egval)
+    w = egval[idx]
+    f = w / (2*np.pi)
+    X = egvec[idx]
+
+    return w, f, X
+
 def modal_properties(A, C=None):
     """Calculate eigenvalues and modes from A and C
 
@@ -99,8 +111,7 @@ def modal_properties(A, C=None):
         Keys are the names written above.
     """
     from copy import deepcopy
-    from scipy import linalg
-    egval, egvec = linalg.eig(A)
+    egval, egvec = eig(A)
     lda = egval
     # throw away very small values
     idx1 = np.where(np.imag(lda) > 1e-8)
@@ -128,7 +139,7 @@ def modal_properties(A, C=None):
     # normalize realmode
     nmodes = realmode.shape[0]
     for i in range(nmodes):
-        realmode[i] = realmode[i] / linalg.norm(realmode[i])
+        realmode[i] = realmode[i] / norm(realmode[i])
         if realmode[i,0] < 0:
             realmode[i] =  -realmode[i]
 
@@ -162,7 +173,7 @@ def ModalAC(M1, M2):
     for i in range(nmodes1):
         for j in range(nmodes2):
             num = M1[i].dot(M2[j])
-            den = linalg.norm(M1[i]) * linalg.norm(M2[j])
+            den = norm(M1[i]) * norm(M2[j])
             MAC[i,j] = (num/den)**2
 
     return MAC

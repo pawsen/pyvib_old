@@ -170,6 +170,7 @@ class NL_polynomial(_NL_compute):
                 idx = np.where(x12 < 0)
                 df12[idx] = -df12[idx]
 
+            #import pdb; pdb.set_trace()
             # add the nonlinear force to the right dofs
             dfnl[idx1, idx1::ndof+1] += df12
             dfnl[idx2, idx1::ndof+1] -= df12
@@ -205,7 +206,8 @@ class NL_polynomial(_NL_compute):
             e12 = self.knl[j] / (self.enl[j]+1) * abs(x12)**(self.enl[j]+1)
             # TODO there should be more to this if-statement
             if x12 < 0:
-                e12 = 0
+                pass
+                #e12 = 0
             energy += e12
         return energy
 
