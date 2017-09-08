@@ -90,14 +90,12 @@ def newmark_beta_nl(M, C, K, x0, xd0, dt, fext, nonlin, sensitivity=False,
     xdd[0] = solve(M, fext[0] - fl - fnl)
 
     if sensitivity:
-        V = np.append(np.eye(ndof), np.zeros((ndof, ndof)))
-        dV = np.append(np.zeros((ndof, ndof)), np.eye(ndof))
+        V = np.hstack((np.eye(ndof), np.zeros((ndof, ndof))))
+        dV = np.hstack((np.zeros((ndof, ndof)), np.eye(ndof)))
         dfnl = nonlin.dforce(x[0], xd[0], is_force=True)
         dfnl_d = nonlin.dforce(x[0], xd[0], is_force=False)
-        rhs = -(C + dfnl_d) * dV - (K + dfnl) * V
+        rhs = -(C + dfnl_d) @ dV - (K + dfnl) @ V
         ddV = solve(M, rhs)
-        V = V + dt**2 * beta * ddV
-        dV = dV + dt * gamma * ddV
 
     # time stepping
     for j in range(1, ns):
@@ -131,7 +129,7 @@ def newmark_beta_nl(M, C, K, x0, xd0, dt, fext, nonlin, sensitivity=False,
             dfnl_d = nonlin.dforce(x[j], xd[j], is_force=False)
 
             Seff = dfnl + dfnl_d * B2 + S_lin
-            dx = -linalg.solve(Seff, res)
+            dx = - solve(Seff, res)
             xdd[j] += A2 * dx
             xd[j] += B2 * dx
             x[j] += dx
@@ -140,28 +138,25 @@ def newmark_beta_nl(M, C, K, x0, xd0, dt, fext, nonlin, sensitivity=False,
             fnl = nonlin.force(x[j], xd[j])
             res = M @ xdd[j] + fl + fnl - fext[j]
 
-            if sensitivity:
-                dfnl = nonlin.dforce(x[j], xd[j], is_force=True)
-                dfnl_d = nonlin.dforce(x[j], xd[j], is_force=False)
-                V = V + dt * dV + (0.5 - beta) * dt**2 * ddV
-                dV = dV + (1 - gamma) * dt * ddV
-                S = dfnl + S_lin + gamma / beta / dt * dfnl_d
-                S = dt**2 * beta * S
-                rhs = -(C + dfnl_d) @ dV - (K + dfnl) @ V
-                ddV = solve(S, rhs)
-                V = V + dt**2 * beta * ddV
-                dV = dV + dt * gamma * ddV
-
-
             it += 1
             #print("j: {}, i: {}, delta_x: {}, res: {}, xd_norm: {}".
             #      format(j,i,delta_x,res_norm,delta_x_norm))
 
         if it == itmax:
             raise ValueError('Max iteration reached')
-
+        if sensitivity:
+            dfnl = nonlin.dforce(x[j], xd[j], is_force=True)
+            dfnl_d = nonlin.dforce(x[j], xd[j], is_force=False)
+            V = V + dt*dV + (1/2 - beta) * dt**2 * ddV
+            dV = dV + (1 - gamma) * dt * ddV
+            S = dfnl + S_lin + gamma/beta/dt * dfnl_d
+            S = dt**2 * beta * S
+            rhs = -(C + dfnl_d) @ dV - (K + dfnl) @ V
+            ddV = solve(S, rhs)
+            V = V + dt**2 * beta * ddV
+            dV = dV + dt * gamma * ddV
     if sensitivity:
-        return x.T, xd.T, xdd.T, np.vstack((V, dV))  # V, dV
+        return x.T, xd.T, xdd.T, np.vstack((V, dV))
     else:
         return x.T, xd.T, xdd.T
 
