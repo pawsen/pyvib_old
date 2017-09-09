@@ -9,10 +9,8 @@ from scipy import io
 import os
 import sys
 sys.path.insert(1, os.path.join(sys.path[0], '../'))
-# from nnm_plot import Anim
+from nnm_plot import Anim
 from newmark import Newmark
-from forcing import sineForce, toMDOF
-from nlforce import NL_force, NL_polynomial
 from common import undamp_modal_properties
 
 def force(A, f, ndof, fdof):
@@ -28,7 +26,7 @@ def force(A, f, ndof, fdof):
     return wrapped_func
 
 
-def shooting_depvitfix(self, x0, omega, indcont):
+def shooting_periodic(self, x0, omega, indcont):
 
     T = 2*np.pi / omega
     if T <= 0:
@@ -254,194 +252,174 @@ class NNM():
         self.sensitivity = True
 
         self.nppp = 360
+        self.PhiT = []
 
         self.newmark = Newmark(M, C, K, nonlin)
 
-M = 1
-C = 0
-K = 1
-k1 = 1
 
-inl = np.array([[0,-1]])
-enl = np.array([3])
-knl = np.array([k1])
-inl = np.atleast_2d(inl)
-nl_pol = NL_polynomial(inl, enl, knl)
-nl = NL_force()
-nl.add(nl_pol)
+    def periodic(self):
+        """Find periodic solution using the shooting technique.
 
-M, C, K = np.atleast_2d(M, C, K)
+        """
 
-par_nnm = {
-    'omega_min': 1e-5*2*np.pi,
-    'omega_max': 0.5*2*np.pi,
-    'opt_it_NR': 3,
-    'max_it_NR': 15,
-    'tol_NR': 1e-6,
-    'step': 0.01,
-    'step_min': 1e-6,
-    'step_max': 1,
-    'scale': 1e-4,
-    'angle_max_beta': 90,
-    'adaptive_stepsize': True,
-    'mode':0
-}
+        ndof = self.ndof
+        # mode shape estimate
+        w0, f0, X0 = undamp_modal_properties(self.M, self.K)
+        w0 = w0[self.mode]
+        X0 = X0[:,self.mode]
+        Xnorm = X0/norm(X0)
+        scale_alpha = np.sqrt(2*self.scale / (Xnorm @ self.K @ Xnorm))
+        # initial state
+        X0 = np.append(scale_alpha*Xnorm, np.zeros(ndof))
+        if w0 == 0:
+            w0 = 1e-3
 
-nnm = NNM(M, C, K, nl, **par_nnm)
-self = nnm
+        n = len(X0)
+        indcont = np.arange(ndof)
+        X0, w, XT, PhiT, ampl, cvg = shooting_periodic(self, X0, w0, indcont)
+        XT = X0.copy()
 
-h = self.h
-ndof = self.ndof
-# mode shape estimate
-w0, f0, X0 = undamp_modal_properties(M,K)
-w0 = w0[self.mode]
-X0 = X0[:,self.mode]
-Xnorm = X0/norm(X0)
-scale_alpha = np.sqrt(2*self.scale / (Xnorm @ K @ Xnorm))
-# initial state
-X0 = np.append(scale_alpha*Xnorm, np.zeros(ndof))
-if w0 == 0:
-    w0 = 1e-3
+        if cvg is False:
+            raise ValueError('Continuation is impossible: non convergent at first'
+                             'iteration, use a better initial guess.')
+        self.PhiT = PhiT
+        append_sol(self, X0, ampl, w, beta=0, predict=np.zeros(n+1), PhiT=PhiT)
+        print('Frequency: {:g} Hz\t\tEnergy: {:0.3e}'.format(w/2/np.pi, self.energy_vec[-1]))
 
-n = len(X0)
-indcont = np.arange(ndof)
-X0, w, XT, PhiT, ampl, cvg = shooting_depvitfix(self, X0, w0, indcont)
-XT = X0
-if cvg is False:
-    raise ValueError('Continuation is impossible: non convergent at first'
-                     'iteration, use a better initial guess.')
+    def continuation(self):
+        """Continuation of periodic solution using Pseudo-arclength.
+        """
 
-T = 2 * np.pi / w
-append_sol(self, X0, ampl, w, beta=0, predict=np.zeros(n+1), PhiT=PhiT)
-
-print('Frequency: {:g} Hz\t\tEnergy: {:0.3e}'.format(w/2/np.pi, self.energy_vec[-1]))
-
-anim = Anim(self.energy_vec, self.omega_vec)
-
-if self.adaptive_stepsize:
-    h = adaptive_h(self, h)
-if w < self.omega_max:
-    smark = 1
-    h = - abs(h)
-else:
-    smark = -1
-    h = abs(h)
-
-X0_predict = np.zeros(n)
-II = np.eye(n)
-beta = 0
-
-abspath = '/home/paw/ownCloud/speciale/code/python/vib/'
-relpath = 'data/nnm/'
-path = abspath + relpath + 'nnm.mat'
-mat = io.loadmat(path)
-
-p = []
-cont = False
-it_w = 0
-# Continuation of periodic solution using Pseudo-arclength.
-while(w * smark < self.omega_max * smark and w > self.omega_min):
-
-    # Prediction step, p=[pz, pT]. Calculate the tangent p from
-    # ∂H/∂z|t=T * pz + ∂H/∂T|t=T *pT = 0
-    # ∂H/∂z = Φ - I, where Φ is the sensitivity/monodromy matrix and
-    # ∂H/∂T = g(z) is the state space system. pT=1 (chosen)
-    if cvg is True:
-        A = PhiT[:,indcont] - II[:,indcont]
-        fT = state_syst_cons(self, XT)
-        sol, *_ = lstsq(A, fT)
-        px =  -sol
-        #import pdb; pdb.set_trace()
-        if cont:
-            p_old = p
-            if self.adaptive_stepsize:
-                h = adaptive_h(self, h, it_NR, beta)
-        p = np.append(px,1)
-        p = h * p / norm(p)
-        if cont:
-            p = np.sign(p @ p_old) * p
-
-        X0_predict[indcont] = X0[indcont] + p[:-1]
-        T = T + p[-1]
-    else:
-        if abs(h) <= self.hmin:
-            print('Stepsize: No convergence at the previous step. but step=step_min already.')
-        h = h / 2
-        h = max(self.hmin, abs(h))
-        print('Stepsize: decreased. No convergence at the previous step.')
-        p = h * p / norm(p)
-        X0_predict[indcont] = self.X0_vec[-1][indcont] + p[:-1]
-        T = 2 * np.pi / self.omega_vec[-1] + p[-1]
-
-    X0 = X0_predict
-    w_predict = 2*np.pi / T
-    w = w_predict
-
-    if T < 0:
-        raise ValueError('The guess frequency ω should be larger than 0', w)
-
-    XT, PhiT, ampl = monodromy_sa(self, X0, T)
-    H = norm(X0 - XT) / norm(X0)
-
-    it_NR = 0
-    print('Iter |        H        |       Ds        |')
-    print(' {:3d} |    {:0.3e}    |                 |'.format(it_NR, H))
-    # NR correction.
-    # |∂H/∂z|t=T, ∂H/∂T | * |Δz| = -|H| = -|z0 - zT|
-    # | px      , pT    |   |ΔT|    |0|    |0      |
-    while(it_NR <= self.max_it_NR and H > self.tol_NR):
-        fT = state_syst_cons(self, XT)
-        As = np.vstack((
-            np.hstack((PhiT[:,indcont] - II[:, indcont], fT[:,None])),
-            np.append(px, 1)
-        ))
-        bs = np.append(X0 - XT,0)
-        Ds, *_ = lstsq(As, bs)
-        X0[indcont] = X0[indcont] + Ds[:-1]
-        T = T + Ds[-1]
-        if T < 0:
-            print('The frequency ω became smaller than 0 during NR correction')
-            break
-        XT, PhiT, ampl = monodromy_sa(self, X0, T)
-        err = H
-        H = norm(X0 - XT) / norm(X0)
-
-        if H > err:
-            msg = 'not convergent, error is not decreasing'
-            print('####' + msg + '####')
-            #raise ValueError(msg)
-
-        it_NR += 1
-        print(' {:3d} |    {:0.3e}    |    {:0.3e}    |'.format(it_NR, H, norm(Ds)))
-
-    w = 2*np.pi / T
-    print('Frequency: {:g} Hz\t\tEnergy: {:0.3e}'.format(w/2/np.pi, (self.energy_vec[-1])))
-
-    cvg = False
-    if it_NR > self.max_it_NR:
-        print('----- divergence -----')
-    if H <= self.tol_NR:
+        h = self.h
+        w = self.omega_vec[-1]
+        PhiT = self.PhiT
+        X0 = self.X0_vec[-1]
+        XT = X0.copy()
+        indcont = np.arange(self.ndof)
+        # If periodic succeed, cvg is True
         cvg = True
-        if it_w > 1:
-            X0_prev = self.X0_vec[-1][indcont]
-            T_prev = 2*np.pi / self.omega_vec[-1]
-            v1 = np.append(X0[indcont],T) - np.append(X0_prev, T_prev)
-            v2 = p
-            beta = abs(np.arccos((v1 @ v2)/(norm(v1)*norm(v2))))*180/np.pi
-            Drel = norm(v1 / np.append(X0[indcont],T))
-            if(beta > self.betamax and Drel > 1e-3):
-                print('Angle condition is not fulfilled:'
-                      'risk of branching switching. Stepsize has to be decreased')
-                cvg = False
+        T = 2 * np.pi / w
+        n = len(X0)
+
+        anim = Anim(self.energy_vec, self.omega_vec)
+
+        if self.adaptive_stepsize:
+            h = adaptive_h(self, h)
+        if w < self.omega_max:
+            smark = 1
+            h = - abs(h)
         else:
-            beta = 0
+            smark = -1
+            h = abs(h)
 
-        if cvg:
-            print('----- convergence -----')
-            cont = True
-            predict = np.append(X0_predict,w_predict)
-            append_sol(self, X0, ampl, w, beta, predict, PhiT)
-        anim.update(self.energy_vec, self.omega_vec)
-    print('Stepsize: {:0.3f}\t\t it_w: {}\n'.format(h, it_w))
+        X0_predict = np.zeros(n)
+        II = np.eye(n)
+        beta = 0
 
-    it_w += 1
+        p = []
+        cont = False
+        it_w = 0
+        while(w * smark < self.omega_max * smark and w > self.omega_min):
+
+            # Prediction step, p=[pz, pT]. Calculate the tangent p from
+            # ∂H/∂z|t=T * pz + ∂H/∂T|t=T *pT = 0
+            # ∂H/∂z = Φ - I, where Φ is the sensitivity/monodromy matrix and
+            # ∂H/∂T = g(z) is the state space system. pT=1 (chosen)
+            if cvg is True:
+                A = PhiT[:,indcont] - II[:,indcont]
+                fT = state_syst_cons(self, XT)
+                sol, *_ = lstsq(A, fT)
+                px =  -sol
+                if cont:
+                    p_old = p
+                    if self.adaptive_stepsize:
+                        h = adaptive_h(self, h, it_NR, beta)
+                p = np.append(px,1)
+                p = h * p / norm(p)
+                if cont:
+                    p = np.sign(p @ p_old) * p
+
+                X0_predict[indcont] = X0[indcont] + p[:-1]
+                T = T + p[-1]
+            else:
+                if abs(h) <= self.hmin:
+                    print('Stepsize: No convergence at the previous step. but step=step_min already.')
+                h = h / 2
+                h = max(self.hmin, abs(h))
+                print('Stepsize: decreased. No convergence at the previous step.')
+                p = h * p / norm(p)
+                X0_predict[indcont] = self.X0_vec[-1][indcont] + p[:-1]
+                T = 2 * np.pi / self.omega_vec[-1] + p[-1]
+
+            X0 = X0_predict
+            w_predict = 2*np.pi / T
+            w = w_predict
+
+            if T < 0:
+                raise ValueError('The guess frequency ω should be larger than 0', w)
+
+            XT, PhiT, ampl = monodromy_sa(self, X0, T)
+            H = norm(X0 - XT) / norm(X0)
+
+            it_NR = 0
+            print('Iter |        H        |       Ds        |')
+            print(' {:3d} |    {:0.3e}    |                 |'.format(it_NR, H))
+            # NR correction.
+            # |∂H/∂z|t=T, ∂H/∂T | * |Δz| = -|H| = -|z0 - zT|
+            # | px      , pT    |   |ΔT|    |0|    |0      |
+            while(it_NR <= self.max_it_NR and H > self.tol_NR):
+                fT = state_syst_cons(self, XT)
+                As = np.vstack((
+                    np.hstack((PhiT[:,indcont] - II[:, indcont], fT[:,None])),
+                    np.append(px, 1)
+                ))
+                bs = np.append(X0 - XT,0)
+                Ds, *_ = lstsq(As, bs)
+                X0[indcont] = X0[indcont] + Ds[:-1]
+                T = T + Ds[-1]
+                if T < 0:
+                    print('The frequency ω became smaller than 0 during NR correction')
+                    break
+                XT, PhiT, ampl = monodromy_sa(self, X0, T)
+                err = H
+                H = norm(X0 - XT) / norm(X0)
+
+                if H > err:
+                    msg = 'not convergent, error is not decreasing'
+                    print('####' + msg + '####')
+                    #raise ValueError(msg)
+
+                it_NR += 1
+                print(' {:3d} |    {:0.3e}    |    {:0.3e}    |'.format(it_NR, H, norm(Ds)))
+
+            w = 2*np.pi / T
+            print('Frequency: {:g} Hz\t\tEnergy: {:0.3e}'.format(w/2/np.pi, (self.energy_vec[-1])))
+
+            cvg = False
+            if it_NR > self.max_it_NR:
+                print('----- divergence -----')
+            if H <= self.tol_NR:
+                cvg = True
+                if it_w > 1:
+                    X0_prev = self.X0_vec[-1][indcont]
+                    T_prev = 2*np.pi / self.omega_vec[-1]
+                    v1 = np.append(X0[indcont],T) - np.append(X0_prev, T_prev)
+                    v2 = p
+                    beta = abs(np.arccos((v1 @ v2)/(norm(v1)*norm(v2))))*180/np.pi
+                    Drel = norm(v1 / np.append(X0[indcont],T))
+                    if(beta > self.betamax and Drel > 1e-3):
+                        print('Angle condition is not fulfilled:'
+                              'risk of branching switching. Stepsize has to be decreased')
+                        cvg = False
+                else:
+                    beta = 0
+
+                if cvg:
+                    print('----- convergence -----')
+                    cont = True
+                    predict = np.append(X0_predict,w_predict)
+                    append_sol(self, X0, ampl, w, beta, predict, PhiT)
+                anim.update(self.energy_vec, self.omega_vec)
+            print('Stepsize: {:0.3f}\t\t it_w: {}\n'.format(h, it_w))
+
+            it_w += 1
