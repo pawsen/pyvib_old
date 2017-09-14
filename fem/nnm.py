@@ -9,7 +9,8 @@ from scipy import io
 import os
 import sys
 sys.path.insert(1, os.path.join(sys.path[0], '../'))
-from nnm_plot import Anim
+sys.path.insert(1, os.path.join(sys.path[0], '../helper'))
+from plotting import Anim
 from newmark import Newmark
 from common import undamp_modal_properties
 
@@ -110,7 +111,8 @@ def NumSim(self, X0, T):
 
     dt = T / self.nppp
     # We want one complete period.
-    ns = int(round((T-0)/dt)) + 1
+    # ns = int(round((T-0)/dt)) + 1
+    ns = self.nppp + 1
     fext = np.zeros(ns)
     if self.sensitivity:
         x, xd, _, Phi = self.newmark.integrate_nl(x0, xd0, dt, fext, sensitivity=True)
@@ -191,8 +193,8 @@ def adaptive_h(self, h, it=None, beta=None):
 
 def append_sol(self, X0, ampl, w, beta, predict, PhiT):
     energy = energy_fct(self, X0)
-    self.X0_vec.append(X0)
-    self.ampl_vec.append(ampl)
+    self.X0_vec.append(X0.copy())
+    self.xamp_vec.append(ampl)
     self.omega_vec.append(w)
     self.energy_vec.append(energy)
     self.beta_vec.append(beta)
@@ -223,7 +225,7 @@ class NNM():
         self.ndof = M.shape[0]
 
         self.X0_vec = []
-        self.ampl_vec = []
+        self.xamp_vec = []
         self.omega_vec = []
         self.energy_vec = []
         self.step_vec = []
@@ -248,9 +250,11 @@ class NNM():
 
         self.stability = True
         self.betamin = 0
-        self.tol_stability = 1e-3
+        # eigenvals should be less than 1 for stability
+        self.tol_stability = 1 + 1e-3
         self.sensitivity = True
 
+        # number points per period
         self.nppp = 360
         self.PhiT = []
 
@@ -301,7 +305,9 @@ class NNM():
         T = 2 * np.pi / w
         n = len(X0)
 
-        anim = Anim(self.energy_vec, self.omega_vec)
+        par = {'title':'Frequency Energy plot (FEP)','xstr':'Log10(Energy) (J)',
+               'ystr':'Frequency (Hz)','yscale':1/(2*np.pi),'dof':0}
+        anim = Anim(x=np.log10(self.energy_vec), y=self.omega_vec,**par)
 
         if self.adaptive_stepsize:
             h = adaptive_h(self, h)
@@ -419,7 +425,7 @@ class NNM():
                     cont = True
                     predict = np.append(X0_predict,w_predict)
                     append_sol(self, X0, ampl, w, beta, predict, PhiT)
-                anim.update(self.energy_vec, self.omega_vec)
+                anim.update(x=np.log10(self.energy_vec), y=self.omega_vec)
             print('Stepsize: {:0.3f}\t\t it_w: {}\n'.format(h, it_w))
 
             it_w += 1

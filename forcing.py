@@ -134,13 +134,13 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1):
     return u, t
 
 
-def sineForce(A, f1=None, omega=None, t=None, fs=None, ns=None, phi_f=0):
+def sineForce(A, f=None, omega=None, t=None, fs=None, ns=None, phi_f=0):
     """
     Parameters
     ----------
     A: float
         Amplitude in N
-    f1: float
+    f: float
         Forcing frequency in (Hz/s)
     t: ndarray
         Time array
@@ -154,8 +154,8 @@ def sineForce(A, f1=None, omega=None, t=None, fs=None, ns=None, phi_f=0):
 
     if t is None:
         t = np.arange(ns)/fs
-    if f1 is not None:
-        omega = f1 * 2*np.pi
+    if f is not None:
+        omega = f * 2*np.pi
 
     phi = phi_f / 180 * np.pi
     u = A * np.sin(omega*t + phi)
@@ -176,22 +176,3 @@ def toMDOF(u, ndof, fdof):
         f[dof] = f[dof] + u
 
     return f
-
-#class Force():
-def force(dt, t0=0, tf=1):
-
-    ns = round((tf-t0)/dt)
-    fs = 1/dt
-    t = np.arange(ns)*dt
-
-    f1 = 1
-    A = 1
-    ndof = 1
-    fdof = 0
-    # do some force
-    # u,_ = sineSweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0)
-    # u,_ = randomPeriodic(arms, fs, f1, f2, ns, nrep=1)
-    u,_ = sineForce(A, fs, f1, ns, phi_f=0)
-    fext = toMDOF(u, ndof, fdof)
-
-    return fext

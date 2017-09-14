@@ -10,10 +10,10 @@ from scipy import sparse
 import os
 import sys
 sys.path.insert(1, os.path.join(sys.path[0], '../..'))
+sys.path.insert(1, os.path.join(sys.path[0], '../../helper'))
 from scipy import io
-
+from plotting import Anim
 from forcing import sineForce, toMDOF
-from hbplots import Anim, nonlin_frf
 from hbcommon import fft_coeff, ifft_coeff, hb_signal, hb_components
 from stability import Hills
 from bifurcation import Fold
@@ -214,8 +214,13 @@ class HB():
         # omega_cont_max = omega_cont_max*2*np.pi
         angle_max_pred = angle_max_pred*np.pi/180
 
-        anim = Anim(self.omega_vec, self.xamp_vec, omega_cont_min,
-                    omega_cont_max, dof=dof, scale_t=scale_t)
+        par = {'title':'Nonlinear FRF','xstr':'Frequency (Hz)',
+               'ystr':'Amplitude (m)','xscale':1/(scale_t*2*np.pi),
+               'dof':0,'ymin':0,
+               'xmin':omega_cont_min/2/np.pi,
+               'xmax':omega_cont_max/2/np.pi*1.1,
+               }
+        anim = Anim(x=self.omega_vec, y=np.asarray(self.xamp_vec).T[dof],**par)
 
         print('\n-------------------------------------------')
         print('|  Continuation of the periodic solution  |')
@@ -285,9 +290,9 @@ class HB():
 
             point = np.append(z,omega)
             if (it_cont >= 4 and True and
-                 ((point  - point_prev) @ (point_prev - point_pprev) /
-                   (norm(point - point_prev) * norm(point_prev-point_pprev)) <
-                   np.cos(angle_max_pred))):# and
+                ((point - point_prev) @ (point_prev - point_pprev) /
+                 (norm(point - point_prev) * norm(point_prev-point_pprev)) <
+                 np.cos(angle_max_pred))):  # and
                  # (it_cont >= index_LP+1) and
                  # (it_cont >= index_BP+2) ):
 
@@ -406,8 +411,7 @@ class HB():
                 step = min(step_max, step)
                 step = max(step_min, step)
 
-
-            anim.update(self.omega_vec,self.xamp_vec)
+            anim.update(x=self.omega_vec, y=np.asarray(self.xamp_vec).T[dof])
             it_cont += 1
 
     def state_sys(self, z, A, force):
