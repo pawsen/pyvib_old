@@ -3,6 +3,7 @@
 
 import numpy as np
 from scipy.linalg import eig, norm
+import math
 
 class color:
     PURPLE = '\033[95m'
@@ -15,6 +16,20 @@ class color:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
     END = '\033[0m'
+
+def next_pow2(i):
+    """
+    Find the next power of two
+
+    >>> int(next_pow2(5))
+    8
+    >>> int(next_pow2(250))
+    256
+    """
+    # do not use NumPy here, math is much faster for single values
+    buf = math.ceil(math.log(i) / math.log(2))
+    return int(math.pow(2, buf))
+
 
 def db(x):
     """relative value in dB
