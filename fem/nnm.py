@@ -14,18 +14,6 @@ from plotting import Anim
 from newmark import Newmark
 from common import undamp_modal_properties
 
-def force(A, f, ndof, fdof):
-    # Closure function. See also functools.partial
-    # fext = self.force(dt, tf=T)
-    def wrapped_func(dt, t0=0, tf=1):
-        ns = round((tf-t0)/dt)
-        fs = 1/dt
-
-        u,_ = sineForce(A, f=f, fs=fs, ns=ns, phi_f=0)
-        fext = toMDOF(u, ndof, fdof)
-        return fext
-    return wrapped_func
-
 
 def shooting_periodic(self, x0, omega, indcont):
 
@@ -43,6 +31,8 @@ def shooting_periodic(self, x0, omega, indcont):
     print('\nIter |        H        |       Ds        |')
     print(' {:3d} |    {:0.3e}    |                 |'.format(it, H))
     while(it <= self.max_it_NR and H > self.tol_NR):
+        # Due to phase conditions, all velocities are set to zero which result
+        # in all velocities being removed from the unknowns.
         fT = state_syst_cons(self, xT)
         A = np.vstack((
             np.hstack((PhiT[:,indcont] - II[:, indcont], fT[:,None])),

@@ -4,6 +4,21 @@
 from scipy import signal
 import numpy as np
 
+"""
+Example of a closure-function. See also partial from ...
+def force(A, f, ndof, fdof):
+    # Closure function. See also functools.partial
+    # fext = self.force(dt, tf=T)
+    def wrapped_func(dt, t0=0, tf=1):
+        ns = round((tf-t0)/dt)
+        fs = 1/dt
+
+        u,_ = sineForce(A, f=f, fs=fs, ns=ns, phi_f=0)
+        fext = toMDOF(u, ndof, fdof)
+        return fext
+    return wrapped_func
+
+"""
 def sineSweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
     """Do a linear or logarithmic sinus sweep excitation.
 

@@ -446,8 +446,8 @@ class HB():
         return H
 
     def hjac(self, z, A, force=None):
-        """Computes the jacobian matrix of h wrt Fourier coefficients z, denoted
-        h_z.
+        """Computes the jacobian matrix of h wrt Fourier coefficients z,
+        denoted h_z.
 
         From eq. (30)
         h_z = ∂h/∂z = A - ∂b/∂z = A - Γ⁺ ∂f/∂x Γ
@@ -478,8 +478,8 @@ class HB():
             # be nice
             for j in range(nz):
                 rhs = np.squeeze(np.asarray(full_rhs[:,j].todense()))
-                return_values = sparse.linalg.lsmr(mat_func_form_sparse, rhs)
-                x = - return_values[0]
+                sol = sparse.linalg.lsmr(mat_func_form_sparse, rhs)
+                x = - sol[0]
                 bjac[:,j] = x
 
             hjac = A - bjac

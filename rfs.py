@@ -214,6 +214,7 @@ class _rfsPlotBuilder(object):
         self.ax3d.clear()
         self.ax3d.plot(y,dy,-ddy, '.k', markersize=2)
         self.ax3d.plot(y_tol,dy_tol,-ddy_tol, '.r', markersize=10)
+        #self.ax3d.set_zlim([-5,5])
 
         self.ax3d.set_title("Restoring force surface")
         self.ax3d.set_xlabel('Displacement (m)')
@@ -225,11 +226,11 @@ class _rfsPlotBuilder(object):
         if show_damped:
             self.ax2d.plot(dy_tol,-ddy_tol, '.k', markersize=8)
             self.ax2d.set_title('Damping curve')
-            self.ax2d.set_xlabel('Velocity (m/s)')
+            self.ax2d.set_xlabel('Rel. velocity (m/s)')
         else:
             self.ax2d.plot(y_tol,-ddy_tol, '.k', markersize=8)
             self.ax2d.set_title('Stiffness curve')
-            self.ax2d.set_xlabel('Displacement (m)')
+            self.ax2d.set_xlabel('Rel. displacement (m)')
         self.ax2d.axhline(y=0, ls='--', lw='0.5',color='k')
         self.ax2d.axvline(x=0, ls='--', lw='0.5',color='k')
         self.ax2d.set_ylabel('-Acceleration (m/s²)')
