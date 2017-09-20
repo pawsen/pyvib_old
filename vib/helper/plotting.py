@@ -4,14 +4,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.linalg import eigvals
-
-import os
-import sys
-abspath = os.path.abspath(os.path.dirname(__file__))
-# sys.path.insert(1, os.path.join(abspath, '..'))
-# sys.path.insert(1, os.path.join(abspath, '../fem'))
-sys.path.insert(1, os.path.join(abspath, '../fem/hb/'))
-from hbcommon import hb_signal
+from ..hb.hbcommon import hb_signal
 
 
 # from functools import partial

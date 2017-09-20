@@ -9,14 +9,13 @@ from scipy import sparse
 
 import os
 import sys
-sys.path.insert(1, os.path.join(sys.path[0], '../..'))
-sys.path.insert(1, os.path.join(sys.path[0], '../../helper'))
 from scipy import io
-from plotting import Anim
-from forcing import sineForce, toMDOF
-from hbcommon import fft_coeff, ifft_coeff, hb_signal, hb_components
-from stability import Hills
-from bifurcation import Fold
+
+from ..helper.plotting import Anim
+from ..forcing import sineForce, toMDOF
+from .hbcommon import fft_coeff, ifft_coeff, hb_signal, hb_components
+from .stability import Hills
+from .bifurcation import Fold
 
 class HB():
     def __init__(self, M0, C0, K0, nonlin,

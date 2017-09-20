@@ -4,13 +4,9 @@
 import numpy as np
 from scipy.linalg import solve, lstsq, norm, eigvals
 
-import os
-import sys
-sys.path.insert(1, os.path.join(sys.path[0], '../'))
-sys.path.insert(1, os.path.join(sys.path[0], '../helper'))
-from plotting import Anim
-from newmark import Newmark
-from common import undamp_modal_properties
+from .helper.plotting import Anim
+from .newmark import Newmark
+from .common import undamp_modal_properties
 
 class NNM():
     def __init__(self, M, C, K, nonlin, omega_min, omega_max, step=0.1,

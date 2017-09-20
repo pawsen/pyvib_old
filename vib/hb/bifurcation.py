@@ -3,15 +3,14 @@
 
 import os
 import sys
-sys.path.insert(1, os.path.join(sys.path[0], '../..'))
 from scipy import io
 
 import numpy as np
 from scipy.linalg import solve, svd, norm, pinv, lstsq
-from scipy import sparse
-from forcing import sineForce, toMDOF
-
 from scipy import linalg
+from scipy import sparse
+
+from ..forcing import sineForce, toMDOF
 
 class Bifurcation():
     def __init__(self, hb, max_it_secant=10, tol_sec=1e-5):

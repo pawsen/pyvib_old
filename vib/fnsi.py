@@ -3,9 +3,10 @@
 
 import numpy as np
 from scipy import linalg
-from common import meanVar, db, modal_properties, ModalAC, ModalACX
-from signal2 import Signal
 from collections import defaultdict
+
+from .common import meanVar, db, modal_properties, ModalAC, ModalACX
+from .signal import Signal
 
 # just for debugging
 from pprint import pprint

@@ -1,0 +1,3 @@
+* pyside2 for qui.
+Choosen over pyqt due to licensing. These two are almost interchangeable. Could
+start with pyqt if docs/examples are nicer.

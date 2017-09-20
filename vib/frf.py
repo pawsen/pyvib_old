@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from signal2 import Signal
+from .signal import Signal
 
 class FRF(Signal):
     def __init__(self, signal, fmin, fmax):
