@@ -15,13 +15,13 @@ from hbcommon import hb_signal
 
 
 # from functools import partial
-# periodic2 = partial(periodic,plot_t='displ')
+# periodic2 = partial(periodic,ptype='displ')
 
 def phase(y, yd, dof=0, fig=None, ax=None, *args, **kwargs):
     if fig is None:
         fig, ax = plt.subplots()
         ax.clear()
-    ax.plot(y[dof],yd[dof])
+    ax.plot(y[dof],yd[dof], **kwargs)
     ax.set_title('Phase space, dof: {}'.format(dof))
     ax.set_xlabel('Displacement (m)')
     ax.set_ylabel('Velocity (m/s)')
@@ -29,10 +29,10 @@ def phase(y, yd, dof=0, fig=None, ax=None, *args, **kwargs):
     # ax.axis('equal')
     return fig, ax
 
-def periodic(t, y, dof=0, plot_t='displ', fig=None, ax=None, *args, **kwargs):
-    if plot_t == 'displ':
+def periodic(t, y, dof=0, ptype='displ', fig=None, ax=None, *args, **kwargs):
+    if ptype == 'displ':
         ystr = 'Displacement (m)'
-    elif plot_t == 'vel':
+    elif ptype == 'vel':
         ystr = 'Velocity (m/s)'
     else:
         ystr = 'Acceleration (m/s²)'
@@ -41,7 +41,7 @@ def periodic(t, y, dof=0, plot_t='displ', fig=None, ax=None, *args, **kwargs):
         fig, ax = plt.subplots()
         ax.clear()
 
-    ax.plot(t,y[dof],'-')
+    ax.plot(t,y[dof], **kwargs)
     ax.axhline(y=0, ls='--', lw='0.5',color='k')
     ax.set_title('Displacement vs time, dof: {}'.format(dof))
     ax.set_xlabel('Time (t)')
@@ -56,22 +56,22 @@ def harmonic(cnorm, dof=0, fig=None, ax=None, *args, **kwargs):
         ax.clear()
 
     nh = cnorm.shape[1] - 1
-    ax.bar(np.arange(nh+1), cnorm[dof])
+    ax.bar(np.arange(nh+1), cnorm[dof], **kwargs)
     ax.set_title('Displacement harmonic component, dof: {}'.format(dof))
-    ax.set_xlabel('Order')
+    ax.set_xlabel('Harmonic index (-)')
     # use double curly braces to "escape" literal curly braces...
-    ax.set_ylabel(r'$C_{{{dof}-h}}$'.format(dof=dof))
+    ax.set_ylabel(r'Harmonic coefficient $C_{{{dof}-h}}$'.format(dof=dof))
     ax.set_xlim([-0.5, nh+0.5])
     ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
     return fig, ax
 
-def stability(lamb, dof, T=None, plot_t='exp', fig=None, ax=None,
+def stability(lamb, dof=0, T=None, ptype='exp', fig=None, ax=None,
               *args, **kwargs):
     if fig is None:
         fig, ax = plt.subplots()
         ax.clear()
 
-    if plot_t == 'multipliers':
+    if ptype == 'multipliers':
         if T is None:
             raise AttributeError('T not provided')
         str1 = 'Floquet multipliers'
@@ -98,9 +98,9 @@ def stability(lamb, dof, T=None, plot_t='exp', fig=None, ax=None,
         ax.axvline(x=0, color='k')
 
     if len(idx_u[0]) != 0:
-        ax.plot(xx[idx_u],yy[idx_u],'ro', label='unstable')
+        ax.plot(xx[idx_u],yy[idx_u],'o', label='unstable', **kwargs)
     if len(idx_s[0]) != 0:
-        ax.plot(xx[idx_s],yy[idx_s],'bx', label='stable')
+        ax.plot(xx[idx_s],yy[idx_s],'x', label='stable', **kwargs)
     ax.set_title('Stability ({}), dof: {}'.format(str1, dof))
     ax.set_xlabel(r'Real({})'.format(str2))
     ax.set_ylabel(r'Imag({})'.format(str2))
@@ -245,9 +245,9 @@ class PointBrowser(object):
         y = np.asarray(y)
 
         if hb is not None:
-            self.plot_t = 'hb'
+            self.ptype = 'hb'
         if nnm is not None:
-            self.plot_t = 'nnm'
+            self.ptype = 'nnm'
         self.nnm = nnm
         self.hb = hb
         self.x = x
@@ -323,7 +323,7 @@ class PointBrowser(object):
             pass
             #plt.show()
         plotdata = {}
-        if self.plot_t == 'hb':
+        if self.ptype == 'hb':
             omega = self.hb.omega_vec[dataind]
             omega2 = omega / self.hb.nu
             #t = self.hb.assemblet(omega2)
@@ -338,7 +338,7 @@ class PointBrowser(object):
 
             plotdata.update({'cnorm':cnorm})
 
-        elif self.plot_t == 'nnm':
+        elif self.ptype == 'nnm':
             X0 = self.nnm.X0_vec[dataind]
             n = len(X0)
             x0 = X0[:n//2]
@@ -372,34 +372,39 @@ class PointBrowser(object):
         self.fig2.canvas.draw()
 
 
-def nonlin_frf(dof=0, plotlist=[], hb=None, nnm=None):
+def nonlin_frf(dof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
+               interactive=True, xscale=1/2/np.pi, yscale=1,
+               xunit='(Hz)',
+               fig=None, ax=None, *args, **kwargs):
 
-    energy_plot = False
     if hb is not None:
-        plot_t = 'hb'
+        ptype = 'hb'
         stab_vec = hb.stab_vec
-        x = np.asarray(hb.omega_vec)/hb.scale_t / 2/np.pi
+        x = np.asarray(hb.omega_vec)/hb.scale_t * xscale
         y = np.asarray(hb.xamp_vec).T[dof]
         titlestr = 'Nonlinear FRF for dof {}'.format(dof)
         ystr = 'Amplitude (m)'
-        xstr = 'Frequency (Hz)'
+        xstr = 'Frequency ' + xunit
     if nnm is not None:
-        plot_t = 'nnm'
+        ptype = 'nnm'
         stab_vec = nnm.stab_vec
         if energy_plot:
             x = np.log10(nnm.energy_vec)
-            y = np.asarray(nnm.omega_vec) / 2/np.pi
+            y = np.asarray(nnm.omega_vec) * xscale  # / 2/np.pi
             titlestr = 'Frequency Energy plot (FEP)'
             xstr = 'Log10(Energy) (J)'
-            ystr = 'Frequency (Hz)'
+            ystr = 'Frequency ' + xunit
         else:
-            x = np.asarray(nnm.omega_vec) / 2/np.pi
-            y = np.asarray(nnm.xamp_vec)
+            x = np.asarray(nnm.omega_vec) * xscale
+            y = np.asarray(nnm.xamp_vec).T[dof]
             titlestr = 'Amplitude of dof {}'.format(dof)
             ystr = 'Amplitude (m)'
-            xstr = 'Frequency (Hz)'
+            xstr = 'Frequency ' + xunit
 
-    fig, ax = plt.subplots()
+    if fig is None:
+        fig, ax = plt.subplots()
+        ax.clear()
+
     ax.set_title(titlestr)
     ax.set_xlabel(xstr)
     ax.set_ylabel(ystr)
@@ -413,14 +418,16 @@ def nonlin_frf(dof=0, plotlist=[], hb=None, nnm=None):
                     np.ma.masked_where(idx1, y), '-k',
                     np.ma.masked_where(idx2, x),
                     np.ma.masked_where(idx2, y), '--k',
-                    ms=1, picker=5)
+                    ms=1, picker=5, **kwargs)
 
-    browser = PointBrowser(x, y, dof, plotlist, fig, ax, lines, hb=hb, nnm=nnm)
+    if interactive:
+        browser = PointBrowser(x, y, dof, plotlist, fig, ax, lines, hb=hb,
+                               nnm=nnm)
 
-    fig.canvas.mpl_connect('pick_event', browser.onpick)
-    fig.canvas.mpl_connect('key_press_event', browser.onpress)
+        fig.canvas.mpl_connect('pick_event', browser.onpick)
+        fig.canvas.mpl_connect('key_press_event', browser.onpress)
 
-    plt.show()
+        plt.show()
 
     return fig, ax
 
