@@ -5,8 +5,9 @@ import scipy.io
 import numpy as np
 from scipy import linalg
 import matplotlib.pylab as plt
-from common import db
-from filter import integrate, differentiate
+
+from .common import db
+from .filter import integrate, differentiate
 
 
 class Signal(object):
