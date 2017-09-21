@@ -265,29 +265,37 @@ class HB():
             print('[Iteration]:    {}'.format(it_cont))
 
             ## Predictor step
-            J_z = self.hjac(z, A)
-            J_w = self.hjac_omega(omega, z)
+            # J_z = self.hjac(z, A)
+            # J_w = self.hjac_omega(omega, z)
 
             # Assemble A from eq. 31
             if it_cont == 1:
+                J_z = self.hjac(z, A)
+                J_w = self.hjac_omega(omega, z)
                 A_pred = np.vstack((
                     np.hstack((J_z, J_w[:,None])),
                     np.ones(nz+1)))
-            else:
-                A_pred = np.vstack((
-                    np.hstack((J_z, J_w[:,None])),
-                    tangent))
+                tangent = solve(A_pred, np.append(np.zeros(nz),1) )
+                tangent = tangent/linalg.norm(tangent)
+            # With Moore-Penrose corrections, it is not needed to explicit
+            # calculate the tangent again, since the corrections also correct
+            # the tangent.
+
+            # else:
+            #     A_pred = np.vstack((
+            #         np.hstack((J_z, J_w[:,None])),
+            #         tangent))
 
             # Tangent vector at iteration point, eq. 31 (search direction)
             # tangent = [z, omega].T
-            tangent = linalg.solve(A_pred, np.append(np.zeros(nz),1) )
-            tangent = tangent/linalg.norm(tangent)
+            # tangent = solve(A_pred, np.append(np.zeros(nz),1) )
+            # tangent = tangent/linalg.norm(tangent)
             tangent_pred = cont_dir * step * tangent
 
             z = z_cont + tangent_pred[:nz]
             omega = omega_cont + tangent_pred[nz]
 
-            point = np.append(z,omega)
+            #point = np.append(z,omega)
             if (it_cont >= 4 and True and
                 ((point - point_prev) @ (point_prev - point_pprev) /
                  (norm(point - point_prev) * norm(point_prev-point_pprev)) <
@@ -319,9 +327,7 @@ class HB():
             #print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
 
             # break
-
-            # TODO: consider modified NR for increased performance
-            # https://stackoverflow.com/a/44710451
+            # More-penrose updating
             while (Obj > tol_NR) and (it_NR <= max_it_NR):
                 H = self.state_sys(z, A, force)
                 H = np.append(H,0)
@@ -361,7 +367,8 @@ class HB():
                 print('The maximum number of iterations is reached without convergence.'
                       'Step size decreased by factor 10: {:0.2f}'.format(step))
                 continue
-
+            tangent = V
+            point = np.append(z,omega)
             if stability:
                 if it_NR == 1:
                     J_z = self.hjac(z, A)
