@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import scipy.io
 import numpy as np
-from scipy import linalg
 import matplotlib.pylab as plt
 
 from .common import db
@@ -13,7 +11,7 @@ from .filter import integrate, differentiate
 class Signal(object):
     """ Holds common properties for a signal
     """
-    def __init__(self, u, y, fs):
+    def __init__(self, u, fs, y=None, yd=None, ydd=None):
         """
         Parameters
         ----------
@@ -23,22 +21,22 @@ class Signal(object):
             Sampling frequency
 
         """
-
         # cast to 2d. Format is now y[ndofs,ns]. For 1d cases ndof=0
-        if y.ndim != 2:
-            y = y.reshape(-1,y.shape[0])
+        self.y = _set_signal(y)
+        self.yd = _set_signal(yd)
+        self.ydd = _set_signal(ydd)
 
         self.u = u
-        self.y = y
         self.fs = fs
 
-        # number of measurement/sensors
-        self.ndof = self.y.shape[0]
-        # total sample points
-        self.ns = self.y.shape[1]
+        # ns: total sample points
+        if y is not None:
+            self.ndof, self.ns = self.y.shape
+        elif yd is not None:
+            self.ndof, self.ns = self.y.shape
+        elif ydd is not None:
+            self.ndof, self.ns = self.y.shape
 
-        self.dy = None
-        self.ddy = None
         self.y_per = None
         self.u_per = None
         self.iscut = False
@@ -58,8 +56,9 @@ class Signal(object):
         # number of periods. Only used for this check
         ns = self.ns
         _nper = int(np.floor(ns / nsper))
-        if any(p > _nper- 1 for p in per):
-            raise ValueError('Period too high. Only {} periods in data.'.format(nper),per)
+        if any(p > _nper - 1 for p in per):
+            raise ValueError('Period too high. Only {} periods in data.'.
+                             format(_nper),per)
 
         self.iscut = True
         ndof = self.ndof
@@ -72,18 +71,20 @@ class Signal(object):
         self.y_per = np.empty((ndof, self.nper*self.nsper))
         self.u_per = np.empty(self.nper*self.nsper)
         for i, p in enumerate(per):
-            self.y_per[:,i*nsper : (i+1)*nsper] = self.y[:,offset + p*nsper :offset+(p+1)*nsper]
-            self.u_per[i*nsper : (i+1)*nsper] = self.u[offset + p*nsper:offset + (p+1)*nsper]
+            self.y_per[:,i*nsper: (i+1)*nsper] = self.y[:,offset + p*nsper:
+                                                        offset+(p+1)*nsper]
+            self.u_per[i*nsper: (i+1)*nsper] = self.u[offset + p*nsper:
+                                                      offset + (p+1)*nsper]
 
-
-    def periodicity(self, nsper, ido=0, offset=0, savefig={'save':False,'fname':''}):
+    def periodicity(self, nsper, dof=0, offset=0, fig=None, ax=None):
         """Shows the periodicity for the signal
+
 
         Parameters:
         ----------
         nsper : int
             Number of points per period
-        ido : int
+        dof : int
             DOF where periodicity is plotted for
         offset : int
             Use offset as first index
@@ -91,7 +92,7 @@ class Signal(object):
 
         fs = self.fs
 
-        y = self.y[ido,offset:]
+        y = self.y[dof,offset:]
         ns = len(y)
         ndof = self.ndof
         # number of periods
@@ -108,12 +109,13 @@ class Signal(object):
         yscale = np.amax(y) - np.amin(y)
 
         # holds the similarity of the signal, compared to reference period
-        va =  np.empty(nsper*(nper-1))
+        va = np.empty(nsper*(nper-1))
 
         nnvec = np.arange(-nper,nper+1, dtype='int')
         va_per = np.empty(nnvec.shape)
         for i, n in enumerate(nnvec):
-            # index of the current period. Moving from 1 to nn-1 because of if/break statement
+            # index of the current period. Moving from 1 to nn-1 because of
+            # if/break statement
             ist = ilast + n * nsper
             if ist < 0:
                 continue
@@ -127,44 +129,39 @@ class Signal(object):
 
         signal = db(y[:ns])
 
-        plt.figure(1)
-        plt.clf()
-        #plt.ion()
+        if fig is None:
+            fig, ax = plt.subplots()
+            ax.clear()
 
-        plt.title('Periodicity of signal for DOF {}'.format(ido))
-        plt.plot(t,signal,'--', label='signal')  # , rasterized=True)
-        plt.plot(t[:ilast],va, label='periodicity')
+        ax.set_title('Periodicity of signal for DOF {}'.format(dof))
+        ax.plot(t,signal,'--', label='signal')  # , rasterized=True)
+        ax.plot(t[:ilast],va, label='periodicity')
         for i in range(1,nper):
             x = t[nsper * i]
-            plt.axvline(x, color='k', linestyle='--')
+            ax.axvline(x, color='k', linestyle='--')
 
-        plt.xlabel('Time (s)')
-        plt.ylabel(r'$\varepsilon$ dB')
-        plt.legend()
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel(r'$\varepsilon$ dB')
+        ax.legend()
 
-        if savefig['save']:
-            fname = savefig['fname']
-            plt.savefig(fname + '.png')
-            plt.savefig(fname + '.pdf')
-            print('plot saved as {}'.format(fname))
-
-        plt.show()
+        return fig, ax
 
     def get_displ(self, lowcut, highcut, isnumeric=False):
         """Integrate signals to get velocity and displacement"""
 
         self.isnumeric = isnumeric
-        ddy = self.ddy
+        ydd = self.ydd
         ndof = self.ndof
         fs = self.fs
 
-        y = np.empty(ddy.shape)
-        dy = np.empty(ddy.shape)
+        y = np.empty(ydd.shape)
+        yd = np.empty(ydd.shape)
         for i in range(ndof):
-            y[i,:], dy[i,:] = integrate(ddy[i,:], fs, lowcut, highcut, isnumeric=isnumeric)
+            y[i,:], yd[i,:] = integrate(ydd[i,:], fs, lowcut, highcut,
+                                        isnumeric=isnumeric)
 
         self.y = y
-        self.dy = dy
+        self.yd = yd
 
     def get_accel(self, isnumeric=False):
         """ Differentiate signals to get velocity and accelerations
@@ -174,30 +171,23 @@ class Signal(object):
         ndof = self.ndof
         fs = self.fs
 
-        dy = np.empty(val.shape)
-        ddy = np.empty(val.shape)
+        yd = np.empty(y.shape)
+        ydd = np.empty(y.shape)
         for i in range(ndof):
-            dy[i,:], ddy[i,:] = differentiate(y[i,:], fs, isnumeric=isnumeric)
+            yd[i,:], ydd[i,:] = differentiate(y[i,:], fs, isnumeric=isnumeric)
 
-        self.dy = dy
-        self.ddy = ddy
+        self.yd = yd
+        self.ydd = ydd
 
-    def set_values(self, y=None, dy=None, ddy=None):
-        if y is not None:
-            #print(np.linalg.norm(y), np.linalg.norm(self.y))
-            # cast to 2d. Format is now y[ndofs,ns]. For 1d cases ndof=0
-            if y.ndim != 2:
-                self.y = y.reshape(-1,y.shape[0])
-            else:
-                self.y = y
-        if dy is not None:
-            #print(np.linalg.norm(dy), np.linalg.norm(self.dy))
-            if dy.ndim != 2:
-                self.dy = dy.reshape(-1,dy.shape[0])
-            else:
-                self.dy = dy
-        if ddy is not None:
-            if ddy.ndim != 2:
-                self.ddy = ddy.reshape(-1,ddy.shape[0])
-            else:
-                self.ddy = ddy
+    def set_signal(self, y=None, yd=None, ydd=None):
+        self.y = _set_signal(y)
+        self.yd = _set_signal(yd)
+        self.ydd = _set_signal(ydd)
+
+
+def _set_signal(y):
+    if y is not None:
+        if y.ndim != 2:
+            y = y.reshape(-1,y.shape[0])
+        return y
+    return None
