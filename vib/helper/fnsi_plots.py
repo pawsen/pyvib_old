@@ -4,9 +4,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from common import db
+from ..common import db
 
-def plot_knl(fnsi, knl):
+def fig_ax_getter(fig=None, ax=None):
+    if fig is None and ax is None:
+        fig, ax = plt.subplots()
+    elif fig is None:
+        fig = ax.get_figure()
+    elif ax is None:
+        ax = fig.gca()
+    return fig, ax
+
+def plot_knl(fnsi, knl, sca=1):
 
     inl = fnsi.inl
     enl = fnsi.enl
@@ -16,14 +25,16 @@ def plot_knl(fnsi, knl):
 
     if inl.size == 0:
         return
-    freq = np.arange(0,nsper)*fs/nsper
-    freq_plot = freq[flines + 1]  # Hz
+    freq = np.arange(0,nsper)*fs/nsper * sca
+    freq_plot = freq[flines]
 
-    # machine precision for float 64. See also
-    # https://stackoverflow.com/a/25155518 for an interesting way of doing it.
-    eps = np.finfo(float).eps
+    if sca == 1:
+        xstr = '(Hz)'
+    else:
+        xstr = '(rad/s)'
 
     figs = []
+    axs = []
     for i in range(knl.shape[0]):
         mu = knl[i]
 
@@ -38,11 +49,12 @@ def plot_knl(fnsi, knl):
         print(' Ratio log₁₀(ℝ(mu)/𝕀(mu)) {:0.2f}'.format(ratio))
 
         fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1)
-        ax1.set_title('Exponent: {:d}. Estimated: {:0.3e}'.format(exponent,mu_mean[0]))
+        ax1.set_title('Exponent: {:d}. Estimated: {:0.3e}'.
+                      format(exponent, mu_mean[0]))
         ax1.plot(freq_plot, np.real(mu),label='fnsi')
         ax1.axhline(mu_mean[0], c='k', ls='--', label='mean')
         ax1.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
-        ax1.set_xlabel('Frequency (Hz)')
+        ax1.set_xlabel('Frequency ' + xstr)
         ax1.legend()
 
         str1 = ''
@@ -51,62 +63,64 @@ def plot_knl(fnsi, knl):
         if np.abs(ymax - ymin) <= 1e-6:
             ymin = 0.9 * mu_mean[0]
             ymax = 1.1 * mu_mean[0]
-            ax1.set_ylim([ymin-eps, ymax+eps])
+            ax1.set_ylim([ymin, ymax])
             str1 = ' 1%'
         ax1.set_ylabel(r'Real($\mu$) $(N/m^{:d})${:s}'.format(exponent, str1))
 
         ax2.plot(freq_plot, np.imag(mu))
         ax2.axhline(mu_mean[1], c='k', ls='--', label='mean')
         ax2.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
-        ax2.set_xlabel('Frequency (Hz)')
+        ax2.set_xlabel('Frequency ' + xstr)
         str1 = ''
         ymin = np.min(np.imag(mu))
         ymax = np.max(np.imag(mu))
         if np.abs(ymax - ymin) <= 1e-6:
             ymin = 0.9 * mu_mean[1]
             ymax = 1.1 * mu_mean[1]
-            ax2.set_ylim([ymin-eps, ymax+eps])
+            ax2.set_ylim([ymin, ymax])
             str1 = ' 1%'
         ax2.set_ylabel(r'Imag($\mu$) $(N/m^{:d})$'.format(exponent))
         fig.tight_layout()
         figs.append(fig)
+        axs.append([ax1, ax2])
 
-    return figs
+    return figs, axs
 
-def plot_modes(idof, sd):
+def plot_modes(idof, sd, sca=1, fig=None, ax=None, **kwargs):
+    fig, ax = fig_ax_getter(fig, ax)
+    if sca == 1:
+        xstr = '(Hz)'
+    else:
+        xstr = '(rad/s)'
 
-    fig = plt.figure()
-    plt.clf()
-    plt.title('Linear modes')
-    plt.xlabel('Node id')
-    plt.ylabel('Displacement (m)')
+    ax.set_title('Linear modes')
+    ax.set_xlabel('Node id')
+    ax.set_ylabel('Displacement (m)')
     # display max 8 modes
     nmodes = min(len(sd['freq']), 8)
     for i in range(nmodes):
         natfreq = sd['natfreq'][i]
-        plt.plot(idof, sd['realmode'][i],'-*', label='{:0.2f} Hz'.format(natfreq))
-    plt.axhline(y=0, ls='--', lw='0.5',color='k')
-    plt.autoscale(enable=True, axis='x', tight=True)
-    plt.legend()
+        ax.plot(idof, sd['realmode'][i],'-*', label='{:0.2f} {:s}'.
+                format(natfreq*sca, xstr))
+    ax.axhline(y=0, ls='--', lw='0.5',color='k')
+    ax.autoscale(enable=True, axis='x', tight=True)
+    ax.legend()
 
-    return fig
+    return fig, ax
 
-def plot_linfrf(fnsi, dofs, H, ax = None, fig = None, **kwargs):
+def plot_linfrf(fnsi, H, dofs=0, sca=1, fig=None, ax=None, **kwargs):
+    fig, ax = fig_ax_getter(fig, ax)
 
     fs = fnsi.fs
     nsper = fnsi.nsper
     flines = fnsi.flines
 
-    freq = np.arange(0,nsper)*fs/nsper
-    freq_plot = freq[flines +1]  # Hz
+    freq = np.arange(0,nsper)*fs/nsper*sca
+    freq_plot = freq[flines]  # Hz
 
     # If h is only calculated for one dof:
     if H.shape[0] == 1:
         dofs = [0]
-
-    if ax is None:
-        fig, ax = plt.subplots()
-        ax.clear()
 
     for i, dof in enumerate(dofs):
         # label='dof: {:d}'.format(dof))
@@ -114,16 +128,32 @@ def plot_linfrf(fnsi, dofs, H, ax = None, fig = None, **kwargs):
 
     if ax is None:
         ax.set_title('Nonparametric linear FRF')
-    ax.set_xlabel('Frequency (Hz)')
+    if sca == 1:
+        xstr = '(Hz)'
+    else:
+        xstr = '(rad/s)'
+    ax.set_xlabel('Frequency ' + xstr)
+
     # For linear scale: 'Amplitude (m/N)'
     ax.set_ylabel('Amplitude (dB)')
     ax.legend()
     return fig, ax
 
 
-def plot_stab(fnsi, nlist, sd, ax = None, fig = None):
-    fmin = fnsi.fmin
-    fmax = fnsi.fmax
+def plot_svg(Sn, fig=None, ax=None, **kwargs):
+    """Plot singular values of Sn. Alternative to stabilization diagram"""
+
+    fig, ax = fig_ax_getter(fig, ax)
+    ax.semilogy(Sn/np.sum(Sn),'sk', markersize=6)
+    ax.set_xlabel('Model order')
+    ax.set_ylabel('Normalized magnitude')
+    return fig, ax
+
+
+def plot_stab(fnsi, nlist, sd, sca=1, fig=None, ax=None):
+    fig, ax = fig_ax_getter(fig, ax)
+    fmin = fnsi.fmin*sca
+    fmax = fnsi.fmax*sca
 
     orUNS = []    # Unstabilised model order
     freqUNS = []  # Unstabilised frequency for current model order
@@ -141,6 +171,7 @@ def plot_stab(fnsi, nlist, sd, ax = None, fig = None):
         # for freq, ep, mode, stab in zip(*values):
         for freq, ep, mode, stab in zip(v['freq'], v['ep'],
                                         v['mode'], v['stab']):
+            freq = freq*sca
             if stab:
                 if ep and mode:
                     orSfull.append(k)
@@ -151,20 +182,16 @@ def plot_stab(fnsi, nlist, sd, ax = None, fig = None):
                 elif mode:
                     orSmode.append(k)
                     freqSmode.append(freq)
-
                 else:
                     orSfreq.append(k)
                     freqS.append(freq)
             else:
                 orUNS.append(k)
                 freqUNS.append(freq)
-    if ax is None:
-        fig, ax = plt.subplots()
-        ax.clear()
 
     # Avoid showing the labels of empty plots
     if len(freqUNS) != 0:
-        ax.plot(freqUNS, orUNS, 'xr', ms= 7, label='Unstabilized')
+        ax.plot(freqUNS, orUNS, 'xr', ms=7, label='Unstabilized')
     if len(freqS) != 0:
         ax.plot(freqS, orSfreq, '*k', ms=7, label='Stabilized in natural frequency')
     if len(freqSep) != 0:
@@ -172,16 +199,19 @@ def plot_stab(fnsi, nlist, sd, ax = None, fig = None):
     if len(freqSmode) != 0:
         ax.plot(freqSmode, orSmode, 'ok', ms=7, mfc='none', label='Extra stabilized in MAC')
     if len(freqSfull) != 0:
-        ax.plot(freqSfull, orSfull, '^k', ms= 7, mfc='none', label='Full stabilization')
+        ax.plot(freqSfull, orSfull, '^k', ms=7, mfc='none', label='Full stabilization')
 
     ax.set_xlim([fmin, fmax])
     ax.set_ylim([nlist[0]-2, nlist[-1]])
-    #ax = plt.gca()
     step = round(nlist[-2]/5)
     major_ticks = np.arange(0, nlist[-2]+1, step)
     ax.set_yticks(major_ticks)
 
-    ax.set_xlabel('Frequency (Hz)')
+    if sca == 1:
+        xstr = '(Hz)'
+    else:
+        xstr = '(rad/s)'
+    ax.set_xlabel('Frequency ' + xstr)
     ax.set_ylabel('Model order')
     ax.set_title('Stabilization diagram')
     ax.legend(loc='lower right')

@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import matplotlib.patches as patches
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.widgets import Slider, CheckButtons
@@ -10,7 +13,7 @@ class _rfsPlotBuilder(object):
     points.
 
     First save handle to plot:
-    3dplot = ax3d.plot(y,dy,-ddy, '.k', markersize=10)
+    3dplot = ax3d.plot(y,yd,-ydd, '.k', markersize=10)
     ax3d.set_autoscaley_on(True)
 
     #¤¤ on update:
@@ -44,10 +47,10 @@ class _rfsPlotBuilder(object):
 
         # plot acceleration signal
         t = np.arange(self.rfs.ns)/self.rfs.fs
-        ax.plot(t, self.rfs.ddy,'-k')
+        ax.plot(t, self.rfs.ydd,'-k')
         #ax.plot(t, self.rfs.y,'-k')
         ax.set_xlabel('Time (s)')
-        ax.set_ylabel(r'Acceleration (m/s²)')
+        ax.set_ylabel(r'Acceleration ($m/s^2$)')
         ax.set_title('Acceleration, for DOF {}'.format(self.rfs.dofs[0]))
 
         #¤ back to rectangular settings
@@ -95,10 +98,11 @@ class _rfsPlotBuilder(object):
 
         plt.show()
 
+
     def slider_update(self, value):
 
         self.rfs.tol_slice = value
-        # y, dy, ddy, y_tol, dy_tol, ddy_tol = self.rfs.update_sel(self.idx1, self.idx2)
+        # y, yd, ydd, y_tol, yd_tol, ydd_tol = self.rfs.update_sel(self.idx1, self.idx2)
         self.update_rfs()
 
         # TODO: works, even if the canvas belong to rect. ie canvas = rect.canvas
@@ -208,12 +212,12 @@ class _rfsPlotBuilder(object):
         self.idx1 = int(np.floor( self.rfs.ns * (x1 - xx[0]) / np.diff(xx)))
         self.idx2 = int(np.ceil( self.rfs.ns * (x2 - xx[0]) / np.diff(xx)))
 
-        y, dy, ddy, y_tol, dy_tol, ddy_tol = self.rfs.update_sel(self.idx1,
+        y, yd, ydd, y_tol, yd_tol, ydd_tol = self.rfs.update_sel(self.idx1,
                                                                  self.idx2,
                                                                  show_damped)
         self.ax3d.clear()
-        self.ax3d.plot(y,dy,-ddy, '.k', markersize=2)
-        self.ax3d.plot(y_tol,dy_tol,-ddy_tol, '.r', markersize=10)
+        self.ax3d.plot(y,yd,-ydd, '.k', markersize=2)
+        self.ax3d.plot(y_tol,yd_tol,-ydd_tol, '.r', markersize=10)
         #self.ax3d.set_zlim([-5,5])
 
         self.ax3d.set_title("Restoring force surface")
@@ -224,11 +228,11 @@ class _rfsPlotBuilder(object):
 
         self.ax2d.clear()
         if show_damped:
-            self.ax2d.plot(dy_tol,-ddy_tol, '.k', markersize=8)
+            self.ax2d.plot(yd_tol,-ydd_tol, '.k', markersize=8)
             self.ax2d.set_title('Damping curve')
             self.ax2d.set_xlabel('Rel. velocity (m/s)')
         else:
-            self.ax2d.plot(y_tol,-ddy_tol, '.k', markersize=8)
+            self.ax2d.plot(y_tol,-ydd_tol, '.k', markersize=8)
             self.ax2d.set_title('Stiffness curve')
             self.ax2d.set_xlabel('Rel. displacement (m)')
         self.ax2d.axhline(y=0, ls='--', lw='0.5',color='k')
@@ -237,9 +241,9 @@ class _rfsPlotBuilder(object):
         self.ax2d.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
 
 
-from signal2 import Signal
+from .signal import Signal
 class RFS(Signal):
-    def __init__(self, signal, dofs=[0], show_damped = False):
+    def __init__(self, signal, dofs=0, show_damped = False):
         """ Show a Restoring Force Surface, which gives a visual idea of the
         type of nonlinearity(if any)
 
@@ -255,10 +259,10 @@ class RFS(Signal):
         show_damp : bool
             show stifness or damping coeff.
         """
-
-        if not isinstance(dofs, list):
-            raise TypeError('dofs not a list. Should be [dof1, dof2]', type(dofs))
-        if len(dofs) > 2:
+        dofs = np.atleast_1d(dofs)
+        # if not isinstance(dofs, list):
+        #     raise TypeError('dofs not a list. Should be [dof1, dof2]', type(dofs))
+        if len(dofs.shape) > 2:
             raise ValueError('List of dofs is too long. Max two dofs', len(dofs))
 
         self.dofs = dofs
@@ -268,17 +272,17 @@ class RFS(Signal):
         self.signal = signal
 
         y = signal.y  #[dofs,:]
-        dy = signal.dy  #[dofs,:]
+        yd = signal.yd  #[dofs,:]
         if len(dofs) == 1:
             # connected to ground
             self.y = y[dofs[0],:]  #.squeeze()
-            self.dy = dy[dofs[0],:]  #.squeeze()
+            self.yd = yd[dofs[0],:]  #.squeeze()
         else:
             # connected to another dof
             self.y = y[dofs[0],:] - y[dofs[1],:]
-            self.dy = dy[dofs[0],:] - dy[dofs[1],:]
+            self.yd = yd[dofs[0],:] - yd[dofs[1],:]
 
-        self.ddy = signal.ddy[dofs[0],:]
+        self.ydd = signal.ydd[dofs[0],:]
 
 
 
@@ -294,23 +298,23 @@ class RFS(Signal):
         """
         #t = self.t( id0:di1 );
         y = self.y[id0:id1]
-        dy = self.dy[id0:id1]
-        ddy = self.ddy[id0:id1]
+        yd = self.yd[id0:id1]
+        ydd = self.ydd[id0:id1]
 
         if show_damped:
             tol =  self.tol_slice * max( np.abs(y))
             ind_tol = np.where(np.abs(y) < tol)
         else:
-            tol =  self.tol_slice * max( np.abs(dy))
-            ind_tol = np.where(np.abs(dy) < tol)
+            tol =  self.tol_slice * max( np.abs(yd))
+            ind_tol = np.where(np.abs(yd) < tol)
         y_tol = y[ind_tol]
-        dy_tol = dy[ind_tol]
-        ddy_tol = ddy[ind_tol]
+        yd_tol = yd[ind_tol]
+        ydd_tol = ydd[ind_tol]
 
-        return y, dy, ddy, y_tol, dy_tol, ddy_tol
+        return y, yd, ydd, y_tol, yd_tol, ydd_tol
 
     def plot(self, show_damped=False):
-        _rfsPlotBuilder(self)
+        self.plot = _rfsPlotBuilder(self)
 
 
 # from mpl_toolkits.mplot3d import Axes3D
@@ -318,8 +322,8 @@ class RFS(Signal):
 # plt.figure(2)
 # plt.clf()
 # ax = plt.axes(projection='3d')
-# ax.plot(y1, dy, -ddy, '.k', markersize=10)
-# ax.plot(y1_tol, y1_tol, -ddy_tol, '.r', markersize=12)
+# ax.plot(y1, yd, -ydd, '.k', markersize=10)
+# ax.plot(y1_tol, y1_tol, -ydd_tol, '.r', markersize=12)
 # ax.set_title("Restoring force surface")
 # ax.set_xlabel('Displacement (m)')
 # ax.set_ylabel('Velocity (m/s)')
@@ -331,6 +335,6 @@ class RFS(Signal):
 # plt.title('Stiffness curve')
 # plt.xlabel('Displacement (m)')
 # plt.ylabel('-Acceleration (m/s²)')
-# plt.plot(y1_tol,-ddy_tol,'.k', markersize=12)
+# plt.plot(y1_tol,-ydd_tol,'.k', markersize=12)
 
 # #plt.show()

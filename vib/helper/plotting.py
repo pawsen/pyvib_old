@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 import numpy as np
 from scipy.linalg import eigvals
 from ..hb.hbcommon import hb_signal
+from copy import deepcopy
 
 
 # from functools import partial
@@ -14,7 +16,7 @@ def phase(y, yd, dof=0, fig=None, ax=None, *args, **kwargs):
     if fig is None:
         fig, ax = plt.subplots()
         ax.clear()
-    ax.plot(y[dof],yd[dof], **kwargs)
+    ax.plot(y[dof],yd[dof])#, **kwargs)
     ax.set_title('Phase space, dof: {}'.format(dof))
     ax.set_xlabel('Displacement (m)')
     ax.set_ylabel('Velocity (m/s)')
@@ -34,7 +36,7 @@ def periodic(t, y, dof=0, ptype='displ', fig=None, ax=None, *args, **kwargs):
         fig, ax = plt.subplots()
         ax.clear()
 
-    ax.plot(t,y[dof], **kwargs)
+    ax.plot(t,y[dof])#, **kwargs)
     ax.axhline(y=0, ls='--', lw='0.5',color='k')
     ax.set_title('Displacement vs time, dof: {}'.format(dof))
     ax.set_xlabel('Time (t)')
@@ -49,7 +51,7 @@ def harmonic(cnorm, dof=0, fig=None, ax=None, *args, **kwargs):
         ax.clear()
 
     nh = cnorm.shape[1] - 1
-    ax.bar(np.arange(nh+1), cnorm[dof], **kwargs)
+    ax.bar(np.arange(nh+1), cnorm[dof])#, *args, **kwargs)
     ax.set_title('Displacement harmonic component, dof: {}'.format(dof))
     ax.set_xlabel('Harmonic index (-)')
     # use double curly braces to "escape" literal curly braces...
@@ -91,9 +93,9 @@ def stability(lamb, dof=0, T=None, ptype='exp', fig=None, ax=None,
         ax.axvline(x=0, color='k')
 
     if len(idx_u[0]) != 0:
-        ax.plot(xx[idx_u],yy[idx_u],'o', label='unstable', **kwargs)
+        ax.plot(xx[idx_u],yy[idx_u],'o', label='unstable')#, **kwargs)
     if len(idx_s[0]) != 0:
-        ax.plot(xx[idx_s],yy[idx_s],'x', label='stable', **kwargs)
+        ax.plot(xx[idx_s],yy[idx_s],'x', label='stable')#, **kwargs)
     ax.set_title('Stability ({}), dof: {}'.format(str1, dof))
     ax.set_xlabel(r'Real({})'.format(str2))
     ax.set_ylabel(r'Imag({})'.format(str2))
@@ -104,6 +106,20 @@ def stability(lamb, dof=0, T=None, ptype='exp', fig=None, ax=None,
     ax.set_xlim(xmax * np.array([-1,1]))
     ax.set_ylim(ymax * np.array([-1,1]))
     ax.grid(True, which='both')
+    return fig, ax
+
+
+def configuration(x1, x2, fig=None, ax=None, *args, **kwargs):
+    if fig is None:
+        fig, ax = plt.subplots()
+        ax.clear()
+
+    ax.plot(x1,x2, *args, **kwargs)
+    ax.set_title('Configuration space')
+    ax.set_xlabel('Displacement x₁ (m)')
+    ax.set_ylabel('Displacement x₂ (m)')
+    ax.ticklabel_format(axis='both', style='sci', scilimits=(-2,2))
+
     return fig, ax
 
 
@@ -151,6 +167,7 @@ class Anim(object):
         self.cur_point = ax.plot(x[-1], y[-1], 'o')[0]
         self.ax = ax
         self.fig = fig
+        self.ims = []
 
     def update(self, x,y):
         """The purpose of blit'ing is to avoid redrawing the axes, and all the ticks
@@ -210,16 +227,16 @@ class Anim(object):
         # fill in the axes rectangle
         fig.canvas.blit(ax.bbox)
 
+        #self.ims.append([deepcopy(self.points), deepcopy(self.cur_point)])
 
-def conf_space():
-    # fig = plt.figure(4)
-    # ax = fig.add_subplot(111)
-    # ax.clear()
-    # ax.plot(x,xd)
-    # ax.set_title('Configuration space, dof: {}'.format(dof))
-    # ax.set_xlabel('Displacement x₁ (m)')
-    # ax.set_ylabel('Displacement x₂ (m)')
-    pass
+    def save(self):
+        # Set up formatting for the movie files
+        Writer = animation.writers['ffmpeg'] # ['imagemagick'] #
+        writer = Writer(fps=15, metadata=dict(artist='Me'), bitrate=1800)
+
+        #im_ani = animation.ArtistAnimation(self.fig, self.ims, interval=50, repeat_delay=3000,
+        #                                   blit=True)
+        #im_ani.save('im.mp4', writer=writer)
 
 class PointBrowser(object):
     """
@@ -382,7 +399,8 @@ def nonlin_frf(dof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
         ptype = 'nnm'
         stab_vec = nnm.stab_vec
         if energy_plot:
-            x = np.log10(nnm.energy_vec)
+            energy = np.asarray(nnm.energy_vec)#.T[dof]
+            x = np.log10(energy)
             y = np.asarray(nnm.omega_vec) * xscale  # / 2/np.pi
             titlestr = 'Frequency Energy plot (FEP)'
             xstr = 'Log10(Energy) (J)'
