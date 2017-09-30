@@ -44,7 +44,7 @@ class FNSI():
         fdof, ns = u.shape
         ndof, ns = y.shape
 
-        # some parameters. Dont know what..
+        # some parameters. Dont know what.. Maybe npp: number per period!
         p1 = 0
         p2 = 0
         npp = nper - p1 - p2
@@ -295,15 +295,6 @@ class FNSI():
         self.F = F
         self.ims = ims
 
-        if svd_plot:
-            #plt.ion()
-            plt.figure(1)
-            plt.clf()
-            plt.semilogy(Sn/np.sum(Sn),'sk', markersize=6)
-            plt.xlabel('Singular value')
-            plt.ylabel('Magnitude')
-            #plt.show()
-
 
     def id(self, nmodel, bd_method=None):
         """Frequency-domain Nonlinear Subspace Identification (FNSI)
@@ -478,7 +469,7 @@ class FNSI():
         """
         from copy import deepcopy
 
-        dofs = np.asarray(dofs)
+        dofs = np.atleast_1d(dofs)
         fs = self.fs
         nsper = self.nsper
         flines = self.flines
@@ -523,13 +514,12 @@ class FNSI():
 
             for i in range(nnl):
                 knl[i, k] = scaling[i] * He[iu, m+i, k] / (He[inl1[i],0,k] -
-                                                          He[inl2[i],0,k] )
+                                                           He[inl2[i],0,k])
 
             for j, dof in enumerate(dofs):
                 H[j,k] = He[dof, 0, k]
 
         return knl, H, He
-
 
     def stabilisation_diagram(self, nlist):
         """
@@ -537,15 +527,15 @@ class FNSI():
         Returns
         -------
         SD : defaultdict of defaultdict(list)
-            Stabilization data. Key is model number(int), v is the properties for the
-            given model number.
+            Stabilization data. Key is model number(int), v is the properties
+            for the given model number.
         """
-        print( 'FNSI stabilisation diagram' );
+        print('FNSI stabilisation diagram')
         fs = self.fs
         l = self.l
         m = self.m
         F = self.F
-        U  =self.Un
+        U =self.Un
         S = self.Sn
         sqCY = self.sqCY
         # for postprocessing
@@ -581,7 +571,7 @@ class FNSI():
         # loop over model orders
         for ior, nval in enumerate(nlist[:-1]):
             # loop over frequencies for current model order
-            for ifr, natfreq in enumerate( SD[ior]['natfreq']):
+            for ifr, natfreq in enumerate(SD[ior]['natfreq']):
                 if natfreq < fmin or natfreq > fmax:
                     continue
 
@@ -589,7 +579,7 @@ class FNSI():
                 nfreq = SD[ior+1]['natfreq']
                 tol_low = (1 - tol_freq / 100) * natfreq
                 tol_high = (1 + tol_freq / 100) * natfreq
-                ifreqS, = np.where( (nfreq >= tol_low) & (nfreq <= tol_high) )
+                ifreqS, = np.where((nfreq >= tol_low) & (nfreq <= tol_high))
                 if ifreqS.size == 0:  # ifreqS is empty
                     # the current natfreq is not stabilized
                     SDout[nval]['stab'].append(False)
@@ -607,7 +597,7 @@ class FNSI():
                         tol_low = (1 - tol_damping / 100) * SD[ior]['ep'][ifr]
                         tol_high = (1 + tol_damping / 100) * SD[ior]['ep'][ifr]
                         # TODO: matlab have find(cond ,1). Ie only return the first match
-                        iepS, = np.where( (nep >= tol_low) & (nep <= tol_high) )
+                        iepS, = np.where((nep >= tol_low) & (nep <= tol_high))
                         if iepS.size == 0:
                             SDout[nval]['ep'].append(False)
                         else:
@@ -626,4 +616,3 @@ class FNSI():
                         SDout[nval]['mode'].append(False)
 
         return SDout
-
