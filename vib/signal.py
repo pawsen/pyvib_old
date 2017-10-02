@@ -6,7 +6,8 @@ import matplotlib.pylab as plt
 
 from .common import db
 from .filter import integrate, differentiate
-
+# from .morletWT import morletWT
+# from collections import namedtuple
 
 class Signal(object):
     """ Holds common properties for a signal
@@ -183,6 +184,15 @@ class Signal(object):
         self.y = _set_signal(y)
         self.yd = _set_signal(yd)
         self.ydd = _set_signal(ydd)
+
+    # def wt(self, f1, f2, nf=50, f00=10, dof=0, pad=0):
+    #     fs = self.fs
+    #     x = self.y[dof]
+    #     finst, wtinst, time, freq, y = morletWT(x, fs, f1, f2, nf, f00, pad)
+
+    #     # poor mans object
+    #     WT = namedtuple('WT', 'f1 f2 nf f00  dof pad finst wtinst time freq y')
+    #     self.wt = WT(f1, f2, nf, f00, dof, pad,finst, wtinst, time, freq, y)
 
 
 def _set_signal(y):

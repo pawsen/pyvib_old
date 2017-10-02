@@ -27,8 +27,9 @@ def next_pow2(i):
     256
     """
     # do not use NumPy here, math is much faster for single values
-    buf = math.ceil(math.log(i) / math.log(2))
-    return int(math.pow(2, buf))
+    exponent = math.ceil(math.log(i) / math.log(2))
+    # the value: int(math.pow(2, exponent))
+    return exponent
 
 
 def db(x):
