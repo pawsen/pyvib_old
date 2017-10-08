@@ -382,10 +382,10 @@ class PointBrowser(object):
         self.fig2.canvas.draw()
 
 
-def nonlin_frf(dof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
-               interactive=True, xscale=1/2/np.pi, yscale=1,
-               xunit='(Hz)',
-               fig=None, ax=None, *args, **kwargs):
+def nfrc(dof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
+         interactive=True, xscale=1/2/np.pi, yscale=1,
+         xunit='(Hz)',
+         fig=None, ax=None, *args, **kwargs):
 
     if hb is not None:
         ptype = 'hb'

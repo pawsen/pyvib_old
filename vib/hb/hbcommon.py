@@ -5,6 +5,13 @@ import numpy as np
 from scipy.fftpack import fft, ifft
 
 def hb_components(z, n, NH):
+    """Get HB coefficient c's
+
+    Parameters
+    ----------
+    n : int
+        Number of DOFs, ie M.shape[0]
+    """
     z = np.hstack([np.zeros(n), z])
     # reorder so first column is zeros, then one column for each dof
     z = np.reshape(z, (n,2*(NH+1)), order='F')
@@ -13,17 +20,19 @@ def hb_components(z, n, NH):
     # Instead we just set the first column in phi to pi/2 (arctan(inf) = pi/2)
     # phi = np.arctan(z[:,1::2] / z[:,::2])
     phi = np.empty((n, NH+1))
-    phi[:,1:] =np.arctan(z[:,3::2] / z[:,2::2])
+    phi[:,1:] = np.arctan(z[:,3::2] / z[:,2::2])
     phi[:,0] = np.pi/2
 
     c = z[:,::2] / np.cos(phi)
     c[:,0] = z[:,1]
 
-    cnorm = np.abs(c) / (np.max(np.abs(c)))
+    # normalize components for each dof
+    cnorm = np.abs(c)/np.sum(np.abs(c),axis=1)[:,None]
 
     return c, phi, cnorm
 
 def hb_signal(omega, t, c, phi):
+    """Get real signal from HB coefficients(components)"""
     n = c.shape[0]
     NH = c.shape[1]-1
     nt = len(t)
@@ -34,7 +43,7 @@ def hb_signal(omega, t, c, phi):
 
         tmp = tt + np.outer(phi[i,1:],np.ones(nt))
         tmp = c[i,0]*np.ones(nt) + c[i,1:] @ np.sin(tmp)
-        x[i] = tmp #np.sum(tmp, axis=0)
+        x[i] = tmp  # np.sum(tmp, axis=0)
 
     return x
 

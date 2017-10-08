@@ -221,6 +221,7 @@ class HB():
                }
         anim = Anim(x=self.omega_vec, y=np.asarray(self.xamp_vec).T[dof],**par)
 
+
         print('\n-------------------------------------------')
         print('|  Continuation of the periodic solution  |')
         print('-------------------------------------------\n')
@@ -419,6 +420,7 @@ class HB():
 
             anim.update(x=self.omega_vec, y=np.asarray(self.xamp_vec).T[dof])
             it_cont += 1
+        #self.anim = anim
 
     def state_sys(self, z, A, force):
         """Calculate the system matrix h(z,ω) = A(ω)z - b(z), given by eq. (21).

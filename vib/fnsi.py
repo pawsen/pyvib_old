@@ -462,10 +462,11 @@ class FNSI():
         Returns
         -------
         knl : ndarray(complex)
-            The nonlinear coefficients (frequency-dependent and complex-valued).
+            The nonlinear coefficients (frequency-dependent and complex-valued)
         H(ω) : ndarray(complex)
+            Estimate of the linear FRF
+        He(ω) : ndarray(complex)
             The extended FRF (transfer function matrix)
-
         """
         from copy import deepcopy
 
@@ -483,19 +484,18 @@ class FNSI():
         freq = np.arange(0,nsper)*fs/nsper
         F = len(flines)
 
-
         l, m = D.shape
 
         # just return in case of no nonlinearities
         if inl.size == 0:
-            #return np.array([]), np.array([])
+            # return np.array([]), np.array([])
             knl = np.array([])
             nnl = 0
         else:
             nnl = inl.shape[0]
             # connected from
             inl1 = inl[:,0]
-             # connected to
+            # connected to
             inl2 = inl[:,1]
             # if connected to ground.
             inl2[np.where(inl2 == -1)] = l
@@ -519,6 +519,9 @@ class FNSI():
             for j, dof in enumerate(dofs):
                 H[j,k] = He[dof, 0, k]
 
+        self.knl = knl
+        self.H = H
+        self.He = He
         return knl, H, He
 
     def stabilisation_diagram(self, nlist):
@@ -535,7 +538,7 @@ class FNSI():
         l = self.l
         m = self.m
         F = self.F
-        U =self.Un
+        U = self.Un
         S = self.Sn
         sqCY = self.sqCY
         # for postprocessing
@@ -557,7 +560,6 @@ class FNSI():
             # Convert A into continous-time arrays using eq (8)
             A = fs * linalg.logm(A)
             SD[k] = modal_properties(A, C)
-
 
         # postprocessing
         # tol for freq and damping is in %
@@ -614,5 +616,9 @@ class FNSI():
                         SDout[nval]['mode'].append(True)
                     else:
                         SDout[nval]['mode'].append(False)
-
+        self.sd = SDout
         return SDout
+
+    def calc_modal(self):
+        """Calculate modal properties after identification is done"""
+        self.modal = modal_properties(self.A, self.C)

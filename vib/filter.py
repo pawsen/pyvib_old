@@ -55,6 +55,7 @@ def integrate(ddy,fs, lowcut=None, highcut=None, order=3, isnumeric=False):
         dy = sp_integrate.cumtrapz(ddy,initial=0)/fs
         y = sp_integrate.cumtrapz(dy,initial=0)/fs
     else:
+        # nyquist freq
         fn = 0.5 * fs
         if highcut > fn:
             raise ValueError('Highcut frequency is higher than nyquist\
@@ -64,8 +65,8 @@ def integrate(ddy,fs, lowcut=None, highcut=None, order=3, isnumeric=False):
 
 
         # Normalized cutoff freqs
-        highcut =  highcut / fn
-        lowcut =  lowcut / fn
+        highcut = highcut / fn
+        lowcut = lowcut / fn
 
         b, a = signal.butter(order, highcut, btype='lowpass')
         ddy = signal.filtfilt(b, a, ddy)
@@ -80,7 +81,7 @@ def integrate(ddy,fs, lowcut=None, highcut=None, order=3, isnumeric=False):
         print(np.linalg.norm(y), np.linalg.norm(dy))
     return y, dy
 
-def differentiate(y, fs, order = 3, cutoff=0.5, isnumeric=False):
+def differentiate(y, fs, order=3, cutoff=0.5, isnumeric=False):
     """ Differentiate y twice to get vel and acc
 
     5-point stencil offers fairly good results in most cases [1]_

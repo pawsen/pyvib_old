@@ -14,7 +14,7 @@ class FRF(Signal):
         self.fmin = fmin
         self.fmax = fmax
 
-    def periodic(self, fmin=None, fmax=None, nper=None):
+    def periodic(self, fmin=None, fmax=None, nper=1):
         """Interface to periodic FRF
 
         Extract periodic signal from original signal and call periodic FRF
@@ -24,10 +24,12 @@ class FRF(Signal):
         nper : int (optional)
             Number of periods in measurement
         """
-        if fmin != None:
+        if fmin is not None:
             self.fmin = fmin
-        if fmax != None:
+        if fmax is not None:
             self.fmax = fmax
+        # if fmin or fmax is None:
+        #     raise ValueError('fmin or fmax not specified')
 
         # Call signal.cut before this. Or call signal.cut from here?
 
@@ -45,8 +47,8 @@ class FRF(Signal):
         for i in range(ndof):
             # TODO maybe save sigN (and freq) in matrix as well. sigN is
             # different for each dof, while freq is not.
-            freq, H1, sigN = periodic(u, y[i,:], nper, fs, self.fmin, self.fmax)
-
+            freq, H1, sigN = periodic(u, y[i,:], nper, fs, self.fmin,
+                                      self.fmax)
             if i == 0:
                 H = np.empty((ndof, len(freq)), dtype=complex)
             H[i,:] = H1
@@ -56,7 +58,7 @@ class FRF(Signal):
     def nonperiodic():
         """Interface to nonperiodic FRF"""
 
-def periodic( u, y, nper, fs, fmin, fmax):
+def periodic(u, y, nper, fs, fmin, fmax):
     """ Calculate FRF for a periodic signal.
 
     H(f) = FRF(f) = Y(f)/U(f) (Y/F in classical notation)
@@ -108,17 +110,15 @@ def periodic( u, y, nper, fs, fmin, fmax):
     nsper = ns // nper
 
     freq = np.arange(0, nsper//2) * fs/nsper
-    flines = np.where( (freq >= fmin) & (freq <= fmax))
+    flines = np.where((freq >= fmin) & (freq <= fmax))
     freq = freq[flines]
     nfreq = len(freq)
 
     G = np.empty((nper, nfreq), dtype='complex')
-    for p in range (nper):
-
+    for p in range(nper):
         # do fft on current period
-        U = np.fft.fft(u[p*nsper : (p+1)*nsper]) / np.sqrt(nsper)
-
-        Y = np.fft.fft(y[p*nsper : (p+1)*nsper]) / np.sqrt(nsper)
+        U = np.fft.fft(u[p*nsper: (p+1)*nsper]) / np.sqrt(nsper)
+        Y = np.fft.fft(y[p*nsper: (p+1)*nsper]) / np.sqrt(nsper)
 
         U = U[flines]
         Y = Y[flines]
@@ -142,7 +142,6 @@ def periodic( u, y, nper, fs, fmin, fmax):
         sigN = np.sqrt(np.std(G, axis=0)**2 / nper)
     else:
         sigN = None
-
 
     return freq, FRF, sigN
 
@@ -205,16 +204,14 @@ def nonperiodic(u, y, N, fs, fmin, fmax):
     """
 
     while N > len(u)/2:
-      N = int(N//2)
+        N = int(N//2)
 
     M = int(np.floor(len(u)/N))
 
-
-    freq = (np.arange(1, N/2 - 1) + 0.5) * fs/ N
-    flines = np.where( (freq >= fmin) & (freq <= fmax))
+    freq = (np.arange(1, N/2 - 1) + 0.5) * fs/N
+    flines = np.where((freq >= fmin) & (freq <= fmax))
     freq = freq[flines]
     nfreq = len(freq)
-
 
     u = u[:M * N]
     y = y[:M * N]
@@ -227,9 +224,8 @@ def nonperiodic(u, y, N, fs, fmin, fmax):
     Y = np.fft.fft(y, axis=0) / np.sqrt(N)
     Y = Y[1:N/2+1,:]
 
-
-    U = diff(U, axis=0)
-    Y = diff(Y, axis=0)
+    U = np.diff(U, axis=0)
+    Y = np.diff(Y, axis=0)
 
     # Syu: Cross spectral density
     # Suu: power spectral density
@@ -250,6 +246,5 @@ def nonperiodic(u, y, N, fs, fmin, fmax):
     else:
         sigT = None
         gamma = None
-
 
     return freq, FRF, sigT, gamma

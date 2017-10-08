@@ -6,6 +6,20 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from ..common import db
 
+class scaler():
+    def __init__(self, scale):
+        self.scale = scale
+
+    def ratio(self):
+        return self.scale
+    def label(self):
+        if self.scale == 1:
+            xstr = '(Hz)'
+        else:
+            xstr = '(rad/s)'
+        return xstr
+
+
 def fig_ax_getter(fig=None, ax=None):
     if fig is None and ax is None:
         fig, ax = plt.subplots()
@@ -15,13 +29,14 @@ def fig_ax_getter(fig=None, ax=None):
         ax = fig.gca()
     return fig, ax
 
-def plot_knl(fnsi, knl, sca=1):
+def plot_knl(fnsi, sca=1):
 
     inl = fnsi.inl
     enl = fnsi.enl
     fs = fnsi.fs
     nsper = fnsi.nsper
     flines = fnsi.flines
+    knl = fnsi.knl
 
     if inl.size == 0:
         return
@@ -136,7 +151,6 @@ def plot_linfrf(fnsi, H, dofs=0, sca=1, fig=None, ax=None, **kwargs):
 
     # For linear scale: 'Amplitude (m/N)'
     ax.set_ylabel('Amplitude (dB)')
-    ax.legend()
     return fig, ax
 
 
@@ -150,10 +164,11 @@ def plot_svg(Sn, fig=None, ax=None, **kwargs):
     return fig, ax
 
 
-def plot_stab(fnsi, nlist, sd, sca=1, fig=None, ax=None):
+def plot_stab(fnsi, nlist, sca=1, fig=None, ax=None):
     fig, ax = fig_ax_getter(fig, ax)
     fmin = fnsi.fmin*sca
     fmax = fnsi.fmax*sca
+    sd = fnsi.sd
 
     orUNS = []    # Unstabilised model order
     freqUNS = []  # Unstabilised frequency for current model order
@@ -193,13 +208,17 @@ def plot_stab(fnsi, nlist, sd, sca=1, fig=None, ax=None):
     if len(freqUNS) != 0:
         ax.plot(freqUNS, orUNS, 'xr', ms=7, label='Unstabilized')
     if len(freqS) != 0:
-        ax.plot(freqS, orSfreq, '*k', ms=7, label='Stabilized in natural frequency')
+        ax.plot(freqS, orSfreq, '*k', ms=7,
+                label='Stabilized in natural frequency')
     if len(freqSep) != 0:
-        ax.plot(freqSep, orSep, 'sk', ms=7, mfc='none', label='Extra stabilized in damping ratio')
+        ax.plot(freqSep, orSep, 'sk', ms=7, mfc='none',
+                label='Extra stabilized in damping ratio')
     if len(freqSmode) != 0:
-        ax.plot(freqSmode, orSmode, 'ok', ms=7, mfc='none', label='Extra stabilized in MAC')
+        ax.plot(freqSmode, orSmode, 'ok', ms=7, mfc='none',
+                label='Extra stabilized in MAC')
     if len(freqSfull) != 0:
-        ax.plot(freqSfull, orSfull, '^k', ms=7, mfc='none', label='Full stabilization')
+        ax.plot(freqSfull, orSfull, '^k', ms=7, mfc='none',
+                label='Full stabilization')
 
     ax.set_xlim([fmin, fmax])
     ax.set_ylim([nlist[0]-2, nlist[-1]])

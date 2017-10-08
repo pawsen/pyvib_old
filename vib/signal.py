@@ -53,7 +53,7 @@ class Signal(object):
         per : list
             List of periods to use. 0-based. Ie. [0,1,2] etc
         """
-
+        per = np.atleast_1d(per)
         # number of periods. Only used for this check
         ns = self.ns
         _nper = int(np.floor(ns / nsper))
@@ -77,7 +77,8 @@ class Signal(object):
             self.u_per[i*nsper: (i+1)*nsper] = self.u[offset + p*nsper:
                                                       offset + (p+1)*nsper]
 
-    def periodicity(self, nsper, dof=0, offset=0, fig=None, ax=None):
+    def periodicity(self, nsper=None, dof=0, offset=0, fig=None, ax=None,
+                    **kwargs):
         """Shows the periodicity for the signal
 
 
@@ -90,6 +91,8 @@ class Signal(object):
         offset : int
             Use offset as first index
         """
+        if nsper is None:
+            nsper = self.nsper
 
         fs = self.fs
 
@@ -108,7 +111,6 @@ class Signal(object):
         # reference period. The last measured period
         yref = y[ilast:ilast+nsper]
         yscale = np.amax(y) - np.amin(y)
-
         # holds the similarity of the signal, compared to reference period
         va = np.empty(nsper*(nper-1))
 
@@ -129,14 +131,13 @@ class Signal(object):
             va_per[i] = np.amax(va[idx])
 
         signal = db(y[:ns])
-
         if fig is None:
             fig, ax = plt.subplots()
             ax.clear()
 
         ax.set_title('Periodicity of signal for DOF {}'.format(dof))
-        ax.plot(t,signal,'--', label='signal')  # , rasterized=True)
-        ax.plot(t[:ilast],va, label='periodicity')
+        ax.plot(t,signal,'--', label='signal', **kwargs)  # , rasterized=True)
+        ax.plot(t[:ilast],va, label='periodicity', **kwargs)
         for i in range(1,nper):
             x = t[nsper * i]
             ax.axvline(x, color='k', linestyle='--')
@@ -194,6 +195,17 @@ class Signal(object):
     #     WT = namedtuple('WT', 'f1 f2 nf f00  dof pad finst wtinst time freq y')
     #     self.wt = WT(f1, f2, nf, f00, dof, pad,finst, wtinst, time, freq, y)
 
+    def filter(self, lowcut, highcut, order=3):
+        from scipy import signal
+        fn = 0.5 * self.fs
+        if highcut > fn:
+            raise ValueError('Highcut frequency is higher than nyquist\
+            frequency of the signal', highcut, fn)
+        elif lowcut <= 0:
+            raise ValueError('Lowcut frequency is 0 or lower', lowcut, fn)
+
+        b, a = signal.butter(order, highcut, btype='lowpass')
+        return signal.filtfilt(b, a, self.y)
 
 def _set_signal(y):
     if y is not None:
