@@ -180,15 +180,12 @@ class NL_polynomial(_NL_compute):
             i2 = inl[j,1]
             idx1 = np.where(i1 == idof)
             x1 = x[idx1]
-            # extraction needed due to the way the slice is made in dfnl.
-            idx1 = idx1[0][0]
             if i2 == -1:
-                idx2 = ndof
+                idx2 = (np.array([ndof]),)
                 x2 = 0
             else:
                 idx2 = np.where(i2 == idof)
                 x2 = x[idx2]
-                idx2 = idx2[0][0]
             x12 = x1 - x2
             df12 = self.knl[j] * self.enl[j] * np.abs(x12)**(self.enl[j]-1)
             # in case of even functional
@@ -196,11 +193,16 @@ class NL_polynomial(_NL_compute):
                 idx = np.where(x12 < 0)
                 df12[idx] = -df12[idx]
 
+
+            # extraction needed due to the way the slice is made in dfnl.
+            id1 = idx1[0][0]
+            id2 = idx2[0][0]
+
             # add the nonlinear force to the right dofs
-            dfnl[idx1, idx1::ndof+1] += df12
-            dfnl[idx2, idx1::ndof+1] -= df12
-            dfnl[idx1, idx2::ndof+1] -= df12
-            dfnl[idx2, idx2::ndof+1] += df12
+            dfnl[idx1, id1::ndof+1] += df12
+            dfnl[idx2, id1::ndof+1] -= df12
+            dfnl[idx1, id2::ndof+1] -= df12
+            dfnl[idx2, id2::ndof+1] += df12
         return dfnl
 
     def energy(self, x, xd, energy):
