@@ -178,14 +178,17 @@ class NL_polynomial(_NL_compute):
         for j in range(nbln):
             i1 = inl[j,0]
             i2 = inl[j,1]
-            idx1 = np.where(i1 == idof)[0][0]
+            idx1 = np.where(i1 == idof)
             x1 = x[idx1]
+            # extraction needed due to the way the slice is made in dfnl.
+            idx1 = idx1[0][0]
             if i2 == -1:
                 idx2 = ndof
                 x2 = 0
             else:
-                idx2 = np.where(i2 == idof)[0][0]
+                idx2 = np.where(i2 == idof)
                 x2 = x[idx2]
+                idx2 = idx2[0][0]
             x12 = x1 - x2
             df12 = self.knl[j] * self.enl[j] * np.abs(x12)**(self.enl[j]-1)
             # in case of even functional
