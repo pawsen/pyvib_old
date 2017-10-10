@@ -91,8 +91,11 @@ def meanVar(Y):
     # https://scipy.github.io/old-wiki/pages/EricsBroadcastingDoc
     Y0 = Y - Ymean[...,None]
 
-    # weights. Only used if the signal is noisy
-    W = np.sum(np.abs(Y0)**2, axis=2)/(p-1)
+    W = []
+    if p > 1:
+        # weights. Only used if the signal is noisy and multiple periods are
+        # used
+        W = np.sum(np.abs(Y0)**2, axis=2)/(p-1)
 
     return Ymean, W
 

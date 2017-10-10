@@ -2,15 +2,11 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from scipy import linalg
+from scipy.linalg import (norm, lstsq, solve, qr, svd, logm, pinv)
 from collections import defaultdict
 
 from .common import meanVar, db, modal_properties, ModalAC, ModalACX
 from .signal import Signal
-
-# just for debugging
-from pprint import pprint
-from scipy.linalg import norm
 
 class FNSI():
     def __init__(self, signal, inl, enl, knl, idof, fmin, fmax,
@@ -256,7 +252,7 @@ class FNSI():
         # Compute the orthogonal projection P = Yi/Ei using QR-decomposition, eq. (20)
         print('QR decomposition')
         P = np.vstack([Emat, Ymat])
-        R, = linalg.qr(P.T, mode='r')
+        R, = qr(P.T, mode='r')
         Rtr = R[:(ims+1)*(m+l),:(ims+1)*(m+l)].T
         R22 = Rtr[(ims+1)*m:ims*(m+l)+m,(ims+1)*m:ims*(m+l)+m]
 
@@ -272,21 +268,19 @@ class FNSI():
 
         # full_matrices=False is equal to matlabs economy-size decomposition.
         # gesvd is the driver used in matlab,
-        UCY, scy, _ = linalg.svd(CY, full_matrices=False, lapack_driver='gesvd')
-        SCY = np.diag(scy)
+        UCY, scy, _ = svd(CY, full_matrices=False, lapack_driver='gesvd')
 
-        sqCY = UCY.dot(np.sqrt(SCY).dot(UCY.T))
-        isqCY = UCY.dot(np.diag(np.diag(SCY)**(-0.5)).dot(UCY.T))
-        print('nan value: ', np.argwhere(np.isnan(isqCY)))
+        # it is faster to work on the diagonal scy, than the full matrix SCY
+        sqCY = UCY @ np.diag(np.sqrt(scy)) @ UCY.T
+        isqCY = UCY @ np.diag(1/np.sqrt(scy)) @ UCY.T
 
         # 4:
         # Compute the SVD of P
         print('SV decomposition')
-
-        Un, sn, _ = linalg.svd(isqCY.dot(R22), full_matrices=False,
+        Un, sn, _ = svd(isqCY.dot(R22), full_matrices=False,
                                lapack_driver='gesvd')
 
-        self.Sn = np.diag(np.diag(sn))
+        self.sn = sn
         self.Un = Un
         self.Rtr = Rtr
         self.sqCY = sqCY
@@ -304,7 +298,7 @@ class FNSI():
         l = self.l
         m = self.m
         Un  =self.Un
-        Sn = self.Sn
+        sn = self.sn
         Rtr = self.Rtr
         sqCY = self.sqCY
 
@@ -313,25 +307,25 @@ class FNSI():
         # determined by inspecting the singular values in Sn or using stabilization
         # diagram.
         U1 = Un[:,:nmodel]
-        S1 = Sn[:nmodel]
+        S1 = sn[:nmodel]
 
         # 6:
         # Estimation of the extended observability matrix, Γi, eq (21)
         # Here np.diag(np.sqrt(S1)) creates an diagonal matrix from an array
-        G = sqCY.dot(U1.dot(np.diag(np.sqrt(S1))))
+        G = sqCY @ U1 @ np.diag(np.sqrt(S1))
 
         # 7:
         # Estimate A from eq(24) and C as the first block row of G.
         # Recompute G from A and C, eq(13). G plays a major role in determining B and D,
         # thus Noel suggest that G is recalculated
 
-        A = linalg.pinv(G[:-l,:]).dot(G[l:,:])
+        A, *_ = lstsq(G[:-l,:], G[l:,:])
         C = G[:l,:]
 
         G1 = np.empty(G.shape)
         G1[:l,:] = C
         for j in range(1,ims):
-            G1[j*l:(j+1)*l,:] = C.dot(np.linalg.matrix_power(A,j))
+            G1[j*l:(j+1)*l,:] = C @ np.linalg.matrix_power(A,j)
 
         G = G1
 
@@ -345,19 +339,19 @@ class FNSI():
         R_Y = Rtr[m*(ims+1):(m+l)*(ims+1),:(m+l)*(ims+1)]
 
         # eq. 30
-        G_inv = linalg.pinv(G)
+        G_inv = pinv(G)
         Q = np.vstack([
-            G_inv.dot(np.hstack([np.zeros((l*ims,l)), np.eye(l*ims)]).dot(R_Y)),
+            G_inv @ np.hstack([np.zeros((l*ims,l)), np.eye(l*ims)]) @ R_Y,
             R_Y[:l,:]]) - \
             np.vstack([
                 A,
-                C]).dot(G_inv.dot(np.hstack([np.eye(l*ims), np.zeros((l*ims,l))]).dot(R_Y)))
+                C]) @ G_inv @ np.hstack([np.eye(l*ims), np.zeros((l*ims,l))]) @ R_Y
 
         Rk = R_U
 
         # eq (34) with zeros matrix appended to the end. eq. L1,2 = [L1,2, zeros]
-        L1 = np.hstack([A.dot(G_inv), np.zeros((nmodel,l))])
-        L2 = np.hstack([C.dot(G_inv), np.zeros((l,l))])
+        L1 = np.hstack([A @ G_inv, np.zeros((nmodel,l))])
+        L2 = np.hstack([C @ G_inv, np.zeros((l,l))])
 
         # The pseudo-inverse of G. eq (33), prepended with zero matrix.
         # eq. MM = [zeros, G_inv]
@@ -412,7 +406,7 @@ class FNSI():
         ])
 
         # Solve for DB, eq. (44)
-        DB = linalg.pinv(kron_prod_real).dot(Q_real)
+        DB, *_ = lstsq(kron_prod_real, Q_real)
         DB = DB.reshape(nmodel+l,m, order='F')
         D = DB[:l,:]
         B = DB[l:l+nmodel,:]
@@ -424,10 +418,10 @@ class FNSI():
         # Ad, Bd is the discrete time(frequency domain) matrices.
         # A, B is continuous time
         Ad = A
-        A = fs * linalg.logm(Ad)
+        A = fs * logm(Ad)
 
         Bd = B
-        B = A.dot(linalg.solve(Ad - np.eye(len(Ad)),Bd))
+        B = A @ (solve(Ad - np.eye(len(Ad)),Bd))
 
         self.A = A
         self.B = B
@@ -509,8 +503,8 @@ class FNSI():
         He = np.empty((l+1, m+nnl, F),dtype=complex)
         He[-1,:,:] = 0
         for k in range(F):
-            He[:-1,:,k] = C.dot(linalg.pinv(np.eye(*A.shape,dtype=complex)*1j*2*np.pi*
-                                            freq[flines[k]] - A)).dot(B) + D
+            He[:-1,:,k] = C @ pinv(np.eye(*A.shape,dtype=complex)*1j*2*np.pi*
+                                    freq[flines[k]] - A) @ B + D
 
             for i in range(nnl):
                 knl[i, k] = scaling[i] * He[iu, m+i, k] / (He[inl1[i],0,k] -
@@ -539,7 +533,7 @@ class FNSI():
         m = self.m
         F = self.F
         U = self.Un
-        S = self.Sn
+        s = self.sn
         sqCY = self.sqCY
         # for postprocessing
         fmin = self.fmin
@@ -548,17 +542,17 @@ class FNSI():
         SD = [None]*len(nlist)
         for k, n in enumerate(nlist):
             U1 = U[:,:n]
-            S1 = S[:n]
+            S1 = s[:n]
             # Estimation of the extended observability matrix, Γi, eq (21)
-            G = sqCY.dot(U1.dot(np.diag(np.sqrt(S1))))
+            G = sqCY @ U1 @ np.diag(np.sqrt(S1))
 
             # Estimate A from eq(24) and C as the first block row of G.
             G_up = G[l:,:]
             G_down = G[:-l,:]
-            A = linalg.pinv(G_down).dot(G_up)
+            A, *_ = lstsq(G_down, G_up)
             C = G[:l, :]
             # Convert A into continous-time arrays using eq (8)
-            A = fs * linalg.logm(A)
+            A = fs * logm(A)
             SD[k] = modal_properties(A, C)
 
         # postprocessing
