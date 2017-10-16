@@ -186,8 +186,14 @@ class FNSI():
         print('QR decomposition')
         P = np.vstack([Emat, Ymat])
         R, = qr(P.T, mode='r')
-        Rtr = R[:(ims+1)*(m+l),:(ims+1)*(m+l)].T
-        R22 = Rtr[(ims+1)*m:ims*(m+l)+m,(ims+1)*m:ims*(m+l)+m]
+        _slice = np.s_[:(ims+1)*(m+l)]
+        Rtr = R[_slice, _slice].T
+        _slice = np.s_[(ims+1)*m:ims*(m+l)+m]
+        R22 = Rtr[_slice, _slice]
+        if np.size(R22) == 0:
+            raise ValueError('Not enough frequency content to allow for the'
+                             ' number of nonlinear basis functions and'
+                             ' matrix block rows(ims).')
 
         # Calculate weight CY from filter W if present.
         if W is None:
@@ -256,14 +262,12 @@ class FNSI():
         # thus Noel suggest that G is recalculated
 
         A, *_ = lstsq(G[:-l,:], G[l:,:])
-        C = G[:l,:]
+        C = G[:l,:].copy()
 
-        G1 = np.empty(G.shape)
-        G1[:l,:] = C
+        # Equal to G[] = C @ np.linalg.matrix_power(A,j)
         for j in range(1,ims):
-            G1[j*l:(j+1)*l,:] = C @ np.linalg.matrix_power(A,j)
+            G[j*l:(j+1)*l,:] =  G[(j-1)*l:(j)*l,:] @ A
 
-        G = G1
 
         # 8:
         # Estimate B and D
