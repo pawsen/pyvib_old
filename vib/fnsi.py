@@ -200,8 +200,11 @@ class FNSI():
 
 
         # full_matrices=False is equal to matlabs economy-size decomposition.
-        # gesvd is the driver used in matlab,
-        UCY, scy, _ = svd(CY, full_matrices=False, lapack_driver='gesvd')
+        # Use gesdd as driver. Matlab uses gesvd. The only reason to use dgesvd
+        # instead is for accuracy and workspace memory. The former should only
+        # be important if you care about high relative accuracy for tiny
+        # singular values. Mem: gesdd: O(min(m,n)^2) vs O(max(m,n)) gesvd
+        UCY, scy, _ = svd(CY, full_matrices=False)
 
         # it is faster to work on the diagonal scy, than the full matrix SCY
         sqCY = UCY @ np.diag(np.sqrt(scy)) @ UCY.T
