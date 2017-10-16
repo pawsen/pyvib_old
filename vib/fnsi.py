@@ -219,8 +219,7 @@ class FNSI():
         # 4:
         # Compute the SVD of P
         print('SV decomposition')
-        Un, sn, _ = svd(isqCY.dot(R22), full_matrices=False,
-                               lapack_driver='gesvd')
+        Un, sn, _ = svd(isqCY.dot(R22), full_matrices=False)
 
         self.sn = sn
         self.Un = Un
