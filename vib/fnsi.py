@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -7,14 +8,12 @@ from collections import defaultdict
 
 from .common import meanVar, db, modal_properties, ModalAC, ModalACX
 from .signal import Signal
+from .spline import spline
 
 class FNSI():
-    def __init__(self, signal, inl, enl, knl, idof, fmin, fmax,
-                 iu=[], nldof=[]):
+    def __init__(self, signal, nonlin, idof, fmin, fmax, iu=[], nldof=[]):
         # self.signal = signal
-        self.inl = np.asarray(inl)
-        self.enl = enl
-        self.knl = knl
+        self.nonlin = nonlin
 
         # nper : number of periods
         # nsper : number of samples per period
@@ -59,70 +58,6 @@ class FNSI():
         self.fmin = fmin
         self.fmax = fmax
 
-
-
-    def _force_nl(self, x):
-        """Calculate force contribution for polynomial nonlinear stiffness or
-        damping, see eq(2)
-
-        Parameters
-        ----------
-        x : ndarray (ndof, ns)
-            displacement or velocity.
-        inl : ndarray (nbln, 2)
-            Matrix with the locations of the nonlinearities,
-            ex: inl = np.array([[7,0],[7,0]])
-        enl : ndarray
-            List of exponents of nonlinearity
-        knl : ndarray (nbln)
-            Array with nonlinear coefficients. ex. [1,1]
-        idof : ndarray
-            Array with node mapping for x.
-
-        Returns
-        -------
-        f_nl : ndarray (nbln, ns)
-            Nonlinear force
-        """
-        inl = self.inl
-        enl = self.enl
-        knl = self.knl
-        idof = self.idof
-
-        # return empty array in case of no nonlinearities
-        if inl.size == 0:
-            return np.array([])
-
-        nbln = inl.shape[0]
-        nsper = x.shape[1]
-        fnl = np.zeros((nbln, nsper))
-
-        for j in range(nbln):
-            # connected from
-            i1 = inl[j,0]
-            # conencted to
-            i2 = inl[j,1]
-
-            # Convert to the right index
-            idx1 = np.where(i1==idof)
-            x1 = x[idx1]
-
-            # if connected to ground
-            if i2 == -1:
-                x2 = 0
-            else:
-                idx2 = np.where(i2==idof)
-                x2 = x[idx2]
-            x12 = x1 - x2
-            # in case of even functional
-            if (enl[j] % 2 == 0):
-                x12 = np.abs(x12)
-
-            fnl[j,:] = knl[j] * x12**enl[j]
-
-        return fnl
-
-
     def calc_EY(self, isnoise=False):
         """Calculate FFT of the extended input vector e(t) and the measured output
         y.
@@ -152,7 +87,6 @@ class FNSI():
         y = self.y
         nsper = self.nsper
         npp = self.npp
-        inl = self.inl
 
         U = np.fft.fft(self.u,axis=1) / np.sqrt(nsper)
         Y = np.fft.fft(self.y,axis=1) / np.sqrt(nsper)
@@ -165,24 +99,24 @@ class FNSI():
             WY = None
 
         # In case of no nonlinearities
-        if inl.size == 0:
+        if len(self.nonlin.nls) == 0:
             scaling = []
             E = Umean
         else:
             ynl = y
             # average displacement
             ynl = np.sum(ynl, axis=2) / npp
-            nl = self._force_nl(ynl)
-            nnl = nl.shape[0]
+            fnl = self.nonlin.force(ynl, 0)
+            nnl = fnl.shape[0]
 
             scaling = np.zeros(nnl)
             for j in range(nnl):
-              scaling[j] = np.std(u[0,:]) / np.std(nl[j,:])
-              nl[j,:] = nl[j,:] * scaling[j]
+              scaling[j] = np.std(u[0,:]) / np.std(fnl[j,:])
+              fnl[j,:] *= scaling[j]
 
-            NL = np.fft.fft(nl, axis=1) / np.sqrt(nsper)
+            FNL = np.fft.fft(fnl, axis=1) / np.sqrt(nsper)
             # concatenate to form extended input spectra matrix
-            E = np.vstack((Umean, -NL))
+            E = np.vstack((Umean, -FNL))
 
         self.E = E
         self.Y = Ymean
@@ -232,8 +166,8 @@ class FNSI():
             dz[j,:] = zvar**j
 
         # 2:
-        # Concatenate external forces and nonlinearities to form the extended input
-        # spectra Ei
+        # Concatenate external forces and nonlinearities to form the extended
+        # input  spectra Ei
         # Initialize Ei and Yi
         Emat = np.empty((m * (ims + 1), F), dtype=complex)
         Ymat = np.empty((l * (ims + 1), F), dtype=complex)
@@ -241,15 +175,14 @@ class FNSI():
             # Implemented as the formulation eq. (10), not (11) and (12)
             Emat[:,j] = np.kron(dz[:,j], E[:, flines[j]])
             Ymat[:,j] = np.kron(dz[:,j], Y[:, flines[j]])
-        print('dtype: {}'.format(Emat.dtype))
 
         # Emat is implicitly recreated as dtype: float64
         Emat = np.hstack([np.real(Emat), np.imag(Emat)])
         Ymat = np.hstack([np.real(Ymat), np.imag(Ymat)])
-        print('dtype: {}'.format(Emat.dtype))
 
         # 3:
-        # Compute the orthogonal projection P = Yi/Ei using QR-decomposition, eq. (20)
+        # Compute the orthogonal projection P = Yi/Ei using QR-decomposition,
+        # eq. (20)
         print('QR decomposition')
         P = np.vstack([Emat, Ymat])
         R, = qr(P.T, mode='r')
@@ -462,7 +395,6 @@ class FNSI():
         He(ω) : ndarray(complex)
             The extended FRF (transfer function matrix)
         """
-        from copy import deepcopy
 
         dofs = np.atleast_1d(dofs)
         fs = self.fs
@@ -472,7 +404,6 @@ class FNSI():
         B = self.B
         C = self.C
         D = self.D
-        inl = deepcopy(self.inl)
         scaling = self.scaling
 
         freq = np.arange(0,nsper)*fs/nsper
@@ -481,45 +412,53 @@ class FNSI():
         l, m = D.shape
 
         # just return in case of no nonlinearities
-        if inl.size == 0:
-            # return np.array([]), np.array([])
-            knl = np.array([])
+        if len(self.nonlin.nls) == 0:
             nnl = 0
         else:
-            nnl = inl.shape[0]
-            # connected from
-            inl1 = inl[:,0]
-            # connected to
-            inl2 = inl[:,1]
-            # if connected to ground.
-            inl2[np.where(inl2 == -1)] = l
-
-            knl = np.empty((nnl, F), dtype=complex)
+            nnl = 0
+            for nl in self.nonlin.nls:
+                nnl += nl.nnl
+                nl.knl = np.empty((nl.nnl,F),dtype=complex)
 
         m = m - nnl
 
         # Extra rows of zeros in He is for ground connections
+        # It is not necessary to set inl's connected to ground equal to l, as
+        # -1 already point to the last row.
         H = np.empty((len(dofs), F),dtype=complex)
         He = np.empty((l+1, m+nnl, F),dtype=complex)
         He[-1,:,:] = 0
-        for k in range(F):
-            He[:-1,:,k] = C @ pinv(np.eye(*A.shape,dtype=complex)*1j*2*np.pi*
-                                    freq[flines[k]] - A) @ B + D
 
-            for i in range(nnl):
-                knl[i, k] = scaling[i] * He[iu, m+i, k] / (He[inl1[i],0,k] -
-                                                           He[inl2[i],0,k])
+        for k in range(F):
+            # eq. 47
+            He[:-1,:,k] = C @ solve(np.eye(*A.shape,dtype=complex)*1j*2*np.pi*
+                                    freq[flines[k]] - A, B) + D
+
+            i = 0
+            for nl in self.nonlin.nls:
+                # number of nonlin connections for the given nl type
+                ninl = int(nl.nnl/nl.inl.shape[0])
+                for j in range(nl.nnl):
+                    idx = j//ninl
+                    nl.knl[j,k] = scaling[i] * He[iu, m+i, k] / \
+                        (He[nl.inl[idx,0],0,k] - He[nl.inl[idx,1],0,k])
+                    i += 1
 
             for j, dof in enumerate(dofs):
                 H[j,k] = He[dof, 0, k]
 
-        self.knl = knl
         self.H = H
         self.He = He
-        return knl, H, He
+        return H, He
 
-    def stabilisation_diagram(self, nlist):
+    def stabilisation_diagram(self, nlist, tol_freq=1, tol_damping=5,
+                              tol_mode=0.98, macchoice='complex'):
         """
+
+        Parameters
+        ----------
+        # tol for freq and damping is in %
+
 
         Returns
         -------
@@ -556,12 +495,6 @@ class FNSI():
             SD[k] = modal_properties(A, C)
 
         # postprocessing
-        # tol for freq and damping is in %
-        tol_freq = 1
-        tol_damping = 5
-        tol_mode = 0.98
-        macchoice = 'complex'
-
         # Initialize SDout as 2 nested defaultdict
         SDout = defaultdict(lambda: defaultdict(list))
         # loop over model orders
@@ -586,13 +519,13 @@ class FNSI():
                     # Stabilized in natfreq
                     SDout[nval]['stab'].append(True)
                     SDout[nval]['freq'].append(natfreq)
-                    # Only in very rare cases, ie multiple natfreqs are very close,
-                    # is len(ifreqS) != 1
+                    # Only in very rare cases, ie multiple natfreqs are very
+                    # close, is len(ifreqS) != 1
                     for ii in ifreqS:
                         nep = SD[ior+1]['ep'][ii]
                         tol_low = (1 - tol_damping / 100) * SD[ior]['ep'][ifr]
                         tol_high = (1 + tol_damping / 100) * SD[ior]['ep'][ifr]
-                        # TODO: matlab have find(cond ,1). Ie only return the first match
+
                         iepS, = np.where((nep >= tol_low) & (nep <= tol_high))
                         if iepS.size == 0:
                             SDout[nval]['ep'].append(False)
@@ -616,3 +549,144 @@ class FNSI():
     def calc_modal(self):
         """Calculate modal properties after identification is done"""
         self.modal = modal_properties(self.A, self.C)
+
+    def state_space(self):
+        """Calculate state space matrices in physical domain using a similarity
+        transform T"""
+
+        # Similarity transform
+        T = np.vstack((self.C, self.C @ self.A))
+        C = solve(T.T, self.C.T).T  # (C = C*T^-1)
+        A = solve(T.T, (T @ self.A).T).T  # (A = T*A*T^-1)
+        B = T @ self.B
+        return
+
+class NL_force(object):
+
+    def __init__(self):
+        self.nls = []
+
+    def add(self, _NL_compute):
+        self.nls.append(_NL_compute)
+
+    def force(self, x, xd):
+
+        # return empty array in case of no nonlinearities
+        if len(self.nls) == 0:
+            return np.array([])
+
+        fnl = []
+        for nl in self.nls:
+            fnl_t = nl.compute(x, xd)
+            fnl.extend(fnl_t)
+
+        fnl = np.asarray(fnl)
+        return fnl
+
+class NL_polynomial():
+    """Calculate force contribution for polynomial nonlinear stiffness or
+    damping, see eq(2)
+
+    Parameters
+    ----------
+    x : ndarray (ndof, ns)
+        displacement or velocity.
+    inl : ndarray (nbln, 2)
+        Matrix with the locations of the nonlinearities,
+        ex: inl = np.array([[7,0],[7,0]])
+    enl : ndarray
+        List of exponents of nonlinearity
+    knl : ndarray (nbln)
+        Array with nonlinear coefficients. ex. [1,1]
+    idof : ndarray
+        Array with node mapping for x.
+
+    Returns
+    -------
+    f_nl : ndarray (nbln, ns)
+        Nonlinear force
+    """
+
+    def __init__(self, inl, enl, knl, is_force=True):
+        self.inl = inl
+        self.enl = enl
+        self.knl = knl
+        self.is_force = is_force
+        self.nnl = inl.shape[0]
+
+    def compute(self, x, xd):
+        inl = self.inl
+        nbln = inl.shape[0]
+        if self.is_force is False:
+            # TODO: Overskriver dette x i original funktion? Ie pass by ref?
+            x = xd
+
+        ndof, nsper = x.shape
+        idof = np.arange(ndof)
+        fnl = np.zeros((nbln, nsper))
+
+        for j in range(nbln):
+            # connected from
+            i1 = inl[j,0]
+            # conencted to
+            i2 = inl[j,1]
+
+            # Convert to the right index
+            idx1 = np.where(i1==idof)
+            x1 = x[idx1]
+
+            # if connected to ground
+            if i2 == -1:
+                x2 = 0
+            else:
+                idx2 = np.where(i2==idof)
+                x2 = x[idx2]
+            x12 = x1 - x2
+            # in case of even functional
+            if (self.enl[j] % 2 == 0):
+                x12 = np.abs(x12)
+
+            fnl[j,:] = self.knl[j] * x12**self.enl[j]
+
+        return fnl
+
+class NL_spline():
+    def __init__(self, inl, nspl, is_force=True):
+        self.nspline = nspl
+        self.is_force = is_force
+        self.inl = inl
+
+        # number of nonlinearities * number of knots
+        self.nnl = inl.shape[0]*(nspl+1)
+
+    def compute(self, x, xd):
+        inl = self.inl
+        nbln = inl.shape[0]
+        ndof, nsper = x.shape
+        idof = np.arange(ndof)
+        if self.is_force is False:
+            x = xd
+
+        fnl = []
+        for j in range(nbln):
+            i1 = inl[j,0]
+            i2 = inl[j,1]
+            idx1 = np.where(i1==idof)
+            x1 = x[idx1]
+            # if connected to ground
+            if i2 == -1:
+                x2 = 0
+            else:
+                idx2 = np.where(i2==idof)
+                x2 = x[idx2]
+            x12 = x1 - x2
+
+            fnl_t, kn, dx = spline(x12.squeeze(), self.nspline)
+
+            fnl.extend(fnl_t)
+        fnl = np.asarray(fnl)
+
+        self.kn = kn
+        self.fnl = fnl
+
+        return fnl
