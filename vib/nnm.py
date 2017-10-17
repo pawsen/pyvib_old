@@ -4,16 +4,16 @@
 import numpy as np
 from scipy.linalg import solve, lstsq, norm, eigvals
 
-from .helper.plotting import Anim
 from .newmark import Newmark
 from .common import modal_properties_MKC
+from .helper.plotting import Anim
 
 class NNM():
     def __init__(self, M, C, K, nonlin, omega_min, omega_max, step=0.1,
                  step_min=0.01, step_max=1, adaptive_stepsize=True,
                  opt_it_NR=3, max_it_NR=15, tol_NR=1e-6, scale=1,
                  max_it_cont=100, mode=0,
-                 angle_max_beta=90):
+                 angle_max_beta=90, anim=True, loglevel=0):
         """Calculate NNM using the shooting method to calculate a periodic
         solution and then Pseudo-arclength to continue(follow) the
         solution/branch.
@@ -53,7 +53,8 @@ class NNM():
         # eigenvals should be less than 1 for stability
         self.tol_stability = 1 + 1e-3
         self.sensitivity = True
-        self.loglevel = 0
+        self.loglevel = loglevel
+        self.anim = anim
 
         # number points per period
         self.nppp = 360
@@ -106,9 +107,10 @@ class NNM():
         T = 2 * np.pi / w
         n = len(X0)
 
-        par = {'title':'Frequency Energy plot (FEP)','xstr':'Log10(Energy) (J)',
-               'ystr':'Frequency (Hz)','yscale':1/(2*np.pi),'dof':0}
-        anim = Anim(x=np.log10(self.energy_vec), y=self.omega_vec,**par)
+        if self.anim:
+            par = {'title':'Frequency Energy plot (FEP)','xstr':'Log10(Energy) (J)',
+                   'ystr':'Frequency (Hz)','yscale':1/(2*np.pi)}
+            anim = Anim(x=np.log10(self.energy_vec), y=self.omega_vec,**par)
 
         if self.adaptive_stepsize:
             h = self.adaptive_h(h)
@@ -236,7 +238,8 @@ class NNM():
                     print('  Energy: {:0.3e}  Stable: {}'.
                           format(self.energy_vec[-1], self.stab_vec[-1]))
                     print('----- convergence -----')
-                anim.update(x=np.log10(self.energy_vec), y=self.omega_vec)
+                if self.anim:
+                    anim.update(x=np.log10(self.energy_vec), y=self.omega_vec)
 
             it_w += 1
 
