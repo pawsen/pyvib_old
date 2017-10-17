@@ -191,6 +191,7 @@ def modal_properties_MKC(M, K, C=None, neigs=6):
 
     """
     from scipy.sparse.linalg import eigs
+    from scipy.sparse import issparse
     from copy import deepcopy
 
     n,n = K.shape
@@ -199,7 +200,6 @@ def modal_properties_MKC(M, K, C=None, neigs=6):
         B = M
     else:
         from scipy.sparse import csr_matrix, vstack, hstack, identity
-        from scipy.sparse import issparse
         if issparse(K):
             A = hstack([C, K], format='csr')
             A = vstack((A, hstack([-identity(n), csr_matrix((n,n))])), format='csr')
@@ -212,14 +212,15 @@ def modal_properties_MKC(M, K, C=None, neigs=6):
             B = np.row_stack((B, np.column_stack([np.zeros((n,n)), np.eye(n)])))
 
 
-    if n < 12 and not issparse(K):
-        egval, egvec  = linalg.eig(A, b=B)
+    # if n < 12 and not issparse(K):
+    #     egval, egvec  = eig(A, b=B)
 
-    else:
-        egval, egvec = eigs(A, k=neigs, M=B, which='SR')
-        if C is not None:
-            # extract eigenvectors as the first half
-            egvec = np.split(egvec, 2)[0]
+    # else:
+    #     egval, egvec = eigs(A, k=neigs, M=B, which='SR')
+    #     if C is not None:
+    #         # extract eigenvectors as the first half
+    #         egvec = np.split(egvec, 2)[0]
+    egval, egvec  = eig(A, b=B)
 
     # TODO: dont repeat code! XXX. The following system can call modal_properties
     # dof = size( M, 1 );

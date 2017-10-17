@@ -9,7 +9,7 @@ from .common import modal_properties_MKC
 from .helper.plotting import Anim
 
 class NNM():
-    def __init__(self, M, C, K, nonlin, omega_min, omega_max, step=0.1,
+    def __init__(self, M, K, nonlin, omega_min, omega_max, step=0.1,
                  step_min=0.01, step_max=1, adaptive_stepsize=True,
                  opt_it_NR=3, max_it_NR=15, tol_NR=1e-6, scale=1,
                  max_it_cont=100, mode=0,
@@ -20,7 +20,7 @@ class NNM():
         """
 
         # Force C to zero, if user forgets it! :)
-        self.M, self.C, self.K = M, 0, K
+        self.M, self.C, self.K = M, np.zeros(M.shape), K
         self.nonlin = nonlin
         self.ndof = M.shape[0]
 
@@ -60,7 +60,7 @@ class NNM():
         self.nppp = 360
         self.PhiT = []
 
-        self.newmark = Newmark(M, C, K, nonlin)
+        self.newmark = Newmark(self.M, self.C, self.K, nonlin)
 
     def periodic(self):
         """Find periodic solution using the shooting technique.
