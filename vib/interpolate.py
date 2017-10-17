@@ -1,6 +1,6 @@
 import numpy as np
 
-def spline_interp(x, a, xv):
+def spline(x, a, xv):
     """
 
     Parameters

@@ -133,7 +133,7 @@ def frf_mck(M, C, K , fmin, fmax, fres):
 
     mat = np.zeros((n1,n2,N+1), dtype=complex)
     for k in range(N+1):
-        sol = lstsq((( 1j *2*np.pi*freq[k] * np.eye(2*n) - A)).T, C[odof].T)[0]
+        sol, *_ = lstsq(((1j*2*np.pi*freq[k] * np.eye(2*n) - A)).T, C[odof].T)
         mat[...,k] = sol.T @ B[:,idof]
 
     # Map to right index.
@@ -146,18 +146,7 @@ def frf_mck(M, C, K , fmin, fmax, fres):
 
     return freq, H
 
-def undamp_modal_properties(M,K):
-    """Calculate undamped modal properties"""
-    egval, egvec = eig(K,b=M)
-    egval = np.real(egval)
-    idx = np.argsort(egval)
-    w = egval[idx]
-    f = w / (2*np.pi)
-    X = egvec[idx]
-
-    return w, f, X
-
-def modal_properties_MKC(M, K, C=None):
+def modal_properties_MKC(M, K, C=None, neigs=6):
     """Calculate damped and undamped eigenfrequencies in (rad/s).
 
     See Jakob S. Jensen & Niels Aage: "Lecture notes: FEMVIB", eq. 3.50 for the
@@ -165,13 +154,11 @@ def modal_properties_MKC(M, K, C=None):
 
     Returns
     -------
-    vals : float[neigs]
-        The eigenvalues, each repeated according to its multiplicity. The
-        eigenvalues are not necessarily ordered.
-    vesc: float[neqs,neigs]
-        the mass normalized (unit “length”) eigenvectors. The column
-        vals[:,i] is the eigenvector corresponding to the eigenvalue
-        vecs[i].
+    realmode : real ndarray. (nodes, nodes)
+        Real part of cpxmode. Normalized to 1.
+    natfreq : real ndarray. (modes)
+        Natural frequency (Hz)
+
 
     Undamped frequencies can be found directly from (matlab syntax). Remove
     diag when using python.
@@ -204,8 +191,6 @@ def modal_properties_MKC(M, K, C=None):
 
     """
     from scipy.sparse.linalg import eigs
-    from scipy.sparse import csr_matrix, vstack, hstack, identity
-    from scipy.sparse import issparse
     from copy import deepcopy
 
     n,n = K.shape
@@ -213,6 +198,8 @@ def modal_properties_MKC(M, K, C=None):
         A = K
         B = M
     else:
+        from scipy.sparse import csr_matrix, vstack, hstack, identity
+        from scipy.sparse import issparse
         if issparse(K):
             A = hstack([C, K], format='csr')
             A = vstack((A, hstack([-identity(n), csr_matrix((n,n))])), format='csr')
@@ -239,23 +226,15 @@ def modal_properties_MKC(M, K, C=None):
     # A = [ zeros( dof, dof ), eye( dof ); - inv( M ) * K,  - inv( M ) * Cv ];
     # C = [ eye( dof ), zeros( dof, dof ) ];
 
+    # XXX All below is only for undamped system
     # Rest is copy from modal_properties below:
-    lda = egval
-    # throw away very small values
-    idx1 = np.where(np.imag(lda) > 1e-8)
-    lda = lda[idx1]
-    # sort after eigenvalues
-    idx2 = np.argsort(np.imag(lda))
-    lda = lda[idx2]
-    freq = np.imag(lda) / (2*np.pi)
-    natfreq = np.abs(lda) / (2*np.pi)
 
-    # Definition: np.sqrt(1 - (freq/natfreq)**2)
-    ep = - np.real(lda) / np.abs(lda)
-
-    # TODO: do some calculation/scaling of modes:
-    cpxmode = []
-    realmode = egvec[idx1][idx2]
+    lda = np.real(egval)
+    idx = np.argsort(np.real(lda))
+    lda = lda[idx]
+    # In Hz
+    natfreq = np.sqrt(lda) / (2*np.pi)
+    realmode = np.real(egvec.T[idx])
     # normalize realmode
     nmodes = realmode.shape[0]
     for i in range(nmodes):
@@ -263,6 +242,9 @@ def modal_properties_MKC(M, K, C=None):
         if realmode[i,0] < 0:
             realmode[i] = -realmode[i]
 
+    ep = []
+    cpxmode = []
+    freq = []
     sd = {
         'cpxmode': cpxmode,
         'realmode': realmode,
@@ -297,7 +279,8 @@ def modal_properties(A, C=None):
     from copy import deepcopy
     egval, egvec = eig(A)
     lda = egval
-    # throw away very small values
+    # throw away very small values. Note this only works for state-space
+    # systems including damping. For undamped system, imag(lda) == 0!
     idx1 = np.where(np.imag(lda) > 1e-8)
     lda = lda[idx1]
     # sort after eigenvalues

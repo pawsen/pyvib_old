@@ -6,7 +6,7 @@ from scipy.linalg import solve, lstsq, norm, eigvals
 
 from .helper.plotting import Anim
 from .newmark import Newmark
-from .common import undamp_modal_properties
+from .common import modal_properties_MKC
 
 class NNM():
     def __init__(self, M, C, K, nonlin, omega_min, omega_max, step=0.1,
@@ -20,7 +20,7 @@ class NNM():
         """
 
         # Force C to zero, if user forgets it! :)
-        self.M, self.C, self.K = M, np.zeros(M.shape), K
+        self.M, self.C, self.K = M, 0, K
         self.nonlin = nonlin
         self.ndof = M.shape[0]
 
@@ -68,16 +68,14 @@ class NNM():
 
         ndof = self.ndof
         # mode shape estimate
-        w0, f0, X0 = undamp_modal_properties(self.M, self.K)
-        w0 = w0[self.mode]
-        X0 = X0[:,self.mode]
-        Xnorm = X0/norm(X0)
-        scale_alpha = np.sqrt(2*self.scale / (Xnorm @ self.K @ Xnorm))
+        sd = modal_properties_MKC(self.M, self.K)
+        w0 = sd['natfreq'][self.mode]*2*np.pi
+        X0 = sd['realmode'][self.mode]
+        scale_alpha = np.sqrt(2*self.scale / (X0 @ self.K @ X0))
         # initial state
-        X0 = np.append(scale_alpha*Xnorm, np.zeros(ndof))
+        X0 = np.append(scale_alpha*X0, np.zeros(ndof))
         if w0 == 0:
             w0 = 1e-3
-
         n = len(X0)
         indcont = np.arange(ndof)
         X0, w, XT, PhiT, ampl, cvg = self.shooting_periodic(X0, w0, indcont)
@@ -208,7 +206,7 @@ class NNM():
                       format(it_NR, H, norm(Ds)))
 
             w = 2*np.pi / T
-            print('it: {:3d}  Step: {:0.3f}  Freq: {:3g} Hz'.
+            print('it: {:3d}  Step: {:0.3g}  Freq: {:3g} Hz'.
                   format(it_w, h, w/2/np.pi), end='')
 
             cvg = False
