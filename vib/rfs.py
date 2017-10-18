@@ -243,7 +243,7 @@ class _rfsPlotBuilder(object):
 
 from .signal import Signal
 class RFS(Signal):
-    def __init__(self, signal, dofs=0, show_damped = False):
+    def __init__(self, signal, dof=0, show_damped = False):
         """ Show a Restoring Force Surface, which gives a visual idea of the
         type of nonlinearity(if any)
 
@@ -253,19 +253,19 @@ class RFS(Signal):
 
         Parameters:
         -----------
-        dofs : list: [dof_i], [dof_i, dof_j] or empty
+        dof : list: [dof_i], [dof_i, dof_j] or empty
             dofs to compare. If none, then compare to ground. If [dof_i], then
             compare dof_i to ground. Else compare dof_i to dof_j
         show_damp : bool
             show stifness or damping coeff.
         """
-        dofs = np.atleast_1d(dofs)
+        dof = np.atleast_1d(dof)
         # if not isinstance(dofs, list):
         #     raise TypeError('dofs not a list. Should be [dof1, dof2]', type(dofs))
-        if len(dofs.shape) > 2:
-            raise ValueError('List of dofs is too long. Max two dofs', len(dofs))
+        if len(dof.shape) > 2:
+            raise ValueError('List of dof is too long. Max two dofs', len(dof))
 
-        self.dofs = dofs
+        self.dofs = dof
         self.ns = signal.ns
         self.fs = signal.fs
         self.tol_slice = 1e-2
@@ -273,16 +273,16 @@ class RFS(Signal):
 
         y = signal.y  #[dofs,:]
         yd = signal.yd  #[dofs,:]
-        if len(dofs) == 1:
+        if len(dof) == 1:
             # connected to ground
-            self.y = y[dofs[0],:]  #.squeeze()
-            self.yd = yd[dofs[0],:]  #.squeeze()
+            self.y = y[dof[0],:]  #.squeeze()
+            self.yd = yd[dof[0],:]  #.squeeze()
         else:
             # connected to another dof
-            self.y = y[dofs[0],:] - y[dofs[1],:]
-            self.yd = yd[dofs[0],:] - yd[dofs[1],:]
+            self.y = y[dof[0],:] - y[dof[1],:]
+            self.yd = yd[dof[0],:] - yd[dof[1],:]
 
-        self.ydd = signal.ydd[dofs[0],:]
+        self.ydd = signal.ydd[dof[0],:]
 
 
 
