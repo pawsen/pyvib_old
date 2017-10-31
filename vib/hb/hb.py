@@ -7,10 +7,6 @@ from scipy.linalg import norm
 from scipy import linalg
 from scipy import sparse
 
-import os
-import sys
-from scipy import io
-
 from ..helper.plotting import Anim
 from ..forcing import sineForce, toMDOF
 from .hbcommon import fft_coeff, ifft_coeff, hb_signal, hb_components
@@ -21,7 +17,7 @@ class HB():
     def __init__(self, M0, C0, K0, nonlin,
                  NH=3, npow2=8, nu=1, scale_x=1, scale_t=1,
                  amp0=1e-3, tol_NR=1e-6, max_it_NR=15,
-                 stability=True, rcm_permute=False):
+                 stability=True, rcm_permute=False, anim=True):
         """Because frequency(in rad/s) and amplitude have different orders of
         magnitude, time and displacement have to be rescaled to avoid
         ill-conditioning.
@@ -55,6 +51,7 @@ class HB():
         self.n = M0.shape[0]
 
         self.nonlin = nonlin
+        self.anim = anim
 
         # number of unknowns in Z-vector, eq (4)
         self.nz = self.n * (2 * NH + 1)
@@ -112,8 +109,8 @@ class HB():
         # Assemble A, describing the linear dynamics. eq (20)
         A = self.assembleA(omega2)
 
-        # Form Q(t), eq (8). Q is orthogonal trigonometric basis(harmonic terms)
-        # Then use Q to from the kron product Q(t) ⊗ Iₙ, eq (6)
+        # Form Q(t), eq (8). Q is orthogonal trigonometric basis(harmonic
+        # terms) Then use Q to from the kron product Q(t) ⊗ Iₙ, eq (6)
         mat_func_form = np.empty((n*nt, nz))
         Q = np.empty((NH*2+1,1))
         for i in range(nt):
@@ -160,7 +157,7 @@ class HB():
 
         if it_NR > max_it_NR:
             raise ValueError("Number of NR iterations exceeded {}."
-                             "Change Harmonic Balance parameters".
+                             " Change Harmonic Balance parameters".
                              format(max_it_NR))
 
         if stability:
@@ -197,7 +194,6 @@ class HB():
         scale_t = self.scale_t
         nu = self.nu
         n = self.n
-        f0 = self.f0
         f_amp = self.f_amp
         fdofs = self.fdofs
 
@@ -209,18 +205,17 @@ class HB():
 
         step_min = step_min * scale_t
         step_max = step_max * scale_t
-        # omega_cont_min = omega_cont_min*2*np.pi
-        # omega_cont_max = omega_cont_max*2*np.pi
         angle_max_pred = angle_max_pred*np.pi/180
 
-        par = {'title':'Nonlinear FRF','xstr':'Frequency (Hz)',
-               'ystr':'Amplitude (m)','xscale':1/(scale_t*2*np.pi),
-               'dof':0,'ymin':0,
-               'xmin':omega_cont_min/2/np.pi,
-               'xmax':omega_cont_max/2/np.pi*1.1,
-               }
-        anim = Anim(x=self.omega_vec, y=np.asarray(self.xamp_vec).T[dof],**par)
-
+        if self.anim:
+            par = {'title':'Nonlinear FRF','xstr':'Frequency (Hz)',
+                   'ystr':'Amplitude (m)','xscale':1/(scale_t*2*np.pi),
+                   'dof':0,'ymin':0,
+                   'xmin':omega_cont_min/2/np.pi,
+                   'xmax':omega_cont_max/2/np.pi*1.1,
+                   }
+            anim = Anim(x=self.omega_vec,
+                        y=np.asarray(self.xamp_vec).T[dof],**par)
 
         print('\n-------------------------------------------')
         print('|  Continuation of the periodic solution  |')
@@ -240,12 +235,6 @@ class HB():
                          np.kron(np.ones((len(inl_tmp),1)), np.arange(2*NH+1)*n)
             tangent_LP = [0]
 
-
-        abspath = '/home/paw/ownCloud/speciale/code/python/vib/'
-        relpath = 'data/'
-        path = abspath + relpath
-        #mat =  io.loadmat(path + 'hb.mat')
-
         omega2 = omega/nu
         # samme A som fra periodic calculation
         A = self.assembleA(omega2)
@@ -253,6 +242,7 @@ class HB():
         it_cont = 1
         z_cont = z
         omega_cont = omega
+        point = 0
         point_prev = 0
         point_pprev = 0
         branch_switch = False
@@ -265,10 +255,6 @@ class HB():
 
             print('[Iteration]:    {}'.format(it_cont))
 
-            ## Predictor step
-            # J_z = self.hjac(z, A)
-            # J_w = self.hjac_omega(omega, z)
-
             # Assemble A from eq. 31
             if it_cont == 1:
                 J_z = self.hjac(z, A)
@@ -276,27 +262,16 @@ class HB():
                 A_pred = np.vstack((
                     np.hstack((J_z, J_w[:,None])),
                     np.ones(nz+1)))
-                tangent = solve(A_pred, np.append(np.zeros(nz),1) )
+                tangent = solve(A_pred, np.append(np.zeros(nz),1))
                 tangent = tangent/linalg.norm(tangent)
             # With Moore-Penrose corrections, it is not needed to explicit
             # calculate the tangent again, since the corrections also correct
             # the tangent.
-
-            # else:
-            #     A_pred = np.vstack((
-            #         np.hstack((J_z, J_w[:,None])),
-            #         tangent))
-
-            # Tangent vector at iteration point, eq. 31 (search direction)
-            # tangent = [z, omega].T
-            # tangent = solve(A_pred, np.append(np.zeros(nz),1) )
-            # tangent = tangent/linalg.norm(tangent)
             tangent_pred = cont_dir * step * tangent
 
             z = z_cont + tangent_pred[:nz]
             omega = omega_cont + tangent_pred[nz]
 
-            #point = np.append(z,omega)
             if (it_cont >= 4 and True and
                 ((point - point_prev) @ (point_prev - point_pprev) /
                  (norm(point - point_prev) * norm(point_prev-point_pprev)) <
@@ -359,14 +334,15 @@ class HB():
                 H = self.state_sys(z, A, force)
                 Obj = linalg.norm(H) / linalg.norm(z)
                 # print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
-                it_NR = it_NR + 1
+                it_NR += 1
 
             if it_NR > max_it_NR:
                 z = z_cont
                 omega = omega_cont
                 step = step / 10
-                print('The maximum number of iterations is reached without convergence.'
-                      'Step size decreased by factor 10: {:0.2f}'.format(step))
+                print('The maximum number of iterations is reached without'
+                      ' convergence. Step size decreased by factor 10:'
+                      ' {:0.2f}'.format(step))
                 continue
             tangent = V
             point = np.append(z,omega)
@@ -397,7 +373,6 @@ class HB():
                 # if detect['BP'] and it_cont > idx_BP[-1] + 1:
                 #     detect_bp()
 
-
             z_cont = z
             omega_cont = omega
             point_pprev = point_prev
@@ -410,17 +385,19 @@ class HB():
             self.step_vec.append(step)
             self.z_vec.append(z)
 
-            print(' NR: {}\tFreq: {:f}\tAmp: {:0.3e}\tStep: {:0.2f}\tStable: {}'.
-                  format(it_NR-1, omega/2/np.pi / scale_t, xamp[dof], step, stab))
+            print(' NR: {}\tFreq: {:f}\tAmp: {:0.3e}\tStep: {:0.2f}\tStable: {}'
+                  .format(it_NR-1, omega/2/np.pi / scale_t, xamp[dof],
+                          step, stab))
 
             if adaptive_stepsize:
                 step = step * opt_it_NR/it_NR
                 step = min(step_max, step)
                 step = max(step_min, step)
 
-            anim.update(x=self.omega_vec, y=np.asarray(self.xamp_vec).T[dof])
+            if self.anim:
+                anim.update(x=self.omega_vec,
+                            y=np.asarray(self.xamp_vec).T[dof])
             it_cont += 1
-        #self.anim = anim
 
     def state_sys(self, z, A, force):
         """Calculate the system matrix h(z,ω) = A(ω)z - b(z), given by eq. (21).
@@ -465,7 +442,7 @@ class HB():
         forces (ie. it is zero for linear forces).
 
         """
-        nz =self.nz
+        nz = self.nz
         nt = self.nt
         NH = self.NH
         n = self.n
@@ -563,4 +540,3 @@ class HB():
         zp = z*scale_x
 
         return t, omegap, zp, cnorm, (c, phi), (cd, phid), (cdd, phidd)
-
