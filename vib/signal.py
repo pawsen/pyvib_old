@@ -27,16 +27,22 @@ class Signal(object):
         self.yd = _set_signal(yd)
         self.ydd = _set_signal(ydd)
 
-        self.u = u
-        self.fs = fs
-
+        self.isset_y = False
+        self.isset_yd = False
+        self.isset_ydd = False
         # ns: total sample points
         if y is not None:
             self.ndof, self.ns = self.y.shape
+            self.isset_y = True
         elif yd is not None:
-            self.ndof, self.ns = self.y.shape
+            self.ndof, self.ns = self.yd.shape
+            self.isset_yd = True
         elif ydd is not None:
-            self.ndof, self.ns = self.y.shape
+            self.ndof, self.ns = self.ydd.shape
+            self.isset_ydd = True
+
+        self.u = u
+        self.fs = fs
 
         self.y_per = None
         self.u_per = None
@@ -185,7 +191,15 @@ class Signal(object):
         self.y = _set_signal(y)
         self.yd = _set_signal(yd)
         self.ydd = _set_signal(ydd)
-
+        if y is not None:
+            self.ndof, self.ns = self.y.shape
+            self.isset_y = True
+        elif yd is not None:
+            self.ndof, self.ns = self.yd.shape
+            self.isset_yd = True
+        elif ydd is not None:
+            self.ndof, self.ns = self.ydd.shape
+            self.isset_ydd = True
     # def wt(self, f1, f2, nf=50, f00=10, dof=0, pad=0):
     #     fs = self.fs
     #     x = self.y[dof]

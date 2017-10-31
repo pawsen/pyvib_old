@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from scipy.linalg import eig, norm
+from scipy.linalg import eig, norm, inv, lstsq, solve
 import math
 
 class color:
@@ -99,45 +99,79 @@ def meanVar(Y):
 
     return Ymean, W
 
-def frf_mck(M, C, K , fmin, fmax, fres):
-    """Compute the transfer function for a FEM model.
+def frf_mkc(M, K, fmin, fmax, fres, C=None, idof=None, odof=None):
+    """Compute the frequency response for a FEM model, given a range of
+    frequencies.
+
+    Parameters
+    ----------
+    M: array
+        Mass matrix
+    K: array
+        Stiffness matrix
+    C: array, optional
+        Damping matrix
+    fmin: float
+        Minimum frequency used 
+    fmax: float
+        Maximum frequency used 
+    fres: float
+        Frequency resolution 
+    idof: array[int], optional
+        Array of in dofs/modes to use. If None, use all.
+    odof: array[int], optional
+        Array of out dofs/modes to use. If None, use all.
 
     Returns
     -------
     freq: ndarray
         The frequencies where H is calculated.
-    H: ndarray, [n, n, len(freq)]
+    H: ndarray, [idof, odof, len(freq)]
         The transfer function. H[0,0] gives H1 for DOF1, etc.
+
+    Examples
+    --------
+    >>> M = np.array([[1, 0],
+    ...               [0, 1]])
+    >>> K = np.array([[2, -1],
+    ...               [-1, 6]])
+    >>> C = np.array([[0.3, -0.02],
+    ...               [-0.02, 0.1]])
+    >>> freq, H = frf_mkc(M, K,  C)
     """
-    from scipy.linalg import inv, lstsq
 
     n, n = M.shape
     if C is None:
         C = np.zeros(M.shape)
     # in/out DOFs to use
-    idof = np.arange(n)
-    odof = np.arange(n)
+    if idof is None:
+        idof = np.arange(n)
+    if odof is None:
+        odof = np.arange(n)
     n1 = len(idof)
     n2 = len(odof)
 
-    # TODO: Use better state-space formulation
-    iM = inv(M)
+    # Create state space system, A, B, C, D. D=0
+    Z = np.zeros((n, n))
+    I = np.eye(n)
     A = np.vstack((
-        np.hstack((np.zeros((n,n)),np.eye(n))),
-        np.hstack((-iM @ K, -iM @ C))))
-    B = np.vstack((np.zeros((n,n)), iM))
-    C = np.hstack((np.eye(n), np.zeros((n,n))))
+        np.hstack((Z, I)),
+        np.hstack((-solve(M, K, assume_a='pos'),
+                   -solve(M, C, assume_a='pos')))))
+    B = np.vstack((Z, inv(M)))
+    C = np.hstack((I, Z))
+    
 
-    N = int(np.ceil((fmax-fmin) / fres))
-    freq = np.linspace(fmin, fmax, N+1) # + N*fres
+    F = int(np.ceil((fmax-fmin) / fres))
+    freq = np.linspace(fmin, fmax, F+1) # + F*fres
 
-    mat = np.zeros((n1,n2,N+1), dtype=complex)
-    for k in range(N+1):
-        sol, *_ = lstsq(((1j*2*np.pi*freq[k] * np.eye(2*n) - A)).T, C[odof].T)
-        mat[...,k] = sol.T @ B[:,idof]
+    mat = np.zeros((n1,n2,F+1), dtype=complex)
+    for k in range(F+1):
+        mat[...,k] = solve(((1j*2*np.pi*freq[k] * np.eye(2*n) - A)).T,
+                           C[odof].T).T @ B[:,idof]
 
     # Map to right index.
-    H = np.zeros((n1,n2,N+1), dtype=complex)
+    H = np.zeros((n1,n2,F+1), dtype=complex)
     for i in range(n2):
         il = odof[i]
         for j in range(n1):
@@ -146,95 +180,58 @@ def frf_mck(M, C, K , fmin, fmax, fres):
 
     return freq, H
 
-def modal_properties_MKC(M, K, C=None, neigs=6):
-    """Calculate damped and undamped eigenfrequencies in (rad/s).
+def modal_properties_mkc(M, K, C=None, neigs=6):
+    """Calculate natural frequencies, damping ratios and mode shapes.
 
-    See Jakob S. Jensen & Niels Aage: "Lecture notes: FEMVIB", eq. 3.50 for the
-    state space formulation of the EVP.
+    If the dampind matrix C is none or if the damping is proportional,
+    wd and zeta are None.
+
+    Parameters
+    ----------
+    M: array
+        Mass matrix
+    K: array
+        Stiffness matrix
+    C: array
+        Damping matrix
+    neigs: int, optional
+        Number of eigenvalues to calculate
 
     Returns
     -------
-    realmode : real ndarray. (nodes, nodes)
-        Real part of cpxmode. Normalized to 1.
-    natfreq : real ndarray. (modes)
-        Natural frequency (Hz)
 
 
-    Undamped frequencies can be found directly from (matlab syntax). Remove
-    diag when using python.
-    * [phi, w2] = eigs(K,M,6,'sm');
-    * f = sort(sqrt(diag(w2))) / (2*pi)
-
-    The generalized eigenvalue problem can be stated in different ways.
-    scipy.sparse.linalg.eigs requires B to positive definite. A common
-    formulation[1]:
-    A = [C, K; -eye(size(K)), zeros(size(K))]
-    B = [M, zeros(size(K)); zeros(size(K)), eye(size(K))]
-
-    with corresponding eigenvector
-    z = [lambda x; x]
-    We can then take the first neqs components of z as the eigenvector x
-
-    Note that the system coefficient matrices are always positive definite for
-    elastic problems. Thus the formulation:
-    A = [zeros(size(K)),K; K, C];
-    B = [K, zeros(size(K)); zeros(size(K)), -M];
-    does not work with scipy.sparse. But does work with scipy.linalg.eig. See
-    also [2] and [3]
-
-    [1]
-    https://en.wikipedia.org/wiki/Quadratic_eigenvalue_problem
-    [2]
-    https://mail.python.org/pipermail/scipy-dev/2011-October/016670.html
-    [3]
-    https://scicomp.stackexchange.com/questions/10940/solving-a-generalised-eigenvalue-problem
-
+    Examples
+    --------
+    >>> M = np.array([[1, 0],
+    ...               [0, 1]])
+    >>> K = np.array([[2, -1],
+    ...               [-1, 6]])
+    >>> C = np.array([[0.3, -0.02],
+    ...               [-0.02, 0.1]])
+    >>> sd = modes_system(M, K, C)
     """
-    from scipy.sparse.linalg import eigs
-    from scipy.sparse import issparse
-    from copy import deepcopy
 
-    n,n = K.shape
-    if C is None:
-        A = K
-        B = M
-    else:
-        from scipy.sparse import csr_matrix, vstack, hstack, identity
-        if issparse(K):
-            A = hstack([C, K], format='csr')
-            A = vstack((A, hstack([-identity(n), csr_matrix((n,n))])), format='csr')
-            B = hstack([M, csr_matrix((n,n))], format='csr')
-            B = vstack((B, hstack([csr_matrix((n,n)), identity(n)])), format='csr')
-        else:
-            A = np.column_stack([C, K])
-            A = np.row_stack((A, np.column_stack([-np.eye(n), np.zeros((n,n))])))
-            B = np.column_stack([M, np.zeros(dim)])
-            B = np.row_stack((B, np.column_stack([np.zeros((n,n)), np.eye(n)])))
+    # Damping is non-proportional, eigenvectors are complex.
+    if (C is not None or not np.all(C == 0)):
+        n = len(M)
+        Z = np.zeros((n, n))
+        I = np.eye(n)
+        # creates state space matrices
+        A = np.vstack([np.hstack([Z, I]),
+                    np.hstack([-solve(M, K, assume_a='pos'),
+                               -solve(M, C, assume_a='pos')])])
+        C = np.hstack((I, Z))
+        sd = modal_properties(A, C)
+        return sd
 
-
-    # if n < 12 and not issparse(K):
-    #     egval, egvec  = eig(A, b=B)
-
-    # else:
-    #     egval, egvec = eigs(A, k=neigs, M=B, which='SR')
-    #     if C is not None:
-    #         # extract eigenvectors as the first half
-    #         egvec = np.split(egvec, 2)[0]
-    egval, egvec  = eig(A, b=B)
-
-    # TODO: dont repeat code! XXX. The following system can call modal_properties
-    # dof = size( M, 1 );
-    # A = [ zeros( dof, dof ), eye( dof ); - inv( M ) * K,  - inv( M ) * Cv ];
-    # C = [ eye( dof ), zeros( dof, dof ) ];
-
-    # XXX All below is only for undamped system
-    # Rest is copy from modal_properties below:
-
+    # Damping is proportional or zero, eigenvectors are real
+    egval, egvec = eig(K,M)
     lda = np.real(egval)
-    idx = np.argsort(np.real(lda))
+    idx = np.argsort(lda)
     lda = lda[idx]
     # In Hz
-    natfreq = np.sqrt(lda) / (2*np.pi)
+    wn = np.sqrt(lda) / (2*np.pi)
     realmode = np.real(egvec.T[idx])
     # normalize realmode
     nmodes = realmode.shape[0]
@@ -243,20 +240,20 @@ def modal_properties_MKC(M, K, C=None, neigs=6):
         if realmode[i,0] < 0:
             realmode[i] = -realmode[i]
 
-    ep = []
+    zeta = []
     cpxmode = []
-    freq = []
+    wd = []
     sd = {
+        'wn': wn,
+        'wd': wd,
+        'zeta': zeta,
         'cpxmode': cpxmode,
         'realmode': realmode,
-        'freq': freq,
-        'natfreq': natfreq,
-        'ep': ep,
     }
     return sd
 
 def modal_properties(A, C=None):
-    """Calculate eigenvalues and modes from A and C
+    """Calculate eigenvalues and modes from state space matrices A and C
 
     Parameters
     ----------
@@ -264,16 +261,16 @@ def modal_properties(A, C=None):
 
     Returns
     -------
+    wn: real ndarray. (modes)
+        Natural frequency (Hz)
+    wd: real ndarray. (modes)
+        Damped frequency (Hz)
+    zeta: real ndarray. (modes)
+        Damping factor
     cpxmode : complex ndarray. (modes, nodes)
         Complex mode(s) shape
     realmode : real ndarray. (nodes, nodes)
         Real part of cpxmode. Normalized to 1.
-    natfreq : real ndarray. (modes)
-        Natural frequency (Hz)
-    freq : real ndarray. (modes)
-        Damped frequency (Hz)
-    ep : real ndarray. (modes)
-        Damping factor
     sd : dict
         Keys are the names written above.
     """
@@ -287,19 +284,18 @@ def modal_properties(A, C=None):
     # sort after eigenvalues
     idx2 = np.argsort(np.imag(lda))
     lda = lda[idx2]
-    freq = np.imag(lda) / (2*np.pi)
-    natfreq = np.abs(lda) / (2*np.pi)
+    wd = np.imag(lda) / (2*np.pi)
+    wn = np.abs(lda) / (2*np.pi)
 
     # Definition: np.sqrt(1 - (freq/natfreq)**2)
-    ep = - np.real(lda) / np.abs(lda)
+    zeta = - np.real(lda) / np.abs(lda)
 
     # cannot calculate mode shapes if C is not given
     if C is not None:
 
         # Transpose so cpxmode has format: (modes, nodes)
         cpxmode = (C @ egvec).T
-        cpxmode = cpxmode[idx1]
-        cpxmode = cpxmode[idx2]
+        cpxmode = cpxmode[idx1][idx2]
         # np.real returns a view. Thus scaling realmode, will also scale the part
         # of cpxmode that is part of the view (ie the real part)
         realmode = deepcopy(np.real(cpxmode))
@@ -315,11 +311,11 @@ def modal_properties(A, C=None):
             realmode[i] = -realmode[i]
 
     sd = {
+        'wn': wn,
+        'wd': wd,
+        'zeta': zeta,
         'cpxmode': cpxmode,
         'realmode': realmode,
-        'freq': freq,
-        'natfreq': natfreq,
-        'ep': ep,
     }
     return sd
 
