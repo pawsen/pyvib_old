@@ -18,7 +18,7 @@ class HB():
                  NH=3, npow2=8, nu=1, scale_x=1, scale_t=1,
                  amp0=1e-3, tol_NR=1e-6, max_it_NR=15,
                  stability=True, rcm_permute=False, anim=True,
-                 xstr='Hz',xscale=1/(2*np.pi)):
+                 xstr='Hz',sca=1/(2*np.pi)):
         """Because frequency(in rad/s) and amplitude have different orders of
         magnitude, time and displacement have to be rescaled to avoid
         ill-conditioning.
@@ -54,7 +54,7 @@ class HB():
         self.nonlin = nonlin
         self.anim = anim
         self.xstr = xstr
-        self.xscale = xscale
+        self.sca = sca
 
         # number of unknowns in Z-vector, eq (4)
         self.nz = self.n * (2 * NH + 1)
@@ -213,10 +213,10 @@ class HB():
         if self.anim:
             par = {'title':'Nonlinear FRF',
                    'xstr':'Frequency ({})'.format(self.xstr),
-                   'ystr':'Amplitude (m)','xscale':1/(scale_t)*self.xscale,
+                   'ystr':'Amplitude (m)','xscale':1/(scale_t)*self.sca,
                    'dof':0,'ymin':0,
-                   'xmin':omega_cont_min*self.xscale,
-                   'xmax':omega_cont_max*self.xscale*1.1,
+                   'xmin':omega_cont_min*self.sca,
+                   'xmax':omega_cont_max*self.sca*1.1,
                    }
             anim = Anim(x=self.omega_vec,
                         y=np.asarray(self.xamp_vec).T[dof],**par)
@@ -390,7 +390,7 @@ class HB():
             self.z_vec.append(z)
 
             print(' NR: {}\tFreq: {:0.3g}{}. Amp: {:0.3e}. Step: {:0.2g}. Stable: {}'
-                  .format(it_NR-1, omega/scale_t*self.xscale, self.xstr,
+                  .format(it_NR-1, omega/scale_t*self.sca, self.xstr,
                           xamp[dof], step, stab))
 
             if adaptive_stepsize:
