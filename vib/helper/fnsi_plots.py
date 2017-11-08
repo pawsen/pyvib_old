@@ -188,7 +188,7 @@ def plot_stab(fnsi, nlist, sca=1, fig=None, ax=None):
         # Short notation for the explicit for-loop
         # values = zip(v.values())
         # for freq, ep, mode, stab in zip(*values):
-        for freq, ep, mode, stab in zip(v['freq'], v['ep'],
+        for freq, ep, mode, stab in zip(v['freq'], v['zeta'],
                                         v['mode'], v['stab']):
             freq = freq*sca
             if stab:

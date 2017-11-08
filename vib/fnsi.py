@@ -506,12 +506,12 @@ class FNSI():
         # loop over model orders
         for ior, nval in enumerate(nlist[:-1]):
             # loop over frequencies for current model order
-            for ifr, natfreq in enumerate(SD[ior]['natfreq']):
+            for ifr, natfreq in enumerate(SD[ior]['wn']):
                 if natfreq < fmin or natfreq > fmax:
                     continue
 
                 # compare with frequencies from one model order higher.
-                nfreq = SD[ior+1]['natfreq']
+                nfreq = SD[ior+1]['wn']
                 tol_low = (1 - tol_freq / 100) * natfreq
                 tol_high = (1 + tol_freq / 100) * natfreq
                 ifreqS, = np.where((nfreq >= tol_low) & (nfreq <= tol_high))
@@ -519,7 +519,7 @@ class FNSI():
                     # the current natfreq is not stabilized
                     SDout[nval]['stab'].append(False)
                     SDout[nval]['freq'].append(natfreq)
-                    SDout[nval]['ep'].append(False)
+                    SDout[nval]['zeta'].append(False)
                     SDout[nval]['mode'].append(False)
                 else:
                     # Stabilized in natfreq
@@ -528,15 +528,15 @@ class FNSI():
                     # Only in very rare cases, ie multiple natfreqs are very
                     # close, is len(ifreqS) != 1
                     for ii in ifreqS:
-                        nep = SD[ior+1]['ep'][ii]
-                        tol_low = (1 - tol_damping / 100) * SD[ior]['ep'][ifr]
-                        tol_high = (1 + tol_damping / 100) * SD[ior]['ep'][ifr]
+                        nep = SD[ior+1]['zeta'][ii]
+                        tol_low = (1 - tol_damping / 100) * SD[ior]['zeta'][ifr]
+                        tol_high = (1 + tol_damping / 100) * SD[ior]['zeta'][ifr]
 
                         iepS, = np.where((nep >= tol_low) & (nep <= tol_high))
                         if iepS.size == 0:
-                            SDout[nval]['ep'].append(False)
+                            SDout[nval]['zeta'].append(False)
                         else:
-                            SDout[nval]['ep'].append(True)
+                            SDout[nval]['zeta'].append(True)
                     if macchoice == 'complex':
                         m1 = SD[ior]['cpxmode'][ifr]
                         m2 = SD[ior+1]['cpxmode'][ifreqS]
