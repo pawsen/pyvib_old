@@ -109,17 +109,19 @@ def stability(lamb, dof=0, T=None, ptype='exp', fig=None, ax=None,
     return fig, ax
 
 
-def configuration(x1, x2, fig=None, ax=None, *args, **kwargs):
+def configuration(y, fig=None, ax=None, *args, **kwargs):
     if fig is None:
         fig, ax = plt.subplots()
         ax.clear()
 
-    ax.plot(x1,x2, *args, **kwargs)
+    x1 = y[0]
+    x2 = y[1]
+    ax.plot(x1,x2)
     ax.set_title('Configuration space')
     ax.set_xlabel('Displacement x₁ (m)')
     ax.set_ylabel('Displacement x₂ (m)')
     ax.ticklabel_format(axis='both', style='sci', scilimits=(-2,2))
-
+    ax.axis('equal')
     return fig, ax
 
 
