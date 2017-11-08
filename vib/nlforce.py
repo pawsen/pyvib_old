@@ -296,7 +296,8 @@ class NL_tanh_damping(_NL_compute):
         return dfnl
 
 class NL_piecewise_linear(_NL_compute):
-    def __init__(self, x, y, slope, delta, inl, symmetric=False, is_force=True):
+    def __init__(self, x, y, slope, inl, delta=None, symmetric=False,
+                 is_force=True):
         """
         Parameters
         ----------
@@ -311,13 +312,15 @@ class NL_piecewise_linear(_NL_compute):
         inl: ndarray [nbln, 2]
             DOFs for nonlinear connection
         """
-        self.x = x
-        self.y = y
-        self.slope = slope
+        self.x = np.asarray(x)
+        self.y = np.asarray(y)
+        self.slope = np.asarray(slope)
         self.delta = delta
-        self.symmetric = symmetric
         self.inl = inl
         self.is_force = is_force
+        if not isinstance(symmetric,(list)) and inl.shape[0] > 1:
+             symmetric = [symmetric]*inl.shape[0]
+        self.symmetric = symmetric
 
     def compute(self, x, xd, fnl):
         inl = self.inl
@@ -339,10 +342,10 @@ class NL_piecewise_linear(_NL_compute):
                 idx2 = np.where(i2 == idof)
                 x2 = x[idx2]
             x12 = x1 - x2
-            if self.symmetric[j] is True and x12 < 0:
+            if self.symmetric is True and x12 < 0:
                 x12 = -x12
-            f12 = piecewise_linear(self.x[j], self.y[j], self.slope[j],
-                                   self.delta[j], x12)
+            f12 = piecewise_linear(self.x, self.y, self.slope,
+                                   self.delta, x12)
             fnl[idx1] += f12
             fnl[idx2] -= f12
         return fnl
@@ -367,10 +370,10 @@ class NL_piecewise_linear(_NL_compute):
                 idx2 = np.where(i2 == idof)
                 x2 = x[idx2]
             x12 = x1 - x2
-            if self.symmetric[j] is True and x12 < 0:
+            if self.symmetric is True and x12 < 0:
                 x12 = -x12
-            df12 = piecewise_linear_der(self.x[j], self.y[j], self.slopes[j],
-                                        self.delta[j], x12)
+            df12 = piecewise_linear_der(self.x, self.y, self.slope,
+                                        self.delta, x12)
 
             id1 = idx1[0][0]
             id2 = idx2[0][0]

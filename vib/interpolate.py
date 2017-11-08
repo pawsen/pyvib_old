@@ -83,14 +83,17 @@ def piecewise_linear(x, y, s, delta=None, xv=[]):
     yv: ndarray
         Interpolated values
     """
+    if len(x) != len(y) or len(x) >= len(s):
+        raise ValueError('Wrong length. Length of slope should be len(x)+1')
 
     n = len(x)
-    nv = len(xv)
+    nv = xv.shape
 
     # Find out which segments, the xv points are located in.
     indv = np.outer(x[:,None],np.ones(nv)) - \
            np.outer(np.ones((n,)),xv)
     indv = np.floor((n - sum(np.sign(indv),0)) / 2)
+    indv = indv.reshape(nv)
 
     yv = np.zeros(nv)
     for i in range(1,n+1):
@@ -102,6 +105,9 @@ def piecewise_linear(x, y, s, delta=None, xv=[]):
 
     if delta is None:
         return yv
+
+    if len(x) > len(delta):
+        raise ValueError('Wrong length of delta. Should be len(x)',len(delta))
 
     for i in range(n):
         dd = delta[i]
@@ -123,15 +129,16 @@ def piecewise_linear(x, y, s, delta=None, xv=[]):
 
 def piecewise_linear_der(x, y, s, delta=None, xv=[]):
     n = len(x)
-    nv = len(xv)
+    nv = xv.shape
 
     indv = np.outer(x[:,None],np.ones(nv)) - \
            np.outer(np.ones((n,)),xv)
     indv = np.floor((n - sum(np.sign(indv),0)) / 2)
+    indv = indv.reshape(nv)
 
     yvd = np.zeros(nv)
     for i in range(0,n+1):
-        ind = np.argwhere(indv == i)
+        ind = np.where(indv == i)
         yvd[ind] = s[i]
 
     if delta is None:
@@ -139,7 +146,7 @@ def piecewise_linear_der(x, y, s, delta=None, xv=[]):
 
     for i in range(n):
         dd = delta[i]
-        indv = np.argwhere(abs(xv - x[i]) <= dd)
+        indv = np.where(abs(xv - x[i]) <= dd)
 
         xa = x[i] - dd
         sa = s[i]
@@ -156,65 +163,3 @@ def piecewise_linear_der(x, y, s, delta=None, xv=[]):
             / 2/dd
 
     return yvd
-
-def piecewise_cubic_spline(x):
-    """
-
-    Let q be divided into L
-    segments of arbitrary length and defined by their abscissas,
-    denoted by qk for k=1,...,L+1.
-
-    qk:
-        Abcissa(x-value) of knot k
-    gk:
-        Ordinate(y-value) of knot k
-    q:
-        Displacement value between knot k and k+1
-
-    Returns
-    -------
-    g:
-        Interpolated value for displacement q
-    """
-    from scipy.linalg import solve
-
-    pass
-
-    # calculate first derivatives gm from linear constraints
-    # Force the cubic spline and its first two derivatives to be continuous across each of the interior knots (L-1 linear constraints)
-    # A = np.zeros((L+1,L+1))
-    # b = np.zeros(L+1)
-    # for k in range(1,L):
-    #     A[k-1,k-1] = 1/(q[k]-q[k-1])
-    #     A[k-1,k] = 2*(1/(q[k]-q[k-1]) + 1/(q[k+1]-q[k]))
-    #     A[k-1,k+1] = 1/(q[k+1]-q[k])
-
-    #     b[k-1] = 3*((g[k]-g[k-1)/(q[k]-q[k-1])**2 +
-    #               (g[k+1]-g[k)/(q[k+1]-q[k])**2)
-
-    # # Since the essentially non-linear restoring force g is zero and
-    # # has zero slope at equilibrium, one should also enforce, in the
-    # # segment containing the abscissa of the equilibrium point, that ..
-    # k, = np.where(q<0)
-    # k = k[-1]
-    # t0 = -q[k]/(q[k+1]-q[k])
-    # A[L-1,k] = (t0**3-2*t0**2+t0) * (q[k+1]-q[k]) # *gm[k]
-    # A[L-1,k+1] = (t0**3-t0**2) * (q[k+1]-q[k])  # *gm[k+1]
-    # b[L-1] = -(2*t0**3-3*t0**2+1)*q[k] - (-2*t0**3+3*t0**2)*g[k+1]
-
-    # A[L,k] = (3*t0**3-4*t0+1) * (q[k+1]-q[k])  # *gm[k]
-    # A[L,k+1] = (3*t0**2-2*t0) * (q[k+1]-q[k])  # *gm[k+1]
-    # b[L] = 6*(t0-t0**2) * (g[k]-g[k+1])
-
-    # gm = solve(A,b)
-
-
-    # # Normalized displacement
-    # t = (x-q[k]) / (q[k+1] + q[k])
-
-    # # interpolation
-    # gv = (2*t**3-3*t**2+1) * g[k] + (-2*t**3+3*t**2) * g[k+1] + \
-    #      (t**3-2*t**2+t) * (q[k+1]-q[k]) * gm[k] + \
-    #      (t**3-t**2) * (q[k+1]-q[k]) * gm[k]
-
-    # return gv
