@@ -569,11 +569,16 @@ class FNSI():
 
 class NL_force(object):
 
-    def __init__(self):
+    def __init__(self, nls=None):
         self.nls = []
+        if nls is not None:
+            self.add(nls)
 
-    def add(self, _NL_compute):
-        self.nls.append(_NL_compute)
+    def add(self, nls):
+        if not isinstance(nls, list):
+            nls = [nls]
+            for nl in nls:
+                self.nls.append(nl)
 
     def force(self, x, xd):
 

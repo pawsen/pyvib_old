@@ -7,17 +7,23 @@ from .interpolate import spline, piecewise_linear, piecewise_linear_der
 
 class NL_force(object):
 
-    def __init__(self):
+    def __init__(self, nls=None):
         self.nls = []
         self.dnls_force = []
         self.dnls_damp = []
 
-    def add(self, _NL_compute):
-        self.nls.append(_NL_compute)
-        if _NL_compute.is_force:
-            self.dnls_force.append(_NL_compute)
-        else:
-            self.dnls_damp.append(_NL_compute)
+        if nls is not None:
+            self.add(nls)
+
+    def add(self, nls):
+            if not isinstance(nls, list):
+                nls = [nls]
+            for nl in nls:
+                self.nls.append(nl)
+                if nl.is_force:
+                    self.dnls_force.append(nl)
+                else:
+                    self.dnls_damp.append(nl)
 
     def force(self, x, xd):
 

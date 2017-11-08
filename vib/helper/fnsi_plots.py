@@ -127,9 +127,10 @@ def plot_modes(idof, sd, sca=1, fig=None, ax=None, **kwargs):
 
     return fig, ax
 
-def plot_linfrf(fnsi, H, dofs=0, sca=1, fig=None, ax=None, **kwargs):
+def plot_linfrf(fnsi, dofs=0, sca=1, fig=None, ax=None, **kwargs):
     fig, ax = fig_ax_getter(fig, ax)
 
+    H = fnsi.H
     fs = fnsi.fs
     nsper = fnsi.nsper
     flines = fnsi.flines
