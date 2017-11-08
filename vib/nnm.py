@@ -13,7 +13,8 @@ class NNM():
                  step_min=0.01, step_max=1, adaptive_stepsize=True,
                  opt_it_NR=3, max_it_NR=15, tol_NR=1e-6, scale=1,
                  max_it_cont=100, mode=0,
-                 angle_max_beta=90, anim=True, loglevel=0):
+                 angle_max_beta=90, anim=True, loglevel=0,
+                 unit='Hz',sca=1/(2*np.pi)):
         """Calculate NNM using the shooting method to calculate a periodic
         solution and then Pseudo-arclength to continue(follow) the
         solution/branch.
@@ -55,6 +56,8 @@ class NNM():
         self.sensitivity = True
         self.loglevel = loglevel
         self.anim = anim
+        self.sca = sca
+        self.unit = unit
 
         # number points per period
         self.nppp = 360
@@ -70,7 +73,7 @@ class NNM():
         ndof = self.ndof
         # mode shape estimate
         sd = modal_properties_MKC(self.M, self.K)
-        w0 = sd['natfreq'][self.mode]*2*np.pi
+        w0 = sd['wn'][self.mode]*2*np.pi
         X0 = sd['realmode'][self.mode]
         scale_alpha = np.sqrt(2*self.scale / (X0 @ self.K @ X0))
         # initial state
@@ -87,8 +90,8 @@ class NNM():
                              'first iteration, use a better initial guess.')
         self.PhiT = PhiT
         self.append_sol(X0, ampl, w, beta=0, predict=np.zeros(n+1), PhiT=PhiT)
-        print('Frequency: {:g} Hz\t\tEnergy: {:0.3e}'.
-              format(w/2/np.pi, self.energy_vec[-1]))
+        print('Frequency: {:g} {}\t\tEnergy: {:0.3e}'.
+              format(w*self.sca, self.unit, self.energy_vec[-1]))
 
         return X0, w, PhiT
 
@@ -109,7 +112,8 @@ class NNM():
 
         if self.anim:
             par = {'title':'Frequency Energy plot (FEP)','xstr':'Log10(Energy) (J)',
-                   'ystr':'Frequency (Hz)','yscale':1/(2*np.pi)}
+                   'ystr':'Frequency ({})'.format(self.unit),
+                   'yscale':self.sca}
             anim = Anim(x=np.log10(self.energy_vec), y=self.omega_vec,**par)
 
         if self.adaptive_stepsize:
@@ -208,8 +212,8 @@ class NNM():
                       format(it_NR, H, norm(Ds)))
 
             w = 2*np.pi / T
-            print('it: {:3d}  Step: {:0.3g}  Freq: {:3g} Hz'.
-                  format(it_w, h, w/2/np.pi), end='')
+            print('it: {:3d}  Step: {:0.3g}  Freq: {:3g} {}'.
+                  format(it_w, h, w*self.sca, self.unit), end='')
 
             cvg = False
             if it_NR > self.max_it_NR:
