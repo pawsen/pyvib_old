@@ -180,7 +180,7 @@ def frf_mkc(M, K, fmin, fmax, fres, C=None, idof=None, odof=None):
 
     return freq, H
 
-def modal_properties_mkc(M, K, C=None, neigs=6):
+def modal_properties_MKC(M, K, C=None, neigs=6):
     """Calculate natural frequencies, damping ratios and mode shapes.
 
     If the dampind matrix C is none or if the damping is proportional,
@@ -213,7 +213,7 @@ def modal_properties_mkc(M, K, C=None, neigs=6):
     """
 
     # Damping is non-proportional, eigenvectors are complex.
-    if (C is not None or not np.all(C == 0)):
+    if (C is not None and not np.all(C == 0)):
         n = len(M)
         Z = np.zeros((n, n))
         I = np.eye(n)
