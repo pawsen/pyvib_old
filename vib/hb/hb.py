@@ -17,7 +17,8 @@ class HB():
     def __init__(self, M0, C0, K0, nonlin,
                  NH=3, npow2=8, nu=1, scale_x=1, scale_t=1,
                  amp0=1e-3, tol_NR=1e-6, max_it_NR=15,
-                 stability=True, rcm_permute=False, anim=True):
+                 stability=True, rcm_permute=False, anim=True,
+                 xstr='Hz',xscale=1/(2*np.pi)):
         """Because frequency(in rad/s) and amplitude have different orders of
         magnitude, time and displacement have to be rescaled to avoid
         ill-conditioning.
@@ -52,6 +53,8 @@ class HB():
 
         self.nonlin = nonlin
         self.anim = anim
+        self.xstr = xstr
+        self.xscale = xscale
 
         # number of unknowns in Z-vector, eq (4)
         self.nz = self.n * (2 * NH + 1)
@@ -208,11 +211,12 @@ class HB():
         angle_max_pred = angle_max_pred*np.pi/180
 
         if self.anim:
-            par = {'title':'Nonlinear FRF','xstr':'Frequency (Hz)',
-                   'ystr':'Amplitude (m)','xscale':1/(scale_t*2*np.pi),
+            par = {'title':'Nonlinear FRF',
+                   'xstr':'Frequency ({})'.format(self.xstr),
+                   'ystr':'Amplitude (m)','xscale':1/(scale_t)*self.xscale,
                    'dof':0,'ymin':0,
-                   'xmin':omega_cont_min/2/np.pi,
-                   'xmax':omega_cont_max/2/np.pi*1.1,
+                   'xmin':omega_cont_min*self.xscale,
+                   'xmax':omega_cont_max*self.xscale*1.1,
                    }
             anim = Anim(x=self.omega_vec,
                         y=np.asarray(self.xamp_vec).T[dof],**par)
@@ -342,7 +346,7 @@ class HB():
                 step = step / 10
                 print('The maximum number of iterations is reached without'
                       ' convergence. Step size decreased by factor 10:'
-                      ' {:0.2f}'.format(step))
+                      ' {:0.2g}'.format(step))
                 continue
             tangent = V
             point = np.append(z,omega)
@@ -385,9 +389,9 @@ class HB():
             self.step_vec.append(step)
             self.z_vec.append(z)
 
-            print(' NR: {}\tFreq: {:f}\tAmp: {:0.3e}\tStep: {:0.2f}\tStable: {}'
-                  .format(it_NR-1, omega/2/np.pi / scale_t, xamp[dof],
-                          step, stab))
+            print(' NR: {}\tFreq: {:0.3g}{}. Amp: {:0.3e}. Step: {:0.2g}. Stable: {}'
+                  .format(it_NR-1, omega/scale_t*self.xscale, self.xstr,
+                          xamp[dof], step, stab))
 
             if adaptive_stepsize:
                 step = step * opt_it_NR/it_NR
