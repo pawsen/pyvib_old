@@ -1,4 +1,6 @@
+!/examples/nlbeam/data/NLBeam.mat
 dop853_temp/
+radau5_temp/
 __pycache__/
 *.vtu
 data/
@@ -7,4 +9,8 @@ data/
 *.tex
 driver/
 meshes/
+plots/
 *.pyc
+*.pkl
+*.npz
+!/examples/nlbeam/data/*.mat
