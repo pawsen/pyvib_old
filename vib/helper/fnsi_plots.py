@@ -116,9 +116,9 @@ def plot_modes(idof, sd, sca=1, fig=None, ax=None, **kwargs):
     ax.set_xlabel('Node id')
     ax.set_ylabel('Displacement (m)')
     # display max 8 modes
-    nmodes = min(len(sd['freq']), 8)
+    nmodes = min(len(sd['wd']), 8)
     for i in range(nmodes):
-        natfreq = sd['natfreq'][i]
+        natfreq = sd['wn'][i]
         ax.plot(idof, sd['realmode'][i],'-*', label='{:0.2f} {:s}'.
                 format(natfreq*sca, xstr))
     ax.axhline(y=0, ls='--', lw='0.5',color='k')
