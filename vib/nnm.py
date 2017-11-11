@@ -32,6 +32,7 @@ class NNM():
         self.step_vec = []
         self.beta_vec = []
         self.stab_vec = []
+        # Floquet multipliers, ie σ.
         self.flo_vec = []
         self.predict_vec = []
 
@@ -51,7 +52,8 @@ class NNM():
 
         self.stability = True
         self.betamin = 0
-        # eigenvals should be less than 1 for stability
+        # modulus should be equal or less than 1+tol for stability, ie. on the
+        # complex unit circle when using Floquet multipliers.
         self.tol_stability = 1 + 1e-3
         self.sensitivity = True
         self.loglevel = loglevel
@@ -132,7 +134,8 @@ class NNM():
         p = []
         cont = False
         it_w = 0
-        while(w * smark < self.omega_max * smark and w > self.omega_min):
+        while(it_w < self.max_it_cont and
+              w*smark < self.omega_max*smark and w > self.omega_min):
 
             # Prediction step, p=[pz, pT]. Calculate the tangent p from
             # ∂H/∂z|t=T * pz + ∂H/∂T|t=T *pT = 0
@@ -433,6 +436,11 @@ class NNM():
         if self.stability:
             flo = eigvals(PhiT)
             self.flo_vec.append(flo)
+            # modulus should be equal or less than 1+tol for stability, ie. on
+            # the complex unit circle for Hamiltonian systems, where the
+            # monodromy matrix is sympletic. This is the Floquet multipliers σ.
+            # They are related to the exponents as σ=e^(λ*T) where T is the
+            # period.
             if max(abs(flo)) <= self.tol_stability:
                 self.stab_vec.append(True)
             else:

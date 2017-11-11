@@ -9,22 +9,26 @@ from ..hb.hbcommon import hb_signal
 from copy import deepcopy
 
 
-# from functools import partial
-# periodic2 = partial(periodic,ptype='displ')
-
 def phase(y, yd, dof=0, fig=None, ax=None, *args, **kwargs):
     if fig is None:
         fig, ax = plt.subplots()
         ax.clear()
-    ax.plot(y[dof],yd[dof])#, **kwargs)
+    dof = np.atleast_1d(dof)
+    for i in dof:
+        ax.plot(y[i], yd[i], label=str(i))#, **kwargs)
     ax.set_title('Phase space, dof: {}'.format(dof))
     ax.set_xlabel('Displacement (m)')
     ax.set_ylabel('Velocity (m/s)')
     ax.ticklabel_format(axis='both', style='sci', scilimits=(-2,2))
+    ax.legend(loc=1)
     # ax.axis('equal')
     return fig, ax
 
 def periodic(t, y, dof=0, ptype='displ', fig=None, ax=None, *args, **kwargs):
+    """ To set ptype when used with the plotlist, use:
+    from functools import partial
+    periodic2 = partial(periodic,ptype='acc')
+    """
     if ptype == 'displ':
         ystr = 'Displacement (m)'
     elif ptype == 'vel':
@@ -35,14 +39,17 @@ def periodic(t, y, dof=0, ptype='displ', fig=None, ax=None, *args, **kwargs):
     if fig is None:
         fig, ax = plt.subplots()
         ax.clear()
+    dof = np.atleast_1d(dof)
+    for i in dof:
+        ax.plot(t, y[i], label=r'$x_{{{x}}}$'.format(x=i))#, **kwargs)
 
-    ax.plot(t,y[dof])#, **kwargs)
     ax.axhline(y=0, ls='--', lw='0.5',color='k')
-    ax.set_title('Displacement vs time, dof: {}'.format(dof))
+    ax.set_title('Displacement vs time')
     ax.set_xlabel('Time (t)')
     ax.set_ylabel(ystr)
     # use sci format on y axis when figures are out of the [0.01, 99] bounds
     ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+    ax.legend()
     return fig, ax
 
 def harmonic(cnorm, dof=0, fig=None, ax=None, *args, **kwargs):
@@ -50,53 +57,79 @@ def harmonic(cnorm, dof=0, fig=None, ax=None, *args, **kwargs):
         fig, ax = plt.subplots()
         ax.clear()
 
+    dof = np.atleast_1d(dof)
+    M = len(dof)
+    colors = ['steelblue', 'firebrick', 'darksage', 'goldenrod', 'gray'] * \
+        int(M/5. + 1)
+
     nh = cnorm.shape[1] - 1
-    ax.bar(np.arange(nh+1), cnorm[dof])#, *args, **kwargs)
+    alpha = 0.5
+    for j, i, color in zip(range(M), dof, colors):
+        kwargs = {'color':color, 'label':r'$x_{{{x}}}$'.format(x=i)}
+        ax.bar(np.arange(nh+1), cnorm[i], alpha=alpha if j else 1, **kwargs)
     ax.set_title('Displacement harmonic component, dof: {}'.format(dof))
     ax.set_xlabel('Harmonic index (-)')
     # use double curly braces to "escape" literal curly braces...
     ax.set_ylabel(r'Harmonic coefficient $C_{{{dof}-h}}$'.format(dof=dof))
     ax.set_xlim([-0.5, nh+0.5])
     ax.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+    ax.legend()
     return fig, ax
 
-def stability(lamb, dof=0, T=None, ptype='exp', fig=None, ax=None,
-              *args, **kwargs):
+def stability(sigma=None, lamb=None, T=None, ptype='exp', tol=1e-3, fig=None,
+              ax=None, *args, **kwargs):
+    """ Shows the stability based on either Floquet multipliers(σ) or
+    exponents(λ). They are related as σ=e^(λ*T) where T is the period.
+
+    Multipliers are the eigenvalues of the monodromy matrix, ie from the
+    shooting method.
+    Exponents are the estimated eigenvalues found by Hills matrix, ie from HB.
+
+    To set ptype when used with the plotlist, use:
+    from functools import partial
+    stability2 = partial(stability,ptype='multipliers')
+    """
     if fig is None:
         fig, ax = plt.subplots()
         ax.clear()
 
+    if sigma is None and ptype == 'multipliers':
+        # called from HB
+        sigma = np.exp(lamb*T)
+    if lamb is None and ptype == 'exp':
+        # called from NNM/shooting
+        lamb = np.log(sigma)/T
+
     if ptype == 'multipliers':
-        if T is None:
-            raise AttributeError('T not provided')
         str1 = 'Floquet multipliers'
         str2 = '$\sigma$'
-        sigma = np.exp(lamb*T)
         xx = np.real(sigma)
         yy = np.imag(sigma)
-        idx_s = np.where(np.abs(sigma) <= 1)
-        idx_u = np.where(np.abs(sigma) > 1)
+        idx_s = np.where(np.abs(sigma) <= 1+tol)
+        idx_u = np.where(np.abs(sigma) > 1+tol)
 
         circ = plt.Circle((0, 0), radius=1, ec='k', fc='None', ls='-')
         ax.add_patch(circ)
 
     else:
+        if T is None:
+            raise AttributeError('Period T not provided')
         str1 = 'Floquet exponent'
         str2 = '$\lambda$'
-        lamb = np.log(lamb)/T
         xx = np.real(lamb)
         yy = np.imag(lamb)
-        idx_s = np.where(xx <= 0)
-        idx_u = np.where(xx > 0)
+        tol = 1e-3
+        idx_s = np.where(xx <= 0+tol)
+        idx_u = np.where(xx > 0+tol)
 
         ax.axhline(y=0, color='k')
         ax.axvline(x=0, color='k')
 
     if len(idx_u[0]) != 0:
-        ax.plot(xx[idx_u],yy[idx_u],'o', label='unstable')#, **kwargs)
+        ax.plot(xx[idx_u],yy[idx_u],'ro', mfc='none', label='unstable')#, **kwargs)
     if len(idx_s[0]) != 0:
-        ax.plot(xx[idx_s],yy[idx_s],'x', label='stable')#, **kwargs)
-    ax.set_title('Stability ({}), dof: {}'.format(str1, dof))
+        ax.plot(xx[idx_s],yy[idx_s],'bx', label='stable')#, **kwargs)
+    ax.set_title('Stability ({})'.format(str1))
     ax.set_xlabel(r'Real({})'.format(str2))
     ax.set_ylabel(r'Imag({})'.format(str2))
     ax.legend()
@@ -106,6 +139,8 @@ def stability(lamb, dof=0, T=None, ptype='exp', fig=None, ax=None,
     ax.set_xlim(xmax * np.array([-1,1]))
     ax.set_ylim(ymax * np.array([-1,1]))
     ax.grid(True, which='both')
+    if ptype == 'multipliers':
+        ax.axis('equal')
     return fig, ax
 
 
@@ -249,7 +284,8 @@ class PointBrowser(object):
     https://matplotlib.org/examples/event_handling/data_browser.html
     """
 
-    def __init__(self, x, y, dof, plotlist, fig, ax, lines, hb=None, nnm=None):
+    def __init__(self, x, y, dof, plotlist, fig, ax, lines, hb=None, nnm=None,
+                 titlestr='', xunit='Hz'):
 
         if len(plotlist) == 0:
             raise ValueError('MUST: len(plotlist)>0',plotlist)
@@ -265,33 +301,41 @@ class PointBrowser(object):
         self.x = x
         self.y = y
         self.dof = dof
-        self.plotlist = plotlist
-        self.fig = fig
-        self.ax = ax
-        self.lines = lines
         self.lastind = 0
         self.lastchange = 0
+
+        self.plotlist = plotlist
+        self.titlestr = titlestr
+        self.xunit = xunit
+
+        # line(s) to select from
+        self.lines = lines
+        # main/selection plot
+        self.fig = fig
+        self.ax = ax
         self.selected, = self.ax.plot([self.x[0]], [self.y[0]],
                                       'o', ms=12, alpha=0.4, color='yellow',
                                       visible=False)
 
+        # secondary/info plot
         self.fig2, (self.ax1, self.ax2) = plt.subplots(2,1)
         self.fig2.show(False)
 
     def onpress(self, event):
         if self.lastind is None:
             return
-        if event.key not in ('n', 'p', 'a', 'z'):
-            return
+
         inc, change = 0, 0
-        if event.key == 'n':
+        if event.key in {'n', 'right'}:
             inc = 1
-        elif event.key == 'p':
+        elif event.key in {'p', 'left'}:
             inc = -1
-        elif event.key == 'a':
+        elif event.key in {'a', 'up'}:
             change = 1
-        elif event.key == 'z':
+        elif event.key in {'z', 'down'}:
             change = -1
+        else:
+            return
 
         self.lastchange += 2*change
         self.lastchange = np.clip(self.lastchange, 0, len(self.plotlist) - 2)
@@ -343,12 +387,15 @@ class PointBrowser(object):
             t, omegap, zp, cnorm, c, cd, cdd = \
                 self.hb.get_components(omega, z)
             lamb = self.hb.lamb_vec[dataind]
+            sigma = None
             x = hb_signal(omega, t, *c)
             xd = hb_signal(omega, t, *cd)
             xdd = hb_signal(omega, t, *cdd)
             T = t[-1]
 
             plotdata.update({'cnorm':cnorm})
+            titlestr = '{}\nFreq {:g}{}, Amplitude {:g}(m)'.\
+                format(self.titlestr, omega, self.xunit, self.y[dataind])
 
         elif self.ptype == 'nnm':
             X0 = self.nnm.X0_vec[dataind]
@@ -363,14 +410,23 @@ class PointBrowser(object):
             fext = np.zeros(ns)
             x, xd, xdd, Phi = self.nnm.newmark.integrate_nl(x0, xd0, dt, fext,
                                                             sensitivity=True)
-            lamb = eigvals(Phi)
+            sigma = eigvals(Phi)
+            lamb = None
+            titlestr = '{}\nFreq {:g}{}, Energy {:g}(log10(J))'.\
+                format(self.titlestr, 1/T*2*np.pi, self.xunit, self.x[dataind])
+
 
 
         plotdata.update({'t': t, 'y':x, 'yd':xd, 'ydd':xdd, 'dof':self.dof,
-                         'T':T, 'lamb':lamb})
+                         'T':T, 'sigma':sigma, 'lamb':lamb})
 
         self.ax1.clear()
         self.ax2.clear()
+        # need to set aspect ratio to auto manual. It is set to equal in
+        # stability and clearing the axes does apparently not set the scaling
+        # back to auto.
+        self.ax1.axis('auto')
+        self.ax2.axis('auto')
         plot0 = self.plotlist[plotind]
         plot1 = self.plotlist[plotind+1]
         # for plot1, plot2 in zip(plotlist[:-1], plotlist[1:]):
@@ -378,13 +434,14 @@ class PointBrowser(object):
         plot1(**plotdata, fig=self.fig2, ax=self.ax2)
         self.selected.set_visible(True)
         self.selected.set_data(self.x[dataind], self.y[dataind])
+        self.ax.set_title(titlestr)
 
         self.fig.canvas.draw()
         self.fig2.tight_layout()
         self.fig2.canvas.draw()
 
 
-def nfrc(dof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
+def nfrc(dof=0, pdof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
          interactive=True, xscale=1/2/np.pi, yscale=1,
          xunit='(Hz)',
          fig=None, ax=None, *args, **kwargs):
@@ -434,8 +491,8 @@ def nfrc(dof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
                     ms=1, picker=5, **kwargs)
 
     if interactive:
-        browser = PointBrowser(x, y, dof, plotlist, fig, ax, lines, hb=hb,
-                               nnm=nnm)
+        browser = PointBrowser(x, y, pdof, plotlist, fig, ax, lines, hb=hb,
+                               nnm=nnm, titlestr=titlestr, xunit=xunit)
 
         fig.canvas.mpl_connect('pick_event', browser.onpick)
         fig.canvas.mpl_connect('key_press_event', browser.onpress)

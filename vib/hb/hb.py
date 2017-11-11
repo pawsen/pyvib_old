@@ -64,6 +64,8 @@ class HB():
         self.omega_vec = []
         self.step_vec = [0]
         self.stab_vec = []
+        #  Floquet exponents(λ). Estimated from Hills matrix. Related to
+        #  multipliers(σ) by σ=e^(λ*T) where T is the period.
         self.lamb_vec = []
 
     def periodic(self, f0, f_amp, fdofs):
