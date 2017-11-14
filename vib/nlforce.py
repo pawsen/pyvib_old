@@ -25,6 +25,23 @@ class NL_force(object):
                 else:
                     self.dnls_damp.append(nl)
 
+    def nldofs(self):
+        # find nonlinear dofs
+        nldofs = []
+        for nl in self.nls:
+            inl = nl.inl
+            for connection in inl:
+                i1 = connection[0]
+                i2 = connection[1]
+                if i1 != -1:
+                    nldofs.append(i1)
+                if i2 != -1:
+                    nldofs.append(i1)
+        # Get unique elements (could also be np.unique(np.asarray(nldofs)))
+        nldofs = np.asarray(list(set(nldofs)))
+        return nldofs
+
+
     def force(self, x, xd):
 
         if x.ndim == 1:

@@ -68,6 +68,9 @@ class HB():
         #  multipliers(σ) by σ=e^(λ*T) where T is the period.
         self.lamb_vec = []
 
+        # list of bifurcations that are searched for
+        self.bif = []
+
     def periodic(self, f0, f_amp, fdofs):
         """Find periodic solution
 
@@ -185,13 +188,16 @@ class HB():
             return omega, z
 
     def continuation(self, omega_cont_min, omega_cont_max,
-                     step=0.1,step_min=0.1, step_max=20, cont_dir=1,
+                     step=0.01,step_min=0.01, step_max=1, cont_dir=1,
                      opt_it_NR=3, it_cont_max=1e4, adaptive_stepsize=True,
-                     angle_max_pred=90, dof=0):
+                     angle_max_pred=90, dof=0,
+                     detect={'fold':False,'NS':False,'BP':False}):
         """ Do continuation of periodic solution.
 
         Based on tangent prediction and Moore-Penrose correction.
         """
+        self.detect = detect
+
         z = self.z_vec[-1]
         omega = self.omega_vec[-1]
 
@@ -228,33 +234,38 @@ class HB():
         print('-------------------------------------------\n')
 
         if stability:
-            detect = {
-                'fold':False,
-                'NS':False,
-                'BP':False
-            }
-            fold = Fold(self, max_it_secant=10, tol_sec=1e-5)
+
             q0_BP = np.ones(nz+1)
             p0_BP = np.ones(nz+1)
-            inl_tmp = np.array([0])
-            nldofs_ext = np.kron(inl_tmp, np.ones(2*NH+1)) + \
-                         np.kron(np.ones((len(inl_tmp),1)), np.arange(2*NH+1)*n)
+
+            nldofs = self.nonlin.nldofs()
+            nldofs_ext = np.kron(nldofs[:,None], np.ones(2*NH+1)) + \
+                         np.kron(np.ones((len(nldofs),1)), np.arange(2*NH+1)*n)
+
+            for k in detect.keys():
+                if k == 'fold' and detect[k] is True:
+                    fold = Fold(self, fdofs, nldofs_ext)
+                    self.bif.append(fold)
+
             tangent_LP = [0]
+
+
 
         omega2 = omega/nu
         # samme A som fra periodic calculation
         A = self.assembleA(omega2)
 
         it_cont = 1
-        z_cont = z
+        z_cont = z.copy()
         omega_cont = omega
         point = 0
         point_prev = 0
         point_pprev = 0
         branch_switch = False
-        idx_BP = [0]
-        idx_LP2 = [0]
-        idx_NS = [0]
+        index_BP = 0
+        index_LP = 0
+        index_NS = 0
+
         while(it_cont <= it_cont_max and
               omega / scale_t <= omega_cont_max and
               omega / scale_t >= omega_cont_min):
@@ -277,13 +288,13 @@ class HB():
 
             z = z_cont + tangent_pred[:nz]
             omega = omega_cont + tangent_pred[nz]
-
-            if (it_cont >= 4 and True and
+            point = np.append(z,omega)
+            if (it_cont >= 4 and
                 ((point - point_prev) @ (point_prev - point_pprev) /
                  (norm(point - point_prev) * norm(point_prev-point_pprev)) <
-                 np.cos(angle_max_pred))):  # and
-                 # (it_cont >= index_LP+1) and
-                 # (it_cont >= index_BP+2) ):
+                 np.cos(angle_max_pred)) and
+                (it_cont >= index_LP+1) and
+                (it_cont >= index_BP+2)):
 
                 tangent_pred = -tangent_pred
                 z = z_cont + tangent_pred[:nz]
@@ -308,7 +319,6 @@ class HB():
             Obj = linalg.norm(H) / linalg.norm(z)
             #print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
 
-            # break
             # More-penrose updating
             while (Obj > tol_NR) and (it_NR <= max_it_NR):
                 H = self.state_sys(z, A, force)
@@ -359,7 +369,7 @@ class HB():
                 self.lamb_vec.append(B)
                 self.stab_vec.append(stab)
 
-            if stability and it_cont > 1 and it_cont > idx_BP[-1] + 1:
+            if stability and it_cont > 1 and it_cont > index_BP + 1:
                 G = np.vstack((
                     np.hstack((J_z, J_w[:,None])),
                     tangent))
@@ -367,19 +377,21 @@ class HB():
                 # t_BP, p0_BP, q0_BP = test_func(G, p0_BP, q0_BP,'BP')
                 # tt_BP = np.real(t_BP)
 
-                # Fold bifurcation is detected when tangent prediction for omega
-                # changes sign
+                # Fold bifurcation is detected when the tangent prediction for
+                # omega changes sign
                 if (detect['fold'] and it_cont > fold.idx[-1] + 1 and
-                    tangent_LP[it_cont-1] * tangent_LP[it_cont-2] < 0):
+                    tangent_LP[-1] * tangent_LP[-2] < 0):
                     B_tilde = J_z
-                    fold.detect(omega, z, A, J_z, B_tilde, fdofs, nldofs_ext, force, it_cont)
-                    print('## FOLD detection in progress')
+                    omega, z = fold.detect(omega, z, A, J_z, B_tilde, force,
+                                           it_cont)
+                    index_LP = fold.idx[-1]
+
                 # if detect['NS'] and it_cont > idx_NS[-1] + 1:
                 #     detect_NS()
                 # if detect['BP'] and it_cont > idx_BP[-1] + 1:
                 #     detect_bp()
 
-            z_cont = z
+            z_cont = z.copy()
             omega_cont = omega
             point_pprev = point_prev
             point_prev = point

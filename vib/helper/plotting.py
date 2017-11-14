@@ -442,9 +442,13 @@ class PointBrowser(object):
 
 
 def nfrc(dof=0, pdof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
-         interactive=True, xscale=1/2/np.pi, yscale=1,
-         xunit='(Hz)',
+         interactive=True, detect=True,
+         xscale=1/2/np.pi, yscale=1, xunit='(Hz)',
          fig=None, ax=None, *args, **kwargs):
+
+    if fig is None:
+        fig, ax = plt.subplots()
+        ax.clear()
 
     if hb is not None:
         ptype = 'hb'
@@ -454,6 +458,11 @@ def nfrc(dof=0, pdof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
         titlestr = 'Nonlinear FRF for dof {}'.format(dof)
         ystr = 'Amplitude (m)'
         xstr = 'Frequency ' + xunit
+        if detect:
+            for bif in hb.bif:
+                bifargs = {'ls':'None','mfc':'None','marker':bif.marker,'label':bif.stype}
+                ax.plot(x[bif.idx[1:]], y[bif.idx[1:]], **bifargs)
+        ax.legend()
     if nnm is not None:
         ptype = 'nnm'
         stab_vec = nnm.stab_vec
@@ -471,9 +480,6 @@ def nfrc(dof=0, pdof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
             ystr = 'Amplitude (m)'
             xstr = 'Frequency ' + xunit
 
-    if fig is None:
-        fig, ax = plt.subplots()
-        ax.clear()
 
     ax.set_title(titlestr)
     ax.set_xlabel(xstr)
