@@ -6,7 +6,7 @@ import sys
 from scipy import io
 
 import numpy as np
-from scipy.linalg import solve, svd, norm, lstsq, eigvals
+from scipy.linalg import solve, svd, norm, lstsq, eigvals, inv
 from scipy import linalg
 from scipy import sparse
 
@@ -30,12 +30,11 @@ class Bifurcation(object):
         self.stype = stype
 
 class Fold(Bifurcation):
-
     def __init__(self,*args, **kwargs):
         kwargs.update({'marker':'s', 'stype':'fold'})
         super().__init__(*args, **kwargs)
 
-    def detect(self, omega, z, A, J_z, B, force, it_cont):
+    def detect(self, omega, z, A, J_z, force, it_cont):
         """Fold bifurcation traces the lotus of the frequency response peaks
 
         At a fold bifurcation these four conditions are true:
@@ -50,7 +49,6 @@ class Fold(Bifurcation):
         bifurcations, when the component of the tangent vector related to ω
         changes sign.
         """
-
         nz = self.hb.nz
         max_it_secant = self.max_it_secant
         tol_sec = self.tol_sec
@@ -60,21 +58,20 @@ class Fold(Bifurcation):
         f_amp = self.hb.f_amp
         omega_save = omega.copy()
         z_save = z.copy()
+        print('-----> Detecting LP bifurcation...')
 
-        G = J_z
-        omega2 = omega/nu
-        A = self.hb.assembleA(omega2)
-
+        A0 = J_z/scale_x
+        G = A0
+        B = A0
         Gq0 = null_approx(G, 'LP2')
         Gp0 = null_approx(G.T, 'LP2')
 
-        print('-----> Detecting LP bifurcation...')
         H = self.hb.state_sys(z, A, force)
         F_it_NR, M_ext, w = extended_state_sys(H, G, Gp0, Gq0, 'LP2')
         print('Test function = {}'.format(norm(F_it_NR) / norm(z)))
 
         it = 0
-        while (it < max_it_secant*10 and norm(F_it_NR)/norm(z) > tol_sec):
+        while (it < max_it_secant and norm(F_it_NR)/norm(z) > tol_sec):
 
             J_ext = extended_jacobian5_detect(self.hb, omega, z, A, B, M_ext,
                                               w, self.fdofs, self.nldofs_ext, 'LP2')
@@ -88,10 +85,10 @@ class Fold(Bifurcation):
             u, _ = sineForce(f_amp, omega=omega, t=t)
             force = toMDOF(u, n,  self.fdofs)
             A = self.hb.assembleA(omega2)
-            J_z = self.hb.hjac(z, A) / scale_x
 
-            G = J_z
-            B = G
+            A0 = self.hb.hjac(z, A) / scale_x
+            G = A0
+            B = A0
             Gq0 = null_approx(G, 'LP2')
             Gp0 = null_approx(G.T, 'LP2')
             H = self.hb.state_sys(z, A, force)
@@ -110,6 +107,115 @@ class Fold(Bifurcation):
             self.nbif += 1
             self.isbif = True
             return omega, z
+
+class NS(Bifurcation):
+    def __init__(self,*args, **kwargs):
+        kwargs.update({'marker':'d', 'stype':'NS'})
+        super().__init__(*args, **kwargs)
+
+    def detect(self, omega, z, A, J_z, force, it_cont):
+        """Detect Neimark-Sacker(NS) bifurcation.
+
+        At a NS bifurcation(also called torus- and Hopf bifurcation), quasi
+        periodic oscillation emanates. Quasi periodic oscillations contains the
+        forcing frequency ω and at least one other frequency ω₂(the envelope)
+        These two frequencies are incommensurate, ie ω/ω₂ is irrational.
+
+        NS bifurcations are detected when the bialternate matrix product of B
+        is singular, B_⊙=B⊙I. The bialternate matrix is singular when two of
+        its eigenvalues μ₁+μ₂=0. For example: μ₁,₂=±jμ
+
+        """
+        nz = self.hb.nz
+        max_it_secant = self.max_it_secant
+        tol_sec = self.tol_sec
+        nu = self.hb.nu
+        scale_x = self.hb.scale_x
+        n = self.hb.n
+        f_amp = self.hb.f_amp
+        omega_save = omega.copy()
+        z_save = z.copy()
+
+        print('-----> Detecting NS bifurcation...')
+
+        B_tilde = self.hb.hills.stability(omega, J_z)
+        B, vr, idx = self.hb.hills.vec(B_tilde)
+        vr_inv = inv(vr)[idx,:]
+        vr = vr[:,idx]
+
+        G = bialtprod(np.diag(B))
+        Gq0 = null_approx(G, 'NS')
+        Gp0 = null_approx(G.T, 'NS')
+
+        H = self.hb.state_sys(z, A, force)
+        F_it_NR, M_ext, w = extended_state_sys(H, G, Gp0, Gq0, 'NS')
+        print('Test function = {}'.format(norm(F_it_NR) / norm(z)))
+
+        it = 0
+        while (it < max_it_secant and norm(F_it_NR)/norm(z) > tol_sec):
+            J_ext = extended_jacobian5_detect(self.hb, omega, z, A, B_tilde, M_ext,
+                                              w, self.fdofs, self.nldofs_ext,
+                                              'NS', vr, vr_inv)
+
+            dNR, *_ = lstsq(J_ext[:,:nz+1], -F_it_NR)
+            z = z + dNR[:nz]
+            omega = omega + dNR[nz]
+
+            omega2 = omega/nu
+            t = self.hb.assemblet(omega2)
+            u, _ = sineForce(f_amp, omega=omega, t=t)
+            force = toMDOF(u, n,  self.fdofs)
+            A = self.hb.assembleA(omega2)
+            J_z = self.hb.hjac(z, A)
+
+            B_tilde = self.hb.hills.stability(omega, J_z)
+            B, vr, idx = self.hb.hills.vec(B_tilde)
+            vr_inv = inv(vr)[idx,:]
+            vr = vr[:,idx]
+
+            G = bialtprod(np.diag(B))
+            Gq0 = null_approx(G, 'NS')
+            Gp0 = null_approx(G.T, 'NS')
+            H = self.hb.state_sys(z, A, force)
+            F_it_NR, M_ext, w = extended_state_sys(H, G, Gp0, Gq0, 'NS')
+            print('Test function = {}'.format(norm(F_it_NR) / norm(z)))
+
+            it += 1
+        if it >= max_it_secant:
+            print( '-----> NS bifurcation detection failed')
+            self.isbif = False
+            return omega_save, z_save
+        else:
+            print('-----> NS detected.')
+            self.idx.append(it_cont)
+            self.nbif += 1
+            self.isbif = True
+            return omega, z
+
+    def identify(self, B):
+        G = bialtprod(np.diag(B))
+        Gdiag = np.diag(G)
+        Gdiag_real = Gdiag[Gdiag == Gdiag.real]
+        pos_NS = Gdiag_real[Gdiag_real > 0]
+        return pos_NS
+
+class BP(Bifurcation):
+    def __init__(self,*args, **kwargs):
+        kwargs.update({'marker':'d', 'stype':'NS'})
+        super().__init__(*args, **kwargs)
+
+    def detect(self, omega, z, A, J_z, B, force, it_cont):
+        """Branch point bifurcations occur when two branches of periodic
+        solution meet.
+
+        At a branch bifurcation these four conditions are true:
+        * h(z,ω) = 0
+        * Rank h_z(z,ω) = nz-1
+        * h_ω(z,ω) ∈ range h_z(z,ω). Ie:  Rank [h_z,h_ω] = nz-1
+        * Exactly two branches of periodic solutions intersect with two distinct
+        tangents.
+        """
+        pass
 
 
 def extended_state_sys(H, G, p0, q0, bif_type):
@@ -133,40 +239,26 @@ def test_func(G, p0, q0, bif_type):
     return _something(G, p0, q0, bif_type)
 
 def _something(G, p0, q0, bif_type, H=None):
+    """
+    For NS, G is the bialtprod of B. As B is a diagonal matrix, so is G.
+
+    H: ndarray
+        The normal state system
+    """
     nG = G.shape[1]
-    if bif_type == 'LP' or bif_type == 'NS':
 
-        # data = np.diag(G)
-        # data.append(p0)
-        # data.append(q0)
-        # ii = np.arange(0,nG*nG+nG-1,nG+2)
-        #M = sparse.coo_matrix((data, (ii,jj)), shape=(nG+1,nG+1))
-        M = sparse.coo_matrix((nG+1, nG+1))
-        idx = np.diag_indices(nG+1, ndim=2)
-        M[idx] = np.diag(G)
-        M[nG,:nG] = p0
-        M[:nG,nG] = q0
+    M = np.vstack((
+        np.hstack((G, p0[:,None])),
+        np.hstack((q0, 0))
+    ))
 
-        Mb = np.zeros(nG+1)
-        Mb[nG] = 1
-
-        wg = sparse.linalg.spsolve(M.tocsr(), Mb)
-
-    elif bif_type == 'BP' or bif_type == 'LP2':
-
-        M = np.vstack((
-            np.hstack((G, p0[:,None])),
-            np.hstack((q0, 0))
-        ))
-
-        wg = solve(M, np.append(np.zeros(nG),1))
-
+    wg = solve(M, np.append(np.zeros(nG),1)).real
     w = wg[:nG]
     g = wg[nG]
     if H is None:
         return g, q0, p0
-
     H = np.append(H,g)
+
     return H, M, w
 
 def null_approx(A, bif_type):
@@ -236,7 +328,68 @@ def nullspace(A, atol=1e-13, rtol=0):
 
     return ns
 
-def extended_jacobian5_detect(self, omega, z, A, B, M_ext, w, fdofs, nldofs_ext, bif_type):
+def bialtprod(A):
+    """Calculate bialternate product of A
+
+    TODO:
+    The indexing is only depending on the shape of A. Thus the found indexes
+    should be saved in order to save computational time if A have the same
+    shape between calls"""
+
+    n = A.shape[0]
+    m = n*(n-1)//2
+    B = np.zeros((m,m), dtype=A.dtype)
+
+    Z = np.ones(m, dtype=int)
+    # init
+    init = np.outer(np.arange(1,n), Z)
+    init2 = np.outer(np.ones(n-1, dtype=int), np.arange(m))
+    idx = np.where(init2 < init)
+    init = init[idx]
+    init2 = init2[idx]
+
+    p = np.outer(init, Z)
+    q = np.outer(init2, Z)
+    r = np.outer(Z, init)
+    s = np.outer(Z, init2)
+
+    test1 = r == p
+    test2 = s == q
+
+    # part1
+    idx = np.where(r==q)
+    idx2 = _sub2ind(n, p[idx], s[idx])
+    B[idx] = -A.flat[idx2]
+
+    # part2
+    idx = np.where(~test1 & test2)
+    idx2 = _sub2ind(n, p[idx], r[idx])
+    B[idx] = A.flat[idx2]
+
+    # part3
+    idx = np.where(test1 & test2)
+    idx2 = _sub2ind(n, p[idx], p[idx])
+    B[idx] = A.flat[idx2]
+    idx2 = _sub2ind(n, q[idx], q[idx])
+    B[idx] += A.flat[idx2]
+
+    # part4
+    idx = np.where(test1 & ~test2)
+    idx2 = _sub2ind(n, q[idx], s[idx])
+    B[idx] = A.flat[idx2]
+
+    # part5
+    idx = np.where(s==p)
+    idx2 = _sub2ind(n, q[idx], r[idx])
+    B[idx] = -A.flat[idx2]
+
+    return B
+
+def _sub2ind(n, row, col):
+    return row*n + col
+
+def extended_jacobian5_detect(self, omega, z, A, B, M_ext, w, fdofs, nldofs_ext, bif_type, vr=None,
+                              vr_inv=None):
     n = self.n
     nG = M_ext.shape[1] -1
     nz = self.nz
@@ -256,17 +409,17 @@ def extended_jacobian5_detect(self, omega, z, A, B, M_ext, w, fdofs, nldofs_ext,
     # TODO parallel loop
     for i in range(nz):
         if i in nldofs_ext:
-            hess = hessian4_detect(self, omega, z, A, B, i, 'z', bif_type)
+            hess = hessian4_detect(self, omega, z, A, B, i, 'z', bif_type, vr, vr_inv)
             J_g_A =- v @ hess @ w
         else:
             J_g_A = 0
         J_part[i] = np.real(J_g_A)
 
     # TODO Rewrite so we DONT pass 0.
-    hess = hessian4_detect(self, omega, z, A, B, 0,'omega', bif_type)
+    hess = hessian4_detect(self, omega, z, A, B, 0,'omega', bif_type, vr, vr_inv)
     J_g_p1 = - v @ hess @ w
 
-    hess = hessian4_detect(self, omega, z, A, B, 0, 'f', bif_type)
+    hess = hessian4_detect(self, omega, z, A, B, 0, 'f', bif_type, vr, vr_inv)
     J_g_p2 = - v @ hess @ w
 
     J_part = np.append(J_part, (np.real(J_g_p1), np.real(J_g_p2)))
@@ -279,7 +432,13 @@ def extended_jacobian5_detect(self, omega, z, A, B, M_ext, w, fdofs, nldofs_ext,
     return J
 
 
-def hessian4_detect(self, omega, z, A, B, idx, gtype, bif_type):
+def hessian4_detect(self, omega, z, A, B_tilde, idx, gtype, bif_type, vr=None,
+                    vr_inv=None):
+    """the Hessian matrix is a square matrix of second-order partial derivatives of
+    a scalar-valued function, or scalar field. It describes the local curvature
+    of a function of many variables.
+
+    """
     scale_x = self.scale_x
     nu = self.nu
 
@@ -291,60 +450,52 @@ def hessian4_detect(self, omega, z, A, B, idx, gtype, bif_type):
             eps = eps * abs(z_pert[idx])
 
         z_pert[idx] = z_pert[idx] + eps
-        J_z_pert = self.hjac(z_pert, A) / scale_x
+        J_z_pert = self.hjac(z_pert, A)
 
         if bif_type == 'LP2':
-            return (J_z_pert - B) / eps
+            return (J_z_pert/scale_x - B_tilde) / eps
         elif bif_type == 'BP':
-            J_w_pert = self.hjac_omega(omega, z_pert)
-            dG_dalpha = (np.vstack((np.hstack((J_z_pert, J_w_pert[:,None])),
-                                   tangent_prev)) - B) / eps
-            return dG_dalpha
-        elif bif_type == 'NS':
             pass
+        elif bif_type == 'NS':
+            B_tilde_pert = self.hills.stability(omega, J_z_pert)
+            Hess = (B_tilde_pert - B_tilde)/eps
+            dG_dalpha_tot = np.diag(vr_inv @ Hess @ vr)
+            dG_dalpha = bialtprod(np.diag(dG_dalpha_tot))
+            return dG_dalpha
 
     elif gtype == 'omega':
 
         if omega != 0:
             eps = eps * abs(omega)
-        omega_pert = omega + eps
+            omega_pert = omega + eps
 
         omega2_pert = omega_pert / nu
         A_pert = self.assembleA(omega2_pert)
-        J_z_pert = self.hjac(z, A_pert) / scale_x
+        J_z_pert = self.hjac(z, A_pert)
 
         if bif_type == 'LP2':
-            return  (J_z_pert - B ) / eps
+            return (J_z_pert/scale_x - B_tilde) / eps
         elif bif_type == 'BP':
             J_w_pert = self.hjac_omega(omega_pert, z_pert)
             dG_dalpha = np.vstack((np.hstack((J_z_pert, J_w_pert[:,None])),
                                    tangent_prev))
             return dG_dalpha
         elif bif_type == 'NS':
-            pass
+            B_tilde_pert = self.hills.stability(omega_pert, J_z_pert)
+            Hess = (B_tilde_pert - B_tilde)/eps
+            dG_dalpha_tot = np.diag(vr_inv @ Hess @ vr)
+            dG_dalpha = bialtprod(np.diag(dG_dalpha_tot))
+            return dG_dalpha
 
     elif gtype == 'f':
-         Hess = np.zeros(B.shape)
-         if bif_type == 'LP2' or bif_type == 'BP':
-             return Hess
-         elif bif_type == 'LP':
-             pass
-         elif bif_type == 'NS':
-             pass
+        if bif_type == 'LP2' or bif_type == 'BP':
+            Hess = np.zeros(B_tilde.shape)
+        else:
+            n = self.n*2
+            m = n*(n-1)//2
+            Hess = np.zeros((m,m))
+        return Hess
 
-
-# def detect_branchpoint(self, J_z, J_w, tangent):
-#     """
-#     Branch point bifurcations occur when two branches of periodic solution meet.
-
-#     At a branch bifurcation these four conditions are true:
-#     * h(z,ω) = 0
-#     * Rank h_z(z,ω) = nz-1
-#     * h_ω(z,ω) ∈ range h_z(z,ω). Ie:  Rank [h_z,h_ω] = nz-1
-#     * Exactly two branches of periodic solutions intersect with two distinct
-#       tangents.
-
-#     """
 
 #     G = np.vstack((
 #         np.hstack((J_z, J_w[:,None])),
@@ -436,73 +587,3 @@ def hessian4_detect(self, omega, z, A, B, idx, gtype, bif_type):
 #         Y0_dot = alpha2 * phi1 + beta2 * phi2
 #         V0_switch = Y0_dot / norm(Y0_dot)
 #         branch_switch = True
-
-# def detect_NS():
-#     """Detect Neimark-Sacker(NS) bifurcation.
-
-#     At a NS bifurcation, also called torus bifurcation, quasi periodic
-#     oscillation emanates. Quasi periodic oscillations contains the forcing
-#     frequency ω and at least one other frequency ω₂(the envelope)
-#     These two frequencies are incommensurate, ie ω/ω₂ is irrational.
-
-#     NS bifurcations are detected when the bialternate matrix product of B is
-#     singular, B_⊙=B⊙I. The bialternate matrix is singular when two of its
-#     eigenvalues μ₁+μ₂=0. For example: μ₁,₂=±jγ
-
-#     """
-#     z_save = z
-#     omega_save = omega
-#     A_save = A
-
-#     mat_B = b2_inv @ b1
-#     if rmc_permute:
-#         pass
-
-#     Atest, right_vec, B_eig_sort = B_reduc(mat_B, n)
-#     right_vec_inv = np.inv(right_vec)
-#     G = bialtprod( Atest );
-#     Gq0 = null_approx(G, 'NS')
-#     Gp0 = null_approx(G.T, 'NS')
-
-#     print('-----> Detecting NS bifurcation...')
-#     H = state_sys(self, z, A, force)
-#     F_it_NR, M_it_NR, w_it_NR = test_func(G, Gp0, Gq0, 'NS', H)
-#     print('Test function = {}'.format(norm(F_it_NR) / norm(z)))
-
-#     it = 1
-#     while (it < max_it_secant and norm(F_it_NR)/norm(z) > tol_sec):
-#         J_ext = 1
-#         dNR = pinv(J_ext[:,:nz+1]) @ -F_it_NR
-#         z = z + dNR[:nz]
-#         omega = omega + dNR[nz+1]
-#         omega2 = omega / nu
-#         t = assemblet(self, omega2)
-#         force = sineForce(f_amp, omega, t, n, fdofs)
-#         A = assembleA(self, omega2)
-#         A0 = jac_sys(self, z, A) / scale_x
-#         # TODO recalculate Delta1
-#         A1 = Delta1
-#         #b1 = [ A1, A0; - eye( size( A0 ) ), zeros( size( A0 ) ) ];
-#         mat_B = b2_inv @ b1
-#         if rmc_permute:
-#             pass
-#         Atest, right_vec, B_eig_sort = B_reduc(mat_B, n)
-#         right_vec_inv = np.inv(right_vec)
-#         G = bialtprod(Atest)
-#         Gq0 = null_approx(G, 'NS')
-#         Gp0 = null_approx(G.T, 'NS')
-#         H = state_sys(self, z, A, force)
-#         F_it_NR, M_it_NR, w_it_NR = test_func(G, Gp0, Gq0, 'NS', H)
-#         print('Test function = {}'.format(norm(F_it_NR) / norm(z)))
-
-#         it += 1
-#     if it >= max_it_secant:
-#         print( '-----> NS bifurcation detection failed')
-#         z = z_save
-#         omega = omega_save
-#         A = A_save
-#     else:
-#         print('-----> NS detected.')
-#         idx_NS.append(it_cont+1)
-#         it_NS += 1
-#         is_NS = True

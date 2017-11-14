@@ -11,7 +11,7 @@ from ..helper.plotting import Anim
 from ..forcing import sineForce, toMDOF
 from .hbcommon import fft_coeff, ifft_coeff, hb_signal, hb_components
 from .stability import Hills
-from .bifurcation import Fold
+from .bifurcation import Fold, NS
 
 class HB():
     def __init__(self, M0, C0, K0, nonlin,
@@ -169,7 +169,8 @@ class HB():
                              format(max_it_NR))
 
         if stability:
-            B, stab = hills.stability(omega, H_z)
+            B_tilde = hills.stability(omega, H_z)
+            B, stab = hills.reduc(B_tilde)
             self.stab_vec.append(stab)
             self.lamb_vec.append(B)
 
@@ -246,9 +247,11 @@ class HB():
                 if k == 'fold' and detect[k] is True:
                     fold = Fold(self, fdofs, nldofs_ext)
                     self.bif.append(fold)
+                if k == 'NS' and detect[k] is True:
+                    ns = NS(self, fdofs, nldofs_ext)
+                    self.bif.append(ns)
 
             tangent_LP = [0]
-
 
 
         omega2 = omega/nu
@@ -265,6 +268,7 @@ class HB():
         index_BP = 0
         index_LP = 0
         index_NS = 0
+        nb_pos_NS = np.zeros(2)
 
         while(it_cont <= it_cont_max and
               omega / scale_t <= omega_cont_max and
@@ -365,14 +369,18 @@ class HB():
             if stability:
                 if it_NR == 1:
                     J_z = self.hjac(z, A)
-                B, stab = self.hills.stability(omega, J_z)
+                B_tilde = self.hills.stability(omega, J_z)
+                B, stab = self.hills.reduc(B_tilde)
                 self.lamb_vec.append(B)
                 self.stab_vec.append(stab)
+                # For NS/PD bifurcation
+                if detect['NS'] is True:
+                    pos_NS = ns.identify(B)
+                    nb_pos_NS[0] = nb_pos_NS[1]
+                    # zero if pos_NS is empty
+                    nb_pos_NS[1] = len(pos_NS)
 
             if stability and it_cont > 1 and it_cont > index_BP + 1:
-                G = np.vstack((
-                    np.hstack((J_z, J_w[:,None])),
-                    tangent))
                 tangent_LP.append(tangent[-1])
                 # t_BP, p0_BP, q0_BP = test_func(G, p0_BP, q0_BP,'BP')
                 # tt_BP = np.real(t_BP)
@@ -381,13 +389,16 @@ class HB():
                 # omega changes sign
                 if (detect['fold'] and it_cont > fold.idx[-1] + 1 and
                     tangent_LP[-1] * tangent_LP[-2] < 0):
-                    B_tilde = J_z
-                    omega, z = fold.detect(omega, z, A, J_z, B_tilde, force,
-                                           it_cont)
+                    omega, z = fold.detect(omega, z, A, J_z, force, it_cont)
                     index_LP = fold.idx[-1]
 
-                # if detect['NS'] and it_cont > idx_NS[-1] + 1:
-                #     detect_NS()
+                # NS bifurcation is detected when a pair of Floquet exponents
+                # crosses the imaginary axis as complex conjugate
+                if (detect['NS'] and it_cont > ns.idx[-1] + 1 and
+                    nb_pos_NS[1] != nb_pos_NS[0]):
+                    omega, z = ns.detect(omega, z, A, J_z, force, it_cont)
+                    index_NS = ns.idx[-1]
+
                 # if detect['BP'] and it_cont > idx_BP[-1] + 1:
                 #     detect_bp()
 

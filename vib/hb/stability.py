@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from scipy.linalg import eigvals, inv, block_diag
+from scipy.linalg import eigvals, inv, block_diag, eig
 from scipy.sparse.csgraph import reverse_cuthill_mckee
 
 class Hills(object):
@@ -64,7 +64,7 @@ class Hills(object):
         self.hb = hb
         #return Delta2, b2_inv
 
-    def stability(self, omega, H_z, it = None):
+    def stability(self, omega, J_z, it=None):
         scale_x = self.hb.scale_x
         scale_t = self.hb.scale_t
         M0 = self.hb.M * scale_t**2 / scale_x
@@ -89,7 +89,7 @@ class Hills(object):
             Delta1 = block_diag(Delta1, blk)
 
         # eq. 45
-        A0 = H_z/scale_x
+        A0 = J_z/scale_x
         A1 = Delta1
         A2 = Delta2
         b1 = np.vstack((
@@ -104,21 +104,39 @@ class Hills(object):
             B_tilde = mat_B[p]
         else:
             B_tilde = mat_B
-        # Get 2n eigenvalues with lowest imaginary modulus
-        B = B_reduc(B_tilde, n)
+
+        #self.B_tilde = B_tilde
+        return B_tilde
+
+    def reduc(self, B_tilde):
+        """Find the 2n first eigenvalues with lowest imaginary part"""
+
+        n = self.hb.n
+        #B_tilde = self.B_tilde
+
+        w = eigvals(B_tilde)
+        idx = np.argsort(np.abs(np.imag(w)))[:2*n]
+        B = w[idx]
 
         if np.max(np.real(B)) <= 0:
             stab = True
         else:
             stab = False
-
         return B, stab
 
-#@staticmethod
-def B_reduc(B_tilde, n):
-    """Find the 2n first eigenvalues with lowest imaginary part"""
+    def vec(self, B_tilde):
+        """Find the 2n first eigenvalues with lowest imaginary part and right
+        eigenvectors
+        """
 
-    w = eigvals(B_tilde)
-    idx = np.argsort(np.abs(np.imag(w)))[:2*n]
+        n = self.hb.n
+        # w: eigenvalues. vr: right eigenvector
+        # Remember: column v[:,i] is the eigenvector corresponding to the eigenvalue w[i].
+        w, vr = eig(B_tilde)
 
-    return w[idx]
+        idx = np.argsort(np.abs(np.imag(w)))[:2*n]
+        B = w[idx]
+        #
+        vr = vr
+
+        return B, vr, idx
