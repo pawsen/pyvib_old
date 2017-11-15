@@ -62,11 +62,16 @@ def harmonic(cnorm, dof=0, fig=None, ax=None, *args, **kwargs):
     colors = ['steelblue', 'firebrick', 'darksage', 'goldenrod', 'gray'] * \
         int(M/5. + 1)
 
-    nh = cnorm.shape[1] - 1
+    width = 0.25
     alpha = 0.5
+    nh = cnorm.shape[1] - 1
+    ind = np.arange(nh+1)
     for j, i, color in zip(range(M), dof, colors):
-        kwargs = {'color':color, 'label':r'$x_{{{x}}}$'.format(x=i)}
-        ax.bar(np.arange(nh+1), cnorm[i], alpha=alpha if j else 1, **kwargs)
+        kwargs = {'width':width, 'color':color, 'label':r'$x_{{{x}}}$'.format(x=i)}
+        ax.bar(ind+width*j, cnorm[i], alpha=alpha if j else 1, **kwargs)
+
+    ax.set_xticks(ind+width/M)
+    ax.set_xticklabels(ind)
     ax.set_title('Displacement harmonic component, dof: {}'.format(dof))
     ax.set_xlabel('Harmonic index (-)')
     # use double curly braces to "escape" literal curly braces...
@@ -76,7 +81,7 @@ def harmonic(cnorm, dof=0, fig=None, ax=None, *args, **kwargs):
     ax.legend()
     return fig, ax
 
-def stability(sigma=None, lamb=None, T=None, ptype='exp', tol=1e-3, fig=None,
+def stability(sigma=None, lamb=None, T=None, ptype='exp', tol=1e-12, fig=None,
               ax=None, *args, **kwargs):
     """ Shows the stability based on either Floquet multipliers(σ) or
     exponents(λ). They are related as σ=e^(λ*T) where T is the period.
@@ -118,7 +123,6 @@ def stability(sigma=None, lamb=None, T=None, ptype='exp', tol=1e-3, fig=None,
         str2 = '$\lambda$'
         xx = np.real(lamb)
         yy = np.imag(lamb)
-        tol = 1e-3
         idx_s = np.where(xx <= 0+tol)
         idx_u = np.where(xx > 0+tol)
 
@@ -344,9 +348,9 @@ class PointBrowser(object):
         self.update()
 
     def onpick(self, event):
-        if event.artist not in self.lines:
-            return True
-        # if event.artist != self.line:
+        # For the moment the plot is made from the Collection object with is
+        # not iterable.
+        # if event.artist not in self.lines:
         #     return True
 
         N = len(event.ind)
@@ -412,10 +416,10 @@ class PointBrowser(object):
                                                             sensitivity=True)
             sigma = eigvals(Phi)
             lamb = None
+            # change to 'tol':self.nnm.tol_stability on next update
+            plotdata.update({'tol':1e-3})
             titlestr = '{}\nFreq {:g}{}, Energy {:g}(log10(J))'.\
                 format(self.titlestr, 1/T*2*np.pi, self.xunit, self.x[dataind])
-
-
 
         plotdata.update({'t': t, 'y':x, 'yd':xd, 'ydd':xdd, 'dof':self.dof,
                          'T':T, 'sigma':sigma, 'lamb':lamb})
@@ -488,13 +492,32 @@ def nfrc(dof=0, pdof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
 
     # picker: 5 points tolerance
     stab_vec = np.array(stab_vec)
-    idx1 = ~stab_vec
-    idx2 = stab_vec
-    lines = ax.plot(np.ma.masked_where(idx1, x),
-                    np.ma.masked_where(idx1, y), '-k',
-                    np.ma.masked_where(idx2, x),
-                    np.ma.masked_where(idx2, y), '--k',
-                    ms=1, picker=5, **kwargs)
+    # idx1 = ~stab_vec
+    # idx2 = stab_vec
+    # l1 = ax.plot(np.ma.masked_where(idx1, x), np.ma.masked_where(idx1, y),
+    #              '-k',ms=1, picker=5, **kwargs)
+    # kwargs.pop('label', None)
+    # l2 = ax.plot(np.ma.masked_where(idx2, x), np.ma.masked_where(idx2, y),
+    #              '--k', ms=1, picker=5, **kwargs)
+    # lines = l1 + l2
+
+    from matplotlib.collections import LineCollection
+    from matplotlib.lines import Line2D
+    # set up colors and line styles
+    ls = ['-' if s else '--' for s in stab_vec]
+    c = ['k' if s else 'r' for s in stab_vec]
+    # convert time series to line segments
+    lines = [((x0,y0), (x1,y1)) for x0, y0, x1, y1 in zip(x[:-1], y[:-1], x[1:], y[1:])]
+    colored_lines = LineCollection(lines, colors=c, linestyles=ls, linewidths=(2,), picker=5)
+    ax.add_collection(colored_lines)
+    ax.autoscale_view()
+    lines = colored_lines
+
+    def make_proxy(zvalue, scalar_mappable, **kwargs):
+        return Line2D([0, 1], [0, 1], **kwargs)
+    proxies = [make_proxy(item, lines, linewidth=5) for item in [0]]
+    label = kwargs.get('label')
+    ax.legend(proxies, [label])
 
     if interactive:
         browser = PointBrowser(x, y, pdof, plotlist, fig, ax, lines, hb=hb,
@@ -506,8 +529,4 @@ def nfrc(dof=0, pdof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
         plt.show()
 
     return fig, ax
-
-
-# a = 1
-# plotlist = [periodic, phase, stability]
 

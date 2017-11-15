@@ -54,7 +54,7 @@ class NNM():
         self.betamin = 0
         # modulus should be equal or less than 1+tol for stability, ie. on the
         # complex unit circle when using Floquet multipliers.
-        self.tol_stability = 1 + 1e-3
+        self.tol_stability = 1e-3
         self.sensitivity = True
         self.loglevel = loglevel
         self.anim = anim
@@ -441,7 +441,7 @@ class NNM():
             # monodromy matrix is sympletic. This is the Floquet multipliers σ.
             # They are related to the exponents as σ=e^(λ*T) where T is the
             # period.
-            if max(abs(flo)) <= self.tol_stability:
+            if max(abs(flo)) <= 1 + self.tol_stability:
                 self.stab_vec.append(True)
             else:
                 self.stab_vec.append(False)
