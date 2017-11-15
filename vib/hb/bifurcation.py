@@ -265,7 +265,12 @@ def null_approx(A, bif_type):
     """Compute the nullspace of A depending on the type of bifurcation"""
     if bif_type == 'LP2' or bif_type == 'BP':
         # compute nullspace from SVD decomposition
-        return nullspace(A, atol=5e-3).squeeze()
+        nullvec = nullspace(A, atol=5e-1).squeeze()
+        # make sure there's only one vector and it is the one corresponding to
+        # the lowest singular value. Maybe atol should be lower, ie. 5e-3?
+        if nullvec.ndim > 1:
+            nullvec = nullvec[:,-1]
+        return nullvec
     else:
         if not np.all(A == np.diag(np.diagonal(A))):
             raise ValueError('The matrix A should be diagonal')
