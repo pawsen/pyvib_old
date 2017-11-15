@@ -492,8 +492,8 @@ def nfrc(dof=0, pdof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
 
     # picker: 5 points tolerance
     stab_vec = np.array(stab_vec)
-    # idx1 = ~stab_vec
-    # idx2 = stab_vec
+    idx1 = ~stab_vec
+    idx2 = stab_vec
     # l1 = ax.plot(np.ma.masked_where(idx1, x), np.ma.masked_where(idx1, y),
     #              '-k',ms=1, picker=5, **kwargs)
     # kwargs.pop('label', None)
@@ -501,23 +501,13 @@ def nfrc(dof=0, pdof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
     #              '--k', ms=1, picker=5, **kwargs)
     # lines = l1 + l2
 
-    from matplotlib.collections import LineCollection
-    from matplotlib.lines import Line2D
-    # set up colors and line styles
-    ls = ['-' if s else '--' for s in stab_vec]
-    c = ['k' if s else 'r' for s in stab_vec]
-    # convert time series to line segments
-    lines = [((x0,y0), (x1,y1)) for x0, y0, x1, y1 in zip(x[:-1], y[:-1], x[1:], y[1:])]
-    colored_lines = LineCollection(lines, colors=c, linestyles=ls, linewidths=(2,), picker=5)
-    ax.add_collection(colored_lines)
-    ax.autoscale_view()
-    lines = colored_lines
+    # The method above is nice, but have the problem that the last value of the
+    # stable solution is omitted, when the solution turns unstable. Instead we
+    # simply draw the unstable solution ob top.
+    lines = ax.plot(x,y,'-k',ms=1, picker=5, **kwargs)
+    ax.plot(np.ma.masked_where(idx2, x), np.ma.masked_where(idx2, y),
+            '--r', lw=1)
 
-    def make_proxy(zvalue, scalar_mappable, **kwargs):
-        return Line2D([0, 1], [0, 1], **kwargs)
-    proxies = [make_proxy(item, lines, linewidth=5) for item in [0]]
-    label = kwargs.get('label')
-    ax.legend(proxies, [label])
 
     if interactive:
         browser = PointBrowser(x, y, pdof, plotlist, fig, ax, lines, hb=hb,
