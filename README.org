@@ -1,3 +1,9 @@
 * pyside2 for qui.
 Choosen over pyqt due to licensing. These two are almost interchangeable. Could
 start with pyqt if docs/examples are nicer.
+
+* Things that are stupid
+** HB
+- Limits for cont. are given in rad/s. Initial periodic solution is given in Hz.
+  In general consisty wrt. rad/s and Hz is very low.
+- Switching direction for BP bifurcations is not fool-proof. Not even close.

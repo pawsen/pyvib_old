@@ -2,16 +2,15 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from scipy.linalg import block_diag, kron, solve, lstsq
-from scipy.linalg import norm
-from scipy import linalg
-from scipy import sparse
+from scipy.linalg import block_diag, kron, solve, lstsq, norm
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import lsmr as splsmr
 
 from ..helper.plotting import Anim
 from ..forcing import sineForce, toMDOF
 from .hbcommon import fft_coeff, ifft_coeff, hb_signal, hb_components
 from .stability import Hills
-from .bifurcation import Fold, NS
+from .bifurcation import Fold, NS, BP
 
 class HB():
     def __init__(self, M0, C0, K0, nonlin,
@@ -129,7 +128,7 @@ class HB():
 
             # Stack the kron prod, so each block row is for time(i)
             mat_func_form[i*n:(i+1)*n,:] = kron(Q.T, np.eye(n))
-        self.mat_func_form_sparse = sparse.csr_matrix(mat_func_form)
+        self.mat_func_form_sparse = csr_matrix(mat_func_form)
 
         if stability:
             hills = Hills(self)
@@ -158,7 +157,7 @@ class HB():
             zsol, *_ = lstsq(H_z,H)
             z = z - zsol
 
-            Obj = linalg.norm(H) / linalg.norm(z)
+            Obj = norm(H) / norm(z)
             print('It. {} - Convergence test: {:e} ({:e})'.
                   format(it_NR, Obj, tol_NR))
             it_NR = it_NR + 1
@@ -169,10 +168,10 @@ class HB():
                              format(max_it_NR))
 
         if stability:
-            B_tilde = hills.stability(omega, H_z)
-            B, stab = hills.reduc(B_tilde)
+            B = hills.stability(omega, H_z)
+            B_tilde, stab = hills.reduc(B)
             self.stab_vec.append(stab)
-            self.lamb_vec.append(B)
+            self.lamb_vec.append(B_tilde)
 
         # amplitude of hb components
         c, cnorm, phi = hb_components(scale_x*z, n, NH)
@@ -192,12 +191,15 @@ class HB():
                      step=0.01,step_min=0.01, step_max=1, cont_dir=1,
                      opt_it_NR=3, it_cont_max=1e4, adaptive_stepsize=True,
                      angle_max_pred=90, dof=0,
-                     detect={'fold':False,'NS':False,'BP':False}):
+                     detect={'fold':False,'NS':False,'BP':False},
+                     default_bp=True):
         """ Do continuation of periodic solution.
 
         Based on tangent prediction and Moore-Penrose correction.
         """
         self.detect = detect
+        self.cont_dir = cont_dir
+        self.dof = dof
 
         z = self.z_vec[-1]
         omega = self.omega_vec[-1]
@@ -219,17 +221,6 @@ class HB():
         step_max = step_max * scale_t
         angle_max_pred = angle_max_pred*np.pi/180
 
-        if self.anim:
-            par = {'title':'Nonlinear FRF',
-                   'xstr':'Frequency ({})'.format(self.xstr),
-                   'ystr':'Amplitude (m)','xscale':1/(scale_t)*self.sca,
-                   'dof':0,'ymin':0,
-                   'xmin':omega_cont_min*self.sca,
-                   'xmax':omega_cont_max*self.sca*1.1,
-                   }
-            anim = Anim(x=self.omega_vec,
-                        y=np.asarray(self.xamp_vec).T[dof],**par)
-
         print('\n-------------------------------------------')
         print('|  Continuation of the periodic solution  |')
         print('-------------------------------------------\n')
@@ -240,19 +231,37 @@ class HB():
             p0_BP = np.ones(nz+1)
 
             nldofs = self.nonlin.nldofs()
+            # index of nonlinear dofs/Fourier coefficients
             nldofs_ext = np.kron(nldofs[:,None], np.ones(2*NH+1)) + \
                          np.kron(np.ones((len(nldofs),1)), np.arange(2*NH+1)*n)
 
             for k in detect.keys():
                 if k == 'fold' and detect[k] is True:
-                    fold = Fold(self, fdofs, nldofs_ext)
+                    fold = Fold(self, fdofs, nldofs_ext, tol_sec=tol_NR)
                     self.bif.append(fold)
                 if k == 'NS' and detect[k] is True:
-                    ns = NS(self, fdofs, nldofs_ext)
+                    ns = NS(self, fdofs, nldofs_ext, tol_sec=tol_NR)
                     self.bif.append(ns)
+                if k == 'BP' and detect[k] is True:
+                    bp = BP(default_bp, self, fdofs, nldofs_ext, tol_sec=tol_NR)
+                    self.bif.append(bp)
 
             tangent_LP = [0]
+            tangent_BP = [0]
+            tt_ns = np.zeros(2)
 
+        anim = None
+        if self.anim:
+            par = {'title':'Nonlinear FRF',
+                   'xstr':'Frequency ({})'.format(self.xstr),
+                   'ystr':'Amplitude (m)','xscale':1/(scale_t)*self.sca,
+                   'dof':dof,'ymin':0,
+                   'xmin':omega_cont_min*self.sca,
+                   'xmax':omega_cont_max*self.sca*1.1,
+                   'hb':self,
+                   }
+            anim = Anim(x=self.omega_vec,
+                        y=np.asarray(self.xamp_vec).T[dof],**par)
 
         omega2 = omega/nu
         # samme A som fra periodic calculation
@@ -264,11 +273,9 @@ class HB():
         point = 0
         point_prev = 0
         point_pprev = 0
-        branch_switch = False
         index_BP = 0
         index_LP = 0
         index_NS = 0
-        nb_pos_NS = np.zeros(2)
 
         while(it_cont <= it_cont_max and
               omega / scale_t <= omega_cont_max and
@@ -284,10 +291,14 @@ class HB():
                     np.hstack((J_z, J_w[:,None])),
                     np.ones(nz+1)))
                 tangent = solve(A_pred, np.append(np.zeros(nz),1))
-                tangent = tangent/linalg.norm(tangent)
+                tangent = tangent/norm(tangent)
             # With Moore-Penrose corrections, it is not needed to explicit
             # calculate the tangent again, since the corrections also correct
             # the tangent.
+
+            if detect['BP'] and bp.branch_switch:
+                tangent = bp.branch_dir(omega, z, tangent, xamp[dof], anim)
+
             tangent_pred = cont_dir * step * tangent
 
             z = z_cont + tangent_pred[:nz]
@@ -297,8 +308,8 @@ class HB():
                 ((point - point_prev) @ (point_prev - point_pprev) /
                  (norm(point - point_prev) * norm(point_prev-point_pprev)) <
                  np.cos(angle_max_pred)) and
-                (it_cont >= index_LP+1) and
-                (it_cont >= index_BP+2)):
+                (it_cont > index_LP+1) and
+                (it_cont > index_BP+2)):
 
                 tangent_pred = -tangent_pred
                 z = z_cont + tangent_pred[:nz]
@@ -306,8 +317,7 @@ class HB():
                 point = np.append(z,omega)
                 print('| Max angle reached. Predictor tangent is reversed. |')
 
-            if branch_switch:
-                pass
+
 
             ## Corrector step. NR iterations
             # Follow eqs. 31-34
@@ -320,8 +330,7 @@ class HB():
             it_NR = 1
             V = tangent
             H = self.state_sys(z, A, force)
-            Obj = linalg.norm(H) / linalg.norm(z)
-            #print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
+            Obj = norm(H) / norm(z)
 
             # More-penrose updating
             while (Obj > tol_NR) and (it_NR <= max_it_NR):
@@ -352,7 +361,7 @@ class HB():
 
                 A = self.assembleA(omega2)
                 H = self.state_sys(z, A, force)
-                Obj = linalg.norm(H) / linalg.norm(z)
+                Obj = norm(H) / norm(z)
                 # print('It. {} - Convergence test: {:e} ({:e})'.format(it_NR, Obj, tol_NR))
                 it_NR += 1
 
@@ -369,21 +378,18 @@ class HB():
             if stability:
                 if it_NR == 1:
                     J_z = self.hjac(z, A)
-                B_tilde = self.hills.stability(omega, J_z)
-                B, stab = self.hills.reduc(B_tilde)
-                self.lamb_vec.append(B)
+                B = self.hills.stability(omega, J_z)
+                B_tilde, stab = self.hills.reduc(B)
+                self.lamb_vec.append(B_tilde)
                 self.stab_vec.append(stab)
-                # For NS/PD bifurcation
                 if detect['NS'] is True:
-                    pos_NS = ns.identify(B)
-                    nb_pos_NS[0] = nb_pos_NS[1]
-                    # zero if pos_NS is empty
-                    nb_pos_NS[1] = len(pos_NS)
+                    # NS/PD: if there's any eigenvalues of B⊙ with only
+                    # imaginary part
+                    tt_ns[0] = tt_ns[1]
+                    tt_ns[1] = ns.identify(B_tilde)
 
-            if stability and it_cont > 1 and it_cont > index_BP + 1:
+            if stability and it_cont > 1 and it_cont > index_BP + 2:
                 tangent_LP.append(tangent[-1])
-                # t_BP, p0_BP, q0_BP = test_func(G, p0_BP, q0_BP,'BP')
-                # tt_BP = np.real(t_BP)
 
                 # Fold bifurcation is detected when the tangent prediction for
                 # omega changes sign
@@ -395,12 +401,22 @@ class HB():
                 # NS bifurcation is detected when a pair of Floquet exponents
                 # crosses the imaginary axis as complex conjugate
                 if (detect['NS'] and it_cont > ns.idx[-1] + 1 and
-                    nb_pos_NS[1] != nb_pos_NS[0]):
+                    tt_ns[1] != tt_ns[0]):
                     omega, z = ns.detect(omega, z, A, J_z, force, it_cont)
                     index_NS = ns.idx[-1]
 
-                # if detect['BP'] and it_cont > idx_BP[-1] + 1:
-                #     detect_bp()
+                if (detect['BP'] and it_cont > bp.idx[-1] + 1):
+                    G = np.vstack((
+                        np.hstack((J_z, J_w[:,None])),
+                        tangent))
+                    t_BP, p0_BP, q0_BP = bp.test_func(G, p0_BP, q0_BP)
+                    tangent_BP.append(np.real(t_BP))
+
+                    if (tangent_BP[-1] * tangent_BP[-2] < 0):
+                        omega, z = bp.detect(omega, z, A, J_z, J_w, tangent,
+                                             force, it_cont)
+                        index_BP = bp.idx[-1]
+
 
             z_cont = z.copy()
             omega_cont = omega
@@ -492,7 +508,7 @@ class HB():
             # be nice
             for j in range(nz):
                 rhs = np.squeeze(np.asarray(full_rhs[:,j].todense()))
-                sol = sparse.linalg.lsmr(mat_func_form_sparse, rhs)
+                sol = splsmr(mat_func_form_sparse, rhs)
                 x = - sol[0]
                 bjac[:,j] = x
 

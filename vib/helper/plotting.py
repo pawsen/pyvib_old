@@ -27,7 +27,7 @@ def phase(y, yd, dof=0, fig=None, ax=None, *args, **kwargs):
 def periodic(t, y, dof=0, ptype='displ', fig=None, ax=None, *args, **kwargs):
     """ To set ptype when used with the plotlist, use:
     from functools import partial
-    periodic2 = partial(periodic,ptype='acc')
+    periodic2 = partial(periodic,type='acc')
     """
     if ptype == 'displ':
         ystr = 'Displacement (m)'
@@ -168,7 +168,7 @@ class Anim(object):
 
     def __init__(self, x, y, dof=0, title='', xstr='', ystr='',
                  xmin=None,xmax=None,ymin=None,ymax=None,
-                 xscale=1,yscale=1):
+                 xscale=1,yscale=1, hb=None):
 
         self.dof = dof
 
@@ -209,6 +209,17 @@ class Anim(object):
         self.ax = ax
         self.fig = fig
         self.ims = []
+        self.hb = hb
+
+        # create axis for bifurcations
+        if hb:
+            self.tangent = []
+            self.ax_bif = []
+            for bif in hb.bif:
+                bifargs = {'ls':'None','mfc':'None','marker':bif.marker,
+                           'label':bif.stype, 'visible':False}
+                self.ax_bif.append(ax.plot(x[-1], y[-1],**bifargs)[0])
+
 
     def update(self, x,y):
         """The purpose of blit'ing is to avoid redrawing the axes, and all the ticks
@@ -262,13 +273,36 @@ class Anim(object):
 
         self.points.set_data(x, y)
         self.cur_point.set_data(x[-1], y[-1])
+        if self.hb:
+            for ax_bif, bif in zip(self.ax_bif, self.hb.bif):
+                if len(bif.idx) > 1:
+                    ax_bif.set_visible(True)
+                    ax_bif.set_data(x[bif.idx[1:]], y[bif.idx[1:]])
+                    ax.draw_artist(ax_bif)
+
         # redraw just the points
         ax.draw_artist(self.points)
         ax.draw_artist(self.cur_point)
         # fill in the axes rectangle
         fig.canvas.blit(ax.bbox)
 
-        #self.ims.append([deepcopy(self.points), deepcopy(self.cur_point)])
+    def plot_tangent(self, w0, x0, omega, x, show=True):
+        """Plot the tangent directions to choose between for a BP bifurcation
+
+        """
+        if show:
+            color = ['k','r','g']
+            ls = ['-','--',':']
+            for omegabp, xbp, c, l in zip(omega, x, color, ls):
+                dy = (xbp - x0)*self.yscale
+                dx = (omegabp - w0)*self.xscale
+                self.tangent.append(self.ax.arrow(w0*self.xscale,x0*self.yscale,
+                                                  dx,dy, color=c, ls=l))
+        else:
+            for tangent in self.tangent:
+                tangent.remove()
+            self.tangent = []
+        self.fig.canvas.draw()
 
     def save(self):
         # Set up formatting for the movie files
@@ -465,7 +499,8 @@ def nfrc(dof=0, pdof=0, plotlist=[], hb=None, nnm=None, energy_plot=False,
         if detect:
             for bif in hb.bif:
                 bifargs = {'ls':'None','mfc':'None','marker':bif.marker,'label':bif.stype}
-                ax.plot(x[bif.idx[1:]], y[bif.idx[1:]], **bifargs)
+                if len(bif.idx) > 1:
+                    ax.plot(x[bif.idx[1:]], y[bif.idx[1:]], **bifargs)
         ax.legend()
     if nnm is not None:
         ptype = 'nnm'

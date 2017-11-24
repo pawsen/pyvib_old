@@ -34,7 +34,6 @@ class Hills(object):
 
     def __init__(self, hb):
 
-
         scale_t = hb.scale_t
         scale_x = hb.scale_x
         NH = hb.NH
@@ -65,6 +64,16 @@ class Hills(object):
         #return Delta2, b2_inv
 
     def stability(self, omega, J_z, it=None):
+        """Calculate B, Hills matrix.
+
+        The 2n eigenvalues of B with lowest imaginary part, is the estimated
+        Floquet exponents. They are collected in B_tilde.
+
+        Returns
+        -------
+        B: ndarray (2Nh+1)2n x (2Nh+1)2n
+            Hills coefficients
+        """
         scale_x = self.hb.scale_x
         scale_t = self.hb.scale_t
         M0 = self.hb.M * scale_t**2 / scale_x
@@ -101,30 +110,30 @@ class Hills(object):
         if rcm_permute:
             # permute B to get smaller bandwidth which gives faster linalg comp.
             p = reverse_cuthill_mckee(mat_B)
-            B_tilde = mat_B[p]
+            B = mat_B[p]
         else:
-            B_tilde = mat_B
+            B = mat_B
 
-        #self.B_tilde = B_tilde
-        return B_tilde
+        return B
 
-    def reduc(self, B_tilde):
-        """Find the 2n first eigenvalues with lowest imaginary part"""
+    def reduc(self, B):
+        """Extract Floquet exponents λ from Hills matrix.
+
+        Find the 2n first eigenvalues with lowest imaginary part
+        """
 
         n = self.hb.n
-        #B_tilde = self.B_tilde
-
-        w = eigvals(B_tilde)
+        w = eigvals(B)
         idx = np.argsort(np.abs(np.imag(w)))[:2*n]
-        B = w[idx]
+        B_tilde = w[idx]
 
-        if np.max(np.real(B)) <= 0:
+        if np.max(np.real(B_tilde)) <= 0:
             stab = True
         else:
             stab = False
-        return B, stab
+        return B_tilde, stab
 
-    def vec(self, B_tilde):
+    def vec(self, B):
         """Find the 2n first eigenvalues with lowest imaginary part and right
         eigenvectors
         """
@@ -132,11 +141,9 @@ class Hills(object):
         n = self.hb.n
         # w: eigenvalues. vr: right eigenvector
         # Remember: column v[:,i] is the eigenvector corresponding to the eigenvalue w[i].
-        w, vr = eig(B_tilde)
+        w, vr = eig(B)
 
         idx = np.argsort(np.abs(np.imag(w)))[:2*n]
-        B = w[idx]
-        #
-        vr = vr
+        B_tilde = w[idx]
 
-        return B, vr, idx
+        return B_tilde, vr, idx
