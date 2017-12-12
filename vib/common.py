@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from scipy.linalg import eig, norm, inv, lstsq, solve
+from scipy.linalg import eig, norm, inv, solve
 import math
+import itertools
 
 class color:
     PURPLE = '\033[95m'
@@ -31,6 +32,33 @@ def next_pow2(i):
     # the value: int(math.pow(2, exponent))
     return exponent
 
+def factors(n):
+    """Find the prime factorization of n
+
+    Efficient implementation. Find the factorization by trial division, using
+    the optimization of dividing only by two and the odd integers.
+
+    An improvement on trial division by two and the odd numbers is wheel
+    factorization, which uses a cyclic set of gaps between potential primes to
+    greatly reduce the number of trial divisions. Here we use a 2,3,5-wheel
+
+    Factoring wheels have the same O(sqrt(n)) time complexity as normal trial
+    division, but will be two or three times faster in practice.
+
+    >>> list(factors(90))
+    [2, 3, 3, 5]
+    """
+    f = 2
+    increments = itertools.chain([1,2,2], itertools.cycle([4,2,4,2,4,6,2,6]))
+    for incr in increments:
+        if f*f > n:
+            break
+        while n % f == 0:
+            yield f
+            n //= f
+        f += incr
+    if n > 1:
+        yield n
 
 def db(x):
     """relative value in dB

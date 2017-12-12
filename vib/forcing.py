@@ -117,7 +117,6 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1):
     R. Pintelon and J. Schoukens. System Identification: A Frequency Domain
     Approach. IEEE Press, Piscataway, NJ, 2001
     """
-    dt = 1/fs
 
     # uniform distribution
     u = 2*np.random.rand(ns+1) - 1
@@ -138,11 +137,10 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1):
         # prevent the first number from reoccurring: 1 2 3 -> 1 2 3 2 3 2 3
         idx = np.arange(1,nrep) * (ns+1)
         u = np.delete(u, idx)
-        t = np.arange(0, ns*nrep+1) / fs
-    else:
-        t = np.arange(0, ns+1) / fs
 
-    rms = np.sqrt(np.mean(np.square(u)))
+    t = np.arange(ns*nrep+1) / fs
+
+    rms = np.sqrt(np.mean(u**2))
     u = arms * u / rms
 
     return u, t

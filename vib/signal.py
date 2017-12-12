@@ -4,8 +4,9 @@
 import numpy as np
 import matplotlib.pylab as plt
 
-from .common import db
+from .common import db, factors
 from .filter import integrate, differentiate
+from scipy.signal import decimate
 # from .morletWT import morletWT
 # from collections import namedtuple
 
@@ -221,9 +222,56 @@ class Signal(object):
         b, a = signal.butter(order, highcut, btype='lowpass')
         return signal.filtfilt(b, a, self.y)
 
+    def downsample(self, n, nsper=None, remove=False):
+        """Filter and downsample signals
+
+        The displacement is decimated(low-pass filtered and downsampled) where
+        forcing is only downsampled by the sampling factor n, ie. every n'th
+        sample is kept.
+
+        Parameters
+        ----------
+        n: scalar
+            downsample rate, ie. keep every n'th sample
+        nsper : int
+            Number of samples per period
+        remove: bool
+            Removal of the last simulated period to eliminate the edge effects
+            due to the low-pass filter.
+
+        """
+        y = self.y
+        u = self.u
+
+        # axis to operate along
+        axis = -1
+
+        # filter and downsample
+        # prime factor decomposition.
+        for k in factors(n):
+            y = decimate(y, q=k, ftype='fir', axis=-1)
+
+        # index for downsampling u
+        sl = [slice(None)] * u.ndim
+        sl[axis] = slice(None, None, n)
+        u = u[sl]
+
+        # Removal of the last simulated period to eliminate the edge effects
+        # due to the low-pass filter.
+        if remove:
+            ns = self.ns
+            nper = int(np.floor(ns/nsper))
+            y = y[:,:(nper-1)*nsper]
+            u = u[:,:(nper-1)*nsper]
+
+        return u, y
+
+
 def _set_signal(y):
     if y is not None:
         if y.ndim != 2:
             y = y.reshape(-1,y.shape[0])
         return y
     return None
+
+
