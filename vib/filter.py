@@ -78,7 +78,6 @@ def integrate(ddy,fs, lowcut=None, highcut=None, order=3, isnumeric=False):
         dy = signal.filtfilt(b, a, dy)
         y = signal.filtfilt(b, a, y)
 
-        print(np.linalg.norm(y), np.linalg.norm(dy))
     return y, dy
 
 def differentiate(y, fs, order=3, cutoff=0.5, isnumeric=False):

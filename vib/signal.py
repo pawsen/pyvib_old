@@ -42,7 +42,7 @@ class Signal(object):
             self.ndof, self.ns = self.ydd.shape
             self.isset_ydd = True
 
-        self.u = u
+        self.u = _set_signal(u)
         self.fs = fs
 
         self.y_per = None
@@ -69,20 +69,21 @@ class Signal(object):
                              format(_nper),per)
 
         self.iscut = True
-        ndof = self.ndof
         self.nper = len(per)
         self.nsper = int(nsper)
         # number of sample for cut'ed signal
         ns = self.nper * self.nsper
 
         # extract periodic signal
-        self.y_per = np.empty((ndof, self.nper*self.nsper))
-        self.u_per = np.empty(self.nper*self.nsper)
-        for i, p in enumerate(per):
-            self.y_per[:,i*nsper: (i+1)*nsper] = self.y[:,offset + p*nsper:
-                                                        offset+(p+1)*nsper]
-            self.u_per[i*nsper: (i+1)*nsper] = self.u[offset + p*nsper:
-                                                      offset + (p+1)*nsper]
+        if self.isset_y:
+            self.y_per = _cut(self.y, per, self.nsper,offset)
+        if self.isset_yd:
+            self.yd_per = _cut(self.yd, per, self.nsper,offset)
+        if self.isset_ydd:
+            self.ydd_per = _cut(self.ydd, per, self.nsper,offset)
+
+        self.u_per = _cut(self.u, per, self.nsper, offset)
+
 
     def periodicity(self, nsper=None, dof=0, offset=0, fig=None, ax=None,
                     **kwargs):
@@ -169,6 +170,8 @@ class Signal(object):
             y[i,:], yd[i,:] = integrate(ydd[i,:], fs, lowcut, highcut,
                                         isnumeric=isnumeric)
 
+        self.isset_y = True
+        self.isset_yd = True
         self.y = y
         self.yd = yd
 
@@ -275,3 +278,14 @@ def _set_signal(y):
     return None
 
 
+def _cut(x,per,nsper,offset=0):
+    """Extract periodic signal from original signal"""
+
+    nper = len(per)
+    ndof = x.shape[0]
+    x_per = np.empty((ndof, nper*nsper))
+
+    for i, p in enumerate(per):
+        x_per[:,i*nsper: (i+1)*nsper] = x[:,offset + p*nsper:
+                                          offset+(p+1)*nsper]
+    return x_per

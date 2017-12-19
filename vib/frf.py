@@ -35,11 +35,11 @@ class FRF(Signal):
 
         # If signal is cut, used that. Otherwise use the full signal.
         if self.signal.iscut:
-            u = self.signal.u_per
+            u = self.signal.u_per.squeeze()
             y = self.signal.y_per
             nper = self.signal.nper
         else:
-            u = self.signal.u
+            u = self.signal.u.squeeze()
             y = self.signal.y
 
         fs = self.signal.fs
