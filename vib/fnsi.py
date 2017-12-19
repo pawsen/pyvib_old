@@ -22,7 +22,7 @@ class FNSI():
         y = signal.y_per
         u = signal.u_per
         if u.ndim != 2:
-             u = u.reshape(-1,u.shape[0])
+            u = u.reshape(-1,u.shape[0])
         nper = signal.nper
         nsper = signal.nsper
 
@@ -59,14 +59,14 @@ class FNSI():
         self.fmax = fmax
 
     def calc_EY(self, isnoise=False):
-        """Calculate FFT of the extended input vector e(t) and the measured output
-        y.
+        """Calculate FFT of the extended input vector e(t) and the measured
+        output y.
 
-        The concatenated extended input vector e(t), is e=[u(t), g(t)].T, see eq
-        (5). (E is called the Extended input spectral matrix and used for forming
-        Ei, eq. (12)). Notice that the stacking order is reversed here.
-        u(t) is the input force and g(y(t),ẏ(t)) is the functional nonlinear force
-        calculated from the specified polynomial nonlinearity, see eq.(2)
+        The concatenated extended input vector e(t), is e=[u(t), g(t)].T, see
+        eq (5). (E is called the Extended input spectral matrix and used for
+        forming Ei, eq. (12)). Notice that the stacking order is reversed here.
+        u(t) is the input force and g(y(t),ẏ(t)) is the functional nonlinear
+        force calculated from the specified polynomial nonlinearity, see eq.(2)
 
         Returns
         ------
@@ -78,9 +78,11 @@ class FNSI():
         Notes
         -----
         Method by J.P Noel. Described in article
-        "Frequency-domain subspace identification for nonlinear mechanical systems"
+        "Frequency-domain subspace identification for nonlinear mechanical
+        systems"
         http://dx.doi.org/10.1016/j.ymssp.2013.06.034
         Equation numbers refers to this article
+
         """
         print('E and Y comp.')
         u = self.u
@@ -91,11 +93,11 @@ class FNSI():
         U = np.fft.fft(self.u,axis=1) / np.sqrt(nsper)
         Y = np.fft.fft(self.y,axis=1) / np.sqrt(nsper)
 
-        Umean, WU = meanVar(U)
-        Ymean, WY = meanVar(Y)
+        Umean, WU = meanVar(U, isnoise=False)
+        Ymean, WY = meanVar(Y, isnoise=isnoise)
 
         # Set weights to none, if the signal is not noisy
-        if not isnoise:
+        if isnoise is False:
             WY = None
 
         # In case of no nonlinearities
@@ -111,8 +113,8 @@ class FNSI():
 
             scaling = np.zeros(nnl)
             for j in range(nnl):
-              scaling[j] = np.std(u[0,:]) / np.std(fnl[j,:])
-              fnl[j,:] *= scaling[j]
+                scaling[j] = np.std(u[0,:]) / np.std(fnl[j,:])
+                fnl[j,:] *= scaling[j]
 
             FNL = np.fft.fft(fnl, axis=1) / np.sqrt(nsper)
             # concatenate to form extended input spectra matrix
@@ -122,7 +124,6 @@ class FNSI():
         self.Y = Ymean
         self.W = WY
         self.scaling = scaling
-
 
     def svd_comp(self, ims, svd_plot=False):
         """
@@ -199,11 +200,10 @@ class FNSI():
         if W is None:
             CY = np.eye(l*ims)
         else:
-            Wmat = np.zeros((l*ims,F))
+            Wmat = np.zeros((l*ims,F), dtype=complex)
             for j in range(F):
                 Wmat[:,j] = np.sqrt(np.kron(dz[:ims,j], W[:, flines[j]]))
             CY = np.real(Wmat @ Wmat.T)
-
 
         # full_matrices=False is equal to matlabs economy-size decomposition.
         # Use gesdd as driver. Matlab uses gesvd. The only reason to use dgesvd
@@ -230,7 +230,6 @@ class FNSI():
         self.F = F
         self.ims = ims
 
-
     def id(self, nmodel, bd_method=None):
         """Frequency-domain Nonlinear Subspace Identification (FNSI)
         """
@@ -245,8 +244,8 @@ class FNSI():
 
         # 5:
         # Truncate Un and Sn based on the model order n. The model order can be
-        # determined by inspecting the singular values in Sn or using stabilization
-        # diagram.
+        # determined by inspecting the singular values in Sn or using
+        # stabilization diagram.
         U1 = Un[:,:nmodel]
         S1 = sn[:nmodel]
 
@@ -257,20 +256,18 @@ class FNSI():
 
         # 7:
         # Estimate A from eq(24) and C as the first block row of G.
-        # Recompute G from A and C, eq(13). G plays a major role in determining B and D,
-        # thus Noel suggest that G is recalculated
+        # Recompute G from A and C, eq(13). G plays a major role in determining
+        # B and D, thus Noel suggest that G is recalculated
 
         A, *_ = lstsq(G[:-l,:], G[l:,:])
         C = G[:l,:].copy()
 
         # Equal to G[] = C @ np.linalg.matrix_power(A,j)
         for j in range(1,ims):
-            G[j*l:(j+1)*l,:] =  G[(j-1)*l:(j)*l,:] @ A
-
+            G[j*l:(j+1)*l,:] = G[(j-1)*l:(j)*l,:] @ A
 
         # 8:
         # Estimate B and D
-        ## Start of (B,D) estimation using no optimisation ##
         print('(B,D) estimation using no optimisation')
 
         # R_U: Ei+1, R_Y: Yi+1
@@ -296,8 +293,9 @@ class FNSI():
         # eq. MM = [zeros, G_inv]
         MM = np.hstack([np.zeros((nmodel,l)), G_inv])
 
-        # The reason for appending/prepending zeros in L and MM, is to easily form the
-        # submatrices of N, given by eq. 40. Thus ML is equal to first row of N1
+        # The reason for appending/prepending zeros in L and MM, is to easily
+        # form the submatrices of N, given by eq. 40. Thus ML is equal to first
+        # row of N1
         ML = MM - L1
 
         # rhs multiplicator of eq (40)
@@ -309,7 +307,8 @@ class FNSI():
         # Assemble the kron_prod in eq. 44.
         for kk in range(ims+1):
             # Submatrices of N_k. Given by eq (40).
-            # eg. N1 corresspond to first row, N2 to second row of the N_k's submatrices
+            # eg. N1 corresspond to first row, N2 to second row of the N_k's
+            # submatrices
             N1 = np.zeros((nmodel,l*(ims+1)))
             N2 = np.zeros((l,l*(ims+1)))
 
@@ -325,7 +324,6 @@ class FNSI():
                 N1,
                 N2
             ]).dot(Z)
-
 
             if kk == 0:
                 kron_prod = np.kron(Rk[kk*m:(kk+1)*m,:].T, Nk)
@@ -558,13 +556,21 @@ class FNSI():
 
     def state_space(self):
         """Calculate state space matrices in physical domain using a similarity
-        transform T"""
+        transform T
+
+        See eq 20.10 in
+        Etienne Gourc, JP Noel, et.al
+        "Obtaining Nonlinear Frequency Responses from Broadband Testing"
+        """
 
         # Similarity transform
         T = np.vstack((self.C, self.C @ self.A))
         C = solve(T.T, self.C.T).T  # (C = C*T^-1)
         A = solve(T.T, (T @ self.A).T).T  # (A = T*A*T^-1)
         B = T @ self.B
+        self.state = {
+            'T': T, 'C': C, 'A': A, 'B': B,
+        }
         return
 
 class NL_force(object):

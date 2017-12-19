@@ -97,7 +97,7 @@ def rescale(x, mini=None, maxi=None):
         maxi = np.max(x)
     return (x - mini) / (maxi - mini)
 
-def meanVar(Y):
+def meanVar(Y, isnoise=False):
     """
     Y = fft(y)/nsper
 
@@ -120,9 +120,9 @@ def meanVar(Y):
     Y0 = Y - Ymean[...,None]
 
     W = []
-    if p > 1:
-        # weights. Only used if the signal is noisy and multiple periods are
-        # used
+    # weights. Only used if the signal is noisy and multiple periods are
+    # used
+    if p > 1 and isnoise:
         W = np.sum(np.abs(Y0)**2, axis=2)/(p-1)
 
     return Ymean, W
