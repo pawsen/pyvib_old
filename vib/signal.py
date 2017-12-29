@@ -4,7 +4,7 @@
 import numpy as np
 import matplotlib.pylab as plt
 
-from .common import db, factors
+from .common import db, prime_factors
 from .filter import integrate, differentiate
 from scipy.signal import decimate
 # from .morletWT import morletWT
@@ -251,7 +251,7 @@ class Signal(object):
 
         # filter and downsample
         # prime factor decomposition.
-        for k in factors(n):
+        for k in prime_factors(n):
             y = decimate(y, q=k, ftype='fir', axis=-1)
 
         # index for downsampling u
@@ -272,8 +272,7 @@ class Signal(object):
 
 def _set_signal(y):
     if y is not None:
-        if y.ndim != 2:
-            y = y.reshape(-1,y.shape[0])
+        y = np.atleast_2d(y)
         return y
     return None
 

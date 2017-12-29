@@ -10,9 +10,8 @@ import pickle
 # vibration libraries
 from vib.signal import Signal
 from vib.fnsi import FNSI
-from vib.common import modal_properties, db, frf_mkc
-from vib.helper.fnsi_plots import (plot_modes, plot_knl, plot_linfrf,
-                                   plot_stab, plot_svg)
+from vib.modal import modal_ac, frf_mkc
+from vib.helper.modal_plotting import (plot_knl, plot_frf, plot_svg)
 from vib.frf import FRF
 from vib.fnsi import NL_force, NL_polynomial, NL_spline
 
@@ -77,7 +76,7 @@ nlist = np.arange(2, nmax+3, 2)
 fnsi = FNSI(snlin, nl, idof, fmin, fmax)
 fnsi.calc_EY()
 fnsi.svd_comp(ims)
-sd = fnsi.stabilisation_diagram(nlist)
+sd = fnsi.stabilization(nlist)
 # Do estimation
 fnsi.id(ncur)
 fnsi.nl_coeff(iu, dof)
@@ -99,7 +98,7 @@ fnsi3.nl_coeff(iu, dof)
 
 def print_modal(fnsi):
     # calculate modal parameters
-    modal = modal_properties(fnsi.A, fnsi.C)
+    modal = modal_ac(fnsi.A, fnsi.C)
     natfreq = modal['wn']
     dampfreq = modal['wd']
     damping = modal['zeta']
@@ -118,7 +117,7 @@ print('## linear identified at low level')
 modal3 = print_modal(fnsi3)
 
 # Stabilization plot
-plot_stab(fnsi, nlist, sca=sca)
+fnsi.plot_stab(sca=sca)
 
 ## Compare FRFs
 frf = FRF(snlin, fmin=1e-3, fmax=5/2/np.pi)
@@ -129,11 +128,11 @@ M, C, K = par['M'], par['C'], par['K']
 freq_mck, H_mck = frf_mkc(M, K, C=C, fmin=1e-3, fmax=fmax, fres=0.01)
 
 fH1, ax = plt.subplots()
-ax.plot(frf_freq*sca, db(np.abs(frf_H[dof])), '-k', label='From high signal')
-plot_linfrf(fnsi, dof, sca, ax=ax, label='nl high', ls='--', c='C1')
-plot_linfrf(fnsi2, dof, sca, ax=ax, label='lin high', ls='--', c='C2')
-plot_linfrf(fnsi3, dof, sca, ax=ax, label='lin low', ls='-.', c='C3')
-ax.plot(freq_mck*sca, db(np.abs(H_mck[0,0,:])), label='mck', ls=':', c='b')
+plot_frf(frf_freq, frf_H, dof, sca, ax=ax, ls='-', c='k', label='From high signal')
+plot_frf(freq_mck, H_mck[0,:], dof, sca, ax=ax, label='mck', ls=':', c='b')
+fnsi.plot_frf(dof, sca, ax=ax, label='nl high', ls='--', c='C1')
+fnsi2.plot_frf(dof, sca, ax=ax, label='lin high', ls='--', c='C2')
+fnsi3.plot_frf(dof, sca, ax=ax, label='lin low', ls='-.', c='C3')
 ax.legend()
 #ax.legend_ = None
 ax.set_xlabel('Frequency (rad/s)')

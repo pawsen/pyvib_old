@@ -31,11 +31,9 @@ def fig_ax_getter(fig=None, ax=None):
 
 def plot_knl(fnsi, sca=1):
 
-
     fs = fnsi.fs
     nsper = fnsi.nsper
     flines = fnsi.flines
-
 
     freq = np.arange(0,nsper)*fs/nsper * sca
     freq_plot = freq[flines]
@@ -105,7 +103,7 @@ def plot_knl(fnsi, sca=1):
 
     return figs, axs
 
-def plot_modes(idof, sd, sca=1, fig=None, ax=None, **kwargs):
+def plot_modes(idof, sr, sca=1, fig=None, ax=None, **kwargs):
     fig, ax = fig_ax_getter(fig, ax)
     if sca == 1:
         xstr = '(Hz)'
@@ -116,10 +114,10 @@ def plot_modes(idof, sd, sca=1, fig=None, ax=None, **kwargs):
     ax.set_xlabel('Node id')
     ax.set_ylabel('Displacement (m)')
     # display max 8 modes
-    nmodes = min(len(sd['wd']), 8)
+    nmodes = min(len(sr['wd']), 8)
     for i in range(nmodes):
-        natfreq = sd['wn'][i]
-        ax.plot(idof, sd['realmode'][i],'-*', label='{:0.2f} {:s}'.
+        natfreq = sr['wn'][i]
+        ax.plot(idof, sr['realmode'][i],'-*', label='{:0.2f} {:s}'.
                 format(natfreq*sca, xstr))
     ax.axhline(y=0, ls='--', lw='0.5',color='k')
     ax.autoscale(enable=True, axis='x', tight=True)
@@ -127,24 +125,18 @@ def plot_modes(idof, sd, sca=1, fig=None, ax=None, **kwargs):
 
     return fig, ax
 
-def plot_linfrf(fnsi, dofs=0, sca=1, fig=None, ax=None, **kwargs):
+def plot_frf(freq, H, dofs=0, sca=1, fig=None, ax=None, *args, **kwargs):
     fig, ax = fig_ax_getter(fig, ax)
-
-    H = fnsi.H
-    fs = fnsi.fs
-    nsper = fnsi.nsper
-    flines = fnsi.flines
-
-    freq = np.arange(0,nsper)*fs/nsper*sca
-    freq_plot = freq[flines]  # Hz
 
     # If h is only calculated for one dof:
     if H.shape[0] == 1:
         dofs = [0]
 
-    for i, dof in enumerate(dofs):
-        # label='dof: {:d}'.format(dof))
-        ax.plot(freq_plot, db(np.abs(H[i])), **kwargs)
+    if not isinstance(dofs, list):
+        dofs = [dofs]
+
+    for dof in dofs:
+        ax.plot(freq*sca, db(np.abs(H[dof])), *args, **kwargs)
 
     if ax is None:
         ax.set_title('Nonparametric linear FRF')
@@ -169,11 +161,8 @@ def plot_svg(Sn, fig=None, ax=None, **kwargs):
     return fig, ax
 
 
-def plot_stab(fnsi, nlist, sca=1, fig=None, ax=None):
+def plot_stab(sd, nlist, fmin=None, fmax=None, sca=1, fig=None, ax=None):
     fig, ax = fig_ax_getter(fig, ax)
-    fmin = fnsi.fmin*sca
-    fmax = fnsi.fmax*sca
-    sd = fnsi.sd
 
     orUNS = []    # Unstabilised model order
     freqUNS = []  # Unstabilised frequency for current model order
@@ -225,7 +214,11 @@ def plot_stab(fnsi, nlist, sca=1, fig=None, ax=None):
         ax.plot(freqSfull, orSfull, '^k', ms=7, mfc='none',
                 label='Full stabilization')
 
-    ax.set_xlim([fmin, fmax])
+    if fmin is not None:
+        ax.set_xlim(left=fmin*sca)
+    if fmax is not None:
+        ax.set_xlim(right=fmax*sca)
+
     ax.set_ylim([nlist[0]-2, nlist[-1]])
     step = round(nlist[-2]/5)
     major_ticks = np.arange(0, nlist[-2]+1, step)

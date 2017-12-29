@@ -1,14 +1,13 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from scipy.linalg import (norm, lstsq, solve, qr, svd, logm, pinv)
-from collections import defaultdict
+from scipy.linalg import (lstsq, solve, qr, svd, logm, pinv)
 
-from .common import meanVar, db, modal_properties, ModalAC, ModalACX
-from .signal import Signal
+from .common import meanVar
+from .modal import modal_ac, stabilization
 from .spline import spline
+from .helper.modal_plotting import plot_frf, plot_stab
 
 class FNSI():
     def __init__(self, signal, nonlin, idof, fmin, fmax, iu=[], nldof=[]):
@@ -159,9 +158,8 @@ class FNSI():
         zvar.imag = 2 * np.pi * flines / nsper
         zvar = np.exp(zvar)
 
-
-        # dz is an array containing powers of zvar. Eg. the scaling z's in eq. (10)
-        # (ξ is not used, but dz relates to ξ)
+        # dz is an array containing powers of zvar. Eg. the scaling z's in eq.
+        # (10) (ξ is not used, but dz relates to ξ)
         dz = np.zeros((ims+1, F), dtype=complex)
         for j in range(ims+1):
             dz[j,:] = zvar**j
@@ -455,8 +453,8 @@ class FNSI():
         self.He = He
         return H, He
 
-    def stabilisation_diagram(self, nlist, tol_freq=1, tol_damping=5,
-                              tol_mode=0.98, macchoice='complex'):
+    def stabilization(self, nlist, tol_freq=1, tol_damping=5, tol_mode=0.98,
+                      macchoice='complex'):
         """
 
         Parameters
@@ -481,8 +479,10 @@ class FNSI():
         # for postprocessing
         fmin = self.fmin
         fmax = self.fmax
+        self.nlist = nlist
 
-        SD = [None]*len(nlist)
+        # estimate modal properties for increasing model order
+        sr = [None]*len(nlist)
         for k, n in enumerate(nlist):
             U1 = U[:,:n]
             S1 = s[:n]
@@ -496,63 +496,18 @@ class FNSI():
             C = G[:l, :]
             # Convert A into continous-time arrays using eq (8)
             A = fs * logm(A)
-            SD[k] = modal_properties(A, C)
+            sr[k] = modal_ac(A, C)
 
         # postprocessing
-        # Initialize SDout as 2 nested defaultdict
-        SDout = defaultdict(lambda: defaultdict(list))
-        # loop over model orders
-        for ior, nval in enumerate(nlist[:-1]):
-            # loop over frequencies for current model order
-            for ifr, natfreq in enumerate(SD[ior]['wn']):
-                if natfreq < fmin or natfreq > fmax:
-                    continue
-
-                # compare with frequencies from one model order higher.
-                nfreq = SD[ior+1]['wn']
-                tol_low = (1 - tol_freq / 100) * natfreq
-                tol_high = (1 + tol_freq / 100) * natfreq
-                ifreqS, = np.where((nfreq >= tol_low) & (nfreq <= tol_high))
-                if ifreqS.size == 0:  # ifreqS is empty
-                    # the current natfreq is not stabilized
-                    SDout[nval]['stab'].append(False)
-                    SDout[nval]['freq'].append(natfreq)
-                    SDout[nval]['zeta'].append(False)
-                    SDout[nval]['mode'].append(False)
-                else:
-                    # Stabilized in natfreq
-                    SDout[nval]['stab'].append(True)
-                    SDout[nval]['freq'].append(natfreq)
-                    # Only in very rare cases, ie multiple natfreqs are very
-                    # close, is len(ifreqS) != 1
-                    for ii in ifreqS:
-                        nep = SD[ior+1]['zeta'][ii]
-                        tol_low = (1 - tol_damping / 100) * SD[ior]['zeta'][ifr]
-                        tol_high = (1 + tol_damping / 100) * SD[ior]['zeta'][ifr]
-
-                        iepS, = np.where((nep >= tol_low) & (nep <= tol_high))
-                        if iepS.size == 0:
-                            SDout[nval]['zeta'].append(False)
-                        else:
-                            SDout[nval]['zeta'].append(True)
-                    if macchoice == 'complex':
-                        m1 = SD[ior]['cpxmode'][ifr]
-                        m2 = SD[ior+1]['cpxmode'][ifreqS]
-                        MAC = ModalACX(m1, m2)
-                    else:
-                        m1 = SD[ior]['realmode'][ifr]
-                        m2 = SD[ior+1]['realmode'][ifreqS]
-                        MAC = ModalAC(m1, m2)
-                    if np.max(MAC) >= tol_mode:
-                        SDout[nval]['mode'].append(True)
-                    else:
-                        SDout[nval]['mode'].append(False)
-        self.sd = SDout
-        return SDout
+        sdout = stabilization(sr, nlist, fmin, fmax, tol_freq, tol_damping,
+                              tol_mode, macchoice)
+        self.sr = sr
+        self.sd = sdout
+        return sdout
 
     def calc_modal(self):
         """Calculate modal properties after identification is done"""
-        self.modal = modal_properties(self.A, self.C)
+        self.modal = modal_ac(self.A, self.C)
 
     def state_space(self):
         """Calculate state space matrices in physical domain using a similarity
@@ -572,6 +527,23 @@ class FNSI():
             'T': T, 'C': C, 'A': A, 'B': B,
         }
         return
+
+    def plot_frf(self, dofs=[0], sca=1, fig=None, ax=None, **kwargs):
+        # Plot identified frequency response function
+        H = self.H
+        fs = self.fs
+        nsper = self.nsper
+        flines = self.flines
+
+        freq = np.arange(0,nsper)*fs/nsper
+        freq_plot = freq[flines]
+
+        return plot_frf(freq_plot, H, dofs, sca, fig, ax, **kwargs)
+
+    def plot_stab(self, sca=1, fig=None, ax=None):
+        " plot stabilization"
+        return plot_stab(self.sd, self.nlist, self.fmin, self.fmax, sca, fig,
+                         ax)
 
 class NL_force(object):
 

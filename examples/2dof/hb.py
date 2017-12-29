@@ -19,7 +19,7 @@ K = par['K']
 
 fdof = 0
 vrms = 2
-f0 = 1e-3/2/np.pi
+f0 = 0.6/2/np.pi
 f1 = 1e-4/2/np.pi
 f2 = 5/2/np.pi
 
@@ -28,8 +28,8 @@ enl = par['enl']
 knl = par['knl']
 
 par_hb ={
-    'NH': 7,
-    'npow2': 11,
+    'NH': 5,
+    'npow2': 8,
     'nu': 1,
     'stability': True,
     'rcm_permute': False,
@@ -47,11 +47,13 @@ par_cont = {
     'cont_dir': 1,
     'opt_it_NR': 3,
     'step': 0.001,
-    'step_min': 0.001,
-    'step_max': 1,
+    'step_min': 0.05,
+    'step_max': 0.01,
     'angle_max_pred': 90,
     'it_cont_max': 1e6,
-    'adaptive_stepsize': True
+    'adaptive_stepsize': True,
+    'detect':{'fold':True,'NS':True,'BP':True},
+    'default_bp':True,
 }
 
 nl_pol = NL_polynomial(inl, enl, knl)
@@ -67,3 +69,4 @@ if savedata:
     print('data saved as {}'.format(filename))
 
 ffrf, ax = nfrc(dof=0, hb=hb, interactive=False, xscale=1, xunit='(rad/s)')
+plt.show()

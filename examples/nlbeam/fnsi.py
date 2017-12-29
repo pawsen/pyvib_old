@@ -9,15 +9,14 @@ from collections import namedtuple
 from vib.signal import Signal
 from vib.fnsi import FNSI
 from vib.fnsi import NL_force, NL_polynomial
-from vib.common import modal_properties, db, frf_mkc
-from vib.helper.fnsi_plots import (plot_modes, plot_knl, plot_linfrf,
-                                   plot_stab)
+from vib.modal import modal_ac , frf_mkc
+from vib.helper.modal_plotting import (plot_modes, plot_knl, plot_frf)
 from vib.frf import FRF
 
 sca = 1
 def print_modal(fnsi):
     # calculate modal parameters
-    modal = modal_properties(fnsi.A, fnsi.C)
+    modal = modal_ac(fnsi.A, fnsi.C)
     natfreq = modal['wn']
     dampfreq = modal['wd']
     damping = modal['zeta']
@@ -72,7 +71,7 @@ nl = NL_force()
 fnsi = FNSI(slin, nl, idof, lin.fmin, lin.fmax)
 fnsi.calc_EY()
 fnsi.svd_comp(ims)
-fnsi.stabilisation_diagram(nlist)
+fnsi.stabilization(nlist)
 # Do identification
 fnsi.id(ncur)
 fnsi.calc_modal()
@@ -87,7 +86,7 @@ snlin.cut(nlin.nsper, per)
 fnsi_nl1 = FNSI(snlin, nl, idof, nlin.fmin, nlin.fmax)
 fnsi_nl1.calc_EY()
 fnsi_nl1.svd_comp(ims)
-fnsi_nl1.stabilisation_diagram(nlist)
+fnsi_nl1.stabilization(nlist)
 fnsi_nl1.id(ncur)
 fnsi_nl1.calc_modal()
 fnsi_nl1.nl_coeff(nlin.iu, nldof)
@@ -102,7 +101,7 @@ nl = NL_force(nl_pol)
 fnsi_nl2 = FNSI(snlin, nl, idof, nlin.fmin, nlin.fmax)
 fnsi_nl2.calc_EY()
 fnsi_nl2.svd_comp(ims)
-fnsi_nl2.stabilisation_diagram(nlist)
+fnsi_nl2.stabilization(nlist)
 fnsi_nl2.id(ncur)
 fnsi_nl2.calc_modal()
 fnsi_nl2.nl_coeff(nlin.iu, nldof)
@@ -123,19 +122,19 @@ frf_freq, frf_H = frf.periodic()
 dof = 6
 
 # periodicity
-slin.periodicity(lin.nsper, dof)
-fper, ax = snlin.periodicity(nlin.nsper, dof)
-#ax.set_title(''); ax.legend_ = None
-ax.yaxis.label.set_size(20)
-ax.xaxis.label.set_size(20)
-ax.tick_params(labelsize=20)
+# slin.periodicity(lin.nsper, dof)
+# fper, ax = snlin.periodicity(nlin.nsper, dof)
+# #ax.set_title(''); ax.legend_ = None
+# ax.yaxis.label.set_size(20)
+# ax.xaxis.label.set_size(20)
+# ax.tick_params(labelsize=20)
 
 # FRF
 fH1, ax = plt.subplots()
-ax.plot(frf_freq*sca, db(np.abs(frf_H[dof])), '-.k', label='From signal')
-plot_linfrf(fnsi, dof, fig=fH1, ax=ax, label='lin')
-plot_linfrf(fnsi_nl1, dof, fig=fH1, ax=ax, label='nl_1')
-plot_linfrf(fnsi_nl2, dof, fig=fH1, ax=ax, ls='--', label='nl2')
+plot_frf(frf_freq, frf_H, dof,sca, ax=ax, ls='-.', c='k', label='From signal')
+fnsi.plot_frf(dof, fig=fH1, ax=ax, label='lin')
+fnsi_nl1.plot_frf(dof, fig=fH1, ax=ax, label='nl_1')
+fnsi_nl2.plot_frf(dof, fig=fH1, ax=ax, ls='--', label='nl2')
 #ax.set_title(''); ax.legend_ = None
 ax.legend()
 
@@ -150,11 +149,11 @@ plot_modes(idof, fnsi_nl2.modal, sca, fig=fmodes)
 # fstab, ax1 = plt.subplots()
 # ax2 = ax1.twinx()
 
-fsdlin, ax = plot_stab(fnsi, nlist, sca)
+fsdlin, ax = fnsi.plot_stab(sca)
 ax.set_title('Linear at low level')  #; ax.legend_ = None
-fsdnlin1, ax = plot_stab(fnsi_nl1, nlist, sca)
+fsdnlin1, ax = fnsi_nl1.plot_stab(sca)
 ax.set_title('Linear at high level')  #; ax.legend_ = None
-fsdnlin2, ax = plot_stab(fnsi_nl2, nlist, sca)
+fsdnlin2, ax = fnsi_nl2.plot_stab(sca)
 ax.set_title('Nonlinear at high level')  #; ax.legend_ = None
 
 # knl
