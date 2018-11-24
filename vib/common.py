@@ -59,16 +59,30 @@ def prime_factors(n):
     if n > 1:
         yield n
 
-def db(x):
+def db(x, r=1):
     """relative value in dB
 
     TODO: Maybe x should be rescaled to ]0..1].?
     log10(0) = inf.
+
+    Parameters
+    ----------
+    x: array like
+    r: float, optional
+        Reference value. default = 1
+
+    Notes
+    -----
+    https://en.wikipedia.org/wiki/Decibel#Field_quantities_and_root-power_quantities
     """
+    if math.isclose(r, 1, rel_tol=1e-6):
+        x = x**2
+    else:
+        x = x**2/r
 
     # dont nag if x=0
     with np.errstate(divide='ignore', invalid='ignore'):
-        return 20*np.log10(np.abs(x**2))
+        return 10*np.log10(np.abs(x))
 
 def rescale(x, mini=None, maxi=None):
     """Rescale x to 0-1.
