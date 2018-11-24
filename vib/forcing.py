@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
+from numpy.fft import ifft
 
 """
 Example of a closure-function. See also partial from ...
@@ -18,7 +19,7 @@ def force(A, f, ndof, fdof):
     return wrapped_func
 
 """
-def sineSweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
+def sinesweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
     """Do a linear or logarithmic sinus sweep excitation.
 
     For a reverse sweep, swap f1 and f2 and set a negative sweep rate.
@@ -85,9 +86,10 @@ def sineSweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
 
 
 
-def randomPeriodic(arms, fs, f1, f2, ns, nrep=1):
+def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',std=1, ngroup=3):
     """Random periodic excitation
 
+    Generates a zero-mean random phase multisine with specified std(amplitude).
     Random phase multisine signal is a periodic random signal with a
     user-controlled amplitude spectrum and a random phase spectrum drawn from a
     uniform distribution. If an integer number of periods is measured, the
@@ -95,55 +97,94 @@ def randomPeriodic(arms, fs, f1, f2, ns, nrep=1):
     Another advantage is that the periodic nature can help help separate signal
     from noise.
 
-    Here the amplitude spectrum is flat between f1 and f2.
+    The amplitude spectrum is flat between f1 and f2.
 
     Parameters
     ----------
-    arms : float
-        Amplitude, rms in N
-    fs : float
-        Sampling frequency
     f1 : float
         Starting frequency in Hz
     f2 : float
         Ending frequency in Hz
-    ns : int
-        Number of points per sample
-    nrep : int
-        Number of times the signal is repeated
+    fs : float
+        Sampling frequency
+    N : int
+        Number of points per period
+    P  : int, optional
+        Number of periods. default = 1
+    M  : int, optional
+        Number of realizations. default = 1
+    ftype : str, {'full', 'odd', 'oddrandom'}, optional
+        For characterization of NLs, only selected lines are excited.
+    std : float, optional
+        std(amplitude) of the generated signals. default = 1
+    ngroup : int, optional
+        In case of ftype = oddrandom, 1 out of ngroup odd lines is discarded.
+
+    Returns
+    -------
+    u: MxNPx record of the generated signals
+    lines: excited frequency lines -> 1 = dc, 2 = fs/N
 
     Notes
     -----
-    R. Pintelon and J. Schoukens. System Identification: A Frequency Domain
-    Approach. IEEE Press, Piscataway, NJ, 2001
+    J.Schoukens, M. Vaes, and R. Pintelon:
+    Linear System Identification in a Nonlinear Setting:
+    Nonparametric Analysis of the Nonlinear Distortions and Their Impact on the
+    Best Linear Approximation. https://arxiv.org/pdf/1804.09587.pdf
+
     """
 
-    # uniform distribution
-    u = 2*np.random.rand(ns+1) - 1
-    u = u - np.mean(u)
+    valid_ftype = {'full', 'odd', 'oddrandom'}
+    # frequency resolution
+    f0 = fs/N
+    # lines selection - select which frequencies to excite
+    lines_min = np.ceil(f1/f0).astype('int')
+    lines_max = np.floor(f2/f0).astype('int')
+    lines = np.arange(lines_min, lines_max + 1, dtype=int)
 
-    freq = np.linspace(0,fs, ns+1)
+    # remove dc
+    if lines[0] == 0:
+        lines = lines[1:]
 
-    # create desired frequency content, by modifying the phase.
-    U = np.fft.fft(u)
-    U[freq < f1] = 0
-    U[freq > f2] = 0
+    if ftype == 'full':
+        pass  # do nothing
+    elif ftype == 'odd':
+        # remove even lines
+        if np.remainder(lines[0],2):  # lines[0] is even
+            lines = lines[::2]
+        else:
+            lines = lines[1::2]
+    elif ftype == 'oddrandom':
+        if np.remainder(lines[0],2):
+            lines = lines[::2]
+        else:
+            lines = lines[1::2]
+        # remove 1 out of ngroup lines
+        nlines = len(lines)
+        nremove = np.floor(nlines/ngroup).astype('int')
+        idx = np.random.randint(ngroup, size=nremove)
+        idx = idx + ngroup*np.arange(nremove)
+        lines = np.delete(lines, idx)
+    else:
+        raise ValueError('Invalid ftype {}'.format(repr(ftype)))
 
-    u = np.real(np.fft.ifft(U)) * (ns+1)
+    nlines = len(lines)
 
-    if nrep > 1:
-        # repeat signal: 1 2 3 -> 1 2 3 1 2 3 1 2 3
-        u = np.tile(u, nrep)
-        # prevent the first number from reoccurring: 1 2 3 -> 1 2 3 2 3 2 3
-        idx = np.arange(1,nrep) * (ns+1)
-        u = np.delete(u, idx)
+    # multisine generation - frequency domain implementation
+    U = np.zeros((M,N),dtype=complex)
+    # excite the selected frequencies
+    U[:,lines] = np.exp(2j*np.pi*np.random.rand(M,nlines))
 
-    t = np.arange(ns*nrep+1) / fs
+    u = np.real(ifft(U,axis=1))  # go to time domain
+    u = std*u / np.std(u[0])  # rescale to obtain desired rms std
 
-    rms = np.sqrt(np.mean(u**2))
-    u = arms * u / rms
+    # Because the ifft is for [0,2*pi[, there is no need to remove any point
+    # when the generated signal is repeated.
+    u = np.tile(u,(1,P))  # generate P periods
+    t = np.arange(N*P)/fs
+    freq = np.linspace(0, fs, N)
 
-    return u, t
+    return u, t, lines, freq
 
 
 def sineForce(A, f=None, omega=None, t=None, fs=None, ns=None, phi_f=0):
