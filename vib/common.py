@@ -31,7 +31,7 @@ def next_pow2(i):
     # the value: int(math.pow(2, exponent))
     return exponent
 
-def prime_factors(n):
+def factor(n):
     """Find the prime factorization of n
 
     Efficient implementation. Find the factorization by trial division, using
