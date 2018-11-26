@@ -86,10 +86,10 @@ def sinesweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
 
 
 
-def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',std=1, ngroup=3):
+def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',rms=1, ngroup=3):
     """Random periodic excitation
 
-    Generates a zero-mean random phase multisine with specified std(amplitude).
+    Generates a zero-mean random phase multisine with specified rms(amplitude).
     Random phase multisine signal is a periodic random signal with a
     user-controlled amplitude spectrum and a random phase spectrum drawn from a
     uniform distribution. If an integer number of periods is measured, the
@@ -106,7 +106,7 @@ def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',std=1, ngroup=3):
     f2 : float
         Ending frequency in Hz
     fs : float
-        Sampling frequency
+        Sample frequency. Must be fs >= 2*f2
     N : int
         Number of points per period
     P  : int, optional
@@ -115,15 +115,18 @@ def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',std=1, ngroup=3):
         Number of realizations. default = 1
     ftype : str, {'full', 'odd', 'oddrandom'}, optional
         For characterization of NLs, only selected lines are excited.
-    std : float, optional
-        std(amplitude) of the generated signals. default = 1
+    rms : float, optional
+        rms(amplitude) of the generated signals. default = 1. Note that since
+        the signal is zero-mean, the std and rms is equal.
     ngroup : int, optional
         In case of ftype = oddrandom, 1 out of ngroup odd lines is discarded.
 
     Returns
     -------
-    u: MxNPx record of the generated signals
+    u: MxNP record of the generated signals
+    t: time vector
     lines: excited frequency lines -> 1 = dc, 2 = fs/N
+    freq: frequency vector
 
     Notes
     -----
@@ -132,7 +135,10 @@ def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',std=1, ngroup=3):
     Nonparametric Analysis of the Nonlinear Distortions and Their Impact on the
     Best Linear Approximation. https://arxiv.org/pdf/1804.09587.pdf
 
+    https://en.wikipedia.org/wiki/Root_mean_square#Relationship_to_other_statistics
     """
+    if not fs >= 2*f2:
+        raise AssertionError('fs should be fs >= 2*f2. fs={}, f2={}'.format(fs,f2))
 
     valid_ftype = {'full', 'odd', 'oddrandom'}
     # frequency resolution
@@ -176,7 +182,7 @@ def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',std=1, ngroup=3):
     U[:,lines] = np.exp(2j*np.pi*np.random.rand(M,nlines))
 
     u = np.real(ifft(U,axis=1))  # go to time domain
-    u = std*u / np.std(u[0])  # rescale to obtain desired rms std
+    u = rms*u / np.std(u[0])  # rescale to obtain desired rms/std
 
     # Because the ifft is for [0,2*pi[, there is no need to remove any point
     # when the generated signal is repeated.
