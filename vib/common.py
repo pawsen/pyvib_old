@@ -31,7 +31,7 @@ def next_pow2(i):
     # the value: int(math.pow(2, exponent))
     return exponent
 
-def factor(n):
+def prime_factor(n):
     """Find the prime factorization of n
 
     Efficient implementation. Find the factorization by trial division, using
@@ -83,6 +83,30 @@ def db(x, r=1):
     # dont nag if x=0
     with np.errstate(divide='ignore', invalid='ignore'):
         return 10*np.log10(np.abs(x))
+
+
+def import_npz(npz_file, namespace=globals()):
+    """Load npz file and unpack data/dictionary to the given namespace
+
+    It is necessary to explicit call the function with globals() even if it is
+    set as default value here. The docs states that the scope is the defining
+    module not the calling.
+
+    Example for `oneliner` without using namespace(can only be used local)
+    for varName in data.files:
+        exec(varName + " = data['" + varName + "']")
+
+    Notes:
+    ------
+    https://docs.python.org/3/library/functions.html#globals
+    """
+    data = np.load(npz_file)
+    for varName in data:
+        try:
+            namespace[varName] = data[varName].item()
+        except ValueError:
+            namespace[varName] = data[varName]
+
 
 def rescale(x, mini=None, maxi=None):
     """Rescale x to 0-1.

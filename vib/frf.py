@@ -3,6 +3,7 @@
 
 import numpy as np
 from .signal import Signal
+from numpy.fft import fft, ifft
 
 class FRF(Signal):
     def __init__(self, signal, fmin, fmax):
@@ -58,18 +59,16 @@ class FRF(Signal):
     def nonperiodic():
         """Interface to nonperiodic FRF"""
 
-def periodic(u, y, nper, fs, fmin, fmax):
-    """ Calculate FRF for a periodic signal.
+def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
+    """Calculate the frequency response matrix, and the corresponding noise and
+    total covariance matrices from the spectra of periodic input/output data.
+
+    Note that the term stochastic nonlinear contribution term is a bit
+    misleading. The NL contribution is deterministic given the same forcing
+    buy differs between realizations.
 
     H(f) = FRF(f) = Y(f)/U(f) (Y/F in classical notation)
     Y and U is the output and input of the system in frequency domain.
-
-    The receptance frequency response function is defined as the ration between
-    a harmonic displacement and a harmonic force. This ratio is complex, since
-    there is both an amplitude ratio, np.abs(FRF), and a phase angle,
-    np.angle(FRF)/np.pi*180 for the phase in degrees.
-
-    Other definitions can be used.
 
     Parameters
     ----------
@@ -88,62 +87,105 @@ def periodic(u, y, nper, fs, fmin, fmax):
 
     Returns
     -------
-    freq : ndarray
-        Frequencies for the FRF
-    FRF : ndarray
-        Receptance vector. Also called H.
-    sigN : ndarray
-        Standard deviation between each period
+    G : ndarray
+        Frequency response matrix(FRM)
+    covGML : ndarray
+        Total covariance (= stochastic nonlinear contributions + noise)
+    covGn : ndarray
+        Noise covariance
     """
 
-    # TODO: Only relevant with multiple forcings
-    # M: number of forced dofs
-    # ns: number of points per forced dof
-    # M, ns = u.shape
-    # if ns < M:
-    #     u = u.T
-    #     M, ns = u.shape
+    # Number of inputs, realization, periods and frequencies
+    m, R, P, F = U.shape
+    p = Y.shape[0]  # number of outputs
+    M = np.floor(R/m).astype(int)  # number of block of experiments
+    if M*m != R:
+        print('Warning: suboptimal number of experiments: B*m != M')
+    # Reshape in M blocks of m experiments
+    U = U[:,:m*M].reshape((m,m,M,P,F))
+    Y = Y[:,:m*M].reshape((p,m,M,P,F))
 
-    ns = len(u)
+    if P > 1:
+        # average input/output spectra over periods
+        U_mean = np.mean(U,axis=3)  # m x m x M x F
+        Y_mean = np.mean(Y,axis=3)
 
-    # points per period
-    nsper = ns // nper
+        # Estimate noise spectra
+        # create new axis. We could have used U_m = np.mean(U,3, keepdims=True)
+        NU = U - U_mean[:,:,:,None,:]  # m x m x M x P x F
+        NY = Y - Y_mean[:,:,:,None,:]
 
-    freq = np.arange(0, nsper//2) * fs/nsper
-    flines = np.where((freq >= fmin) & (freq <= fmax))
-    freq = freq[flines]
-    nfreq = len(freq)
+        # Calculate input/output noise (co)variances on averaged(over periods)
+        # spectra
+        covU = np.empty((m*m,m*m,M,F), dtype=complex)
+        covY = np.empty((p*m,p*m,M,F), dtype=complex)
+        covYU = np.empty((p*m,m*m,M,F), dtype=complex)
+        for mm in range(M):  # Loop over experiment blocks
+            # noise spectrum of experiment block mm (m x m x P x F)
+            NU_m = NU[:,:,mm]
+            NY_m = NY[:,:,mm]
+            for f in range(F):
+                # TODO extend this using einsum, so we avoid all loops
+                # TODO fx: NU_m[...,f].reshape(-1,*NU_m[...,f].shape[2:])
+                # flatten the m x m dimension and use einsum to take the outer
+                # product of m*m x m*m and then sum over the p periods.
+                tmpUU = NU_m[...,f].reshape(-1, P)  # create view
+                tmpYY = NY_m[...,f].reshape(-1, P)
+                covU[:,:,mm,f] = np.einsum('ij,kj->ik',tmpUU,tmpUU) / (P-1)/P
+                covY[:,:,mm,f] = np.einsum('ij,kj->ik',tmpYY,tmpYY) / (P-1)/P
+                covYU[:,:,mm,f] = np.einsum('ij,kj->ik',tmpYY,tmpUU) / (P-1)/P
 
-    G = np.empty((nper, nfreq), dtype='complex')
-    for p in range(nper):
-        # do fft on current period
-        U = np.fft.fft(u[p*nsper: (p+1)*nsper]) / np.sqrt(nsper)
-        Y = np.fft.fft(y[p*nsper: (p+1)*nsper]) / np.sqrt(nsper)
+        # Further calculations with averaged spectra
+        U = U_mean  # m x m x M x F
+        Y = Y_mean
 
-        U = U[flines]
-        Y = Y[flines]
+    # Compute FRM and noise and total covariance on averaged(over experiment
+    # blocks and periods) FRM
+    G = np.empty((p,m,F), dtype=complex)
+    covGML = np.empty((m*p,m*p,F), dtype=complex)
+    covGn = np.empty((m*p,m*p,F), dtype=complex)
+    Gm = np.empty((p,m,M), dtype=complex)
+    U_inv_m = np.empty((m,m,M), dtype=complex)
+    covGn_m = np.empty((m*p,m*p,M), dtype=complex)
 
-        G[p,:] = Y / U
+    for f in range(F):
+        # Estimate the frequency response matrix (FRM)
+        for mm in range(M):
+            # psudo-inverse using svd. A = u*s*v, then A* = vᵀs*u where s*=1/s
+            U_inv_m[:,:,mm] = np.linalg.pinv(U[:,:,mm,f])
+            # FRM of experiment block m at frequency f
+            Gm[:,:,mm] = Y[:,:,mm,f] @ U_inv_m[:,:,mm]
 
-    """In case of multiple forcings, one could put an extra for-loop around the
-    p-loop, ie. G[m,p,:] = Y/U, where m is the current forcing. We would then
-    have the current points as
-    Y = fft(y[m, p*nsper:...]) and visa versa for u.
-    Then take the frf as
-    FRF = np.mean(G, (1,0))
-    ie. first mean over periods, then forcings.
-    """
+        # Average FRM over experiment blocks
+        G[:,:,f] = Gm.mean(2)
 
-    # Make the FRF the average of all periods
-    FRF = np.mean(G, axis=0)
+        # Estimate the total covariance on averaged FRM
+        tmp = 0
+        NG = G[:,:,f,None] - Gm
+        tmp = NG.reshape(-1, M)
+        covGML[:,:,f] = np.einsum('ij,kj->ik',tmp,tmp) / M/(M-1)
 
-    # deviation between FFTs for each period
-    if nper > 1:
-        sigN = np.sqrt(np.std(G, axis=0)**2 / nper)
-    else:
-        sigN = None
+        # Estimate noise covariance on averaged FRM (only if P > 1)
+        if P > 1:
+            for mm in range(M):
+                U_invT = U_inv_m[:,:,mm].T
+                A = np.kron(U_invT, np.eye(p))
+                B = -np.kron(U_invT, Gm[:,:,mm])
+                AB = A @ covYU[:,:,mm,f] @ B.conj().T
+                covGn_m[:,:,mm] = A @ covY[:,:,mm,f] @ A.conj().T + \
+                    B @ covU[:,:,mm,f] @ B.conj().T + \
+                    (AB + AB.conj().T)
 
-    return freq, FRF, sigN
+            covGn[:,:,f] = covGn_m.mean(2)/M
+
+    # No total covariance estimate possible if only one experiment block
+    if M < 2:
+        covGML = 0
+    # No noise covariance estimate possible if only one period
+    if P == 1:
+        covGn = 0
+
+    return G, covGML, covGn
 
 def nonperiodic(u, y, N, fs, fmin, fmax):
     """Calculate FRF for a nonperiodic signal.

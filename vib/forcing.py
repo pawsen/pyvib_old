@@ -86,16 +86,16 @@ def sinesweep(amp, fs, f1, f2, vsweep, nrep=1, inctype='lin', t0=0):
 
 
 
-def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',rms=1, ngroup=3):
+def multisine(f1, f2, fs, N=1024, P=1, M=1, lines='full',rms=1, ngroup=4):
     """Random periodic excitation
 
-    Generates a zero-mean random phase multisine with specified rms(amplitude).
-    Random phase multisine signal is a periodic random signal with a
-    user-controlled amplitude spectrum and a random phase spectrum drawn from a
-    uniform distribution. If an integer number of periods is measured, the
-    amplitude spectrum is perfectly realized, unlike classical Gaussian noise.
-    Another advantage is that the periodic nature can help help separate signal
-    from noise.
+    Generates M realizations of a zero-mean random phase multisine with
+    specified rms(amplitude). Random phase multisine signal is a periodic
+    random signal with a user-controlled amplitude spectrum and a random phase
+    spectrum drawn from a uniform distribution. If an integer number of periods
+    is measured, the amplitude spectrum is perfectly realized, unlike classical
+    Gaussian noise. Another advantage is that the periodic nature can help help
+    separate signal from noise.
 
     The amplitude spectrum is flat between f1 and f2.
 
@@ -107,8 +107,8 @@ def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',rms=1, ngroup=3):
         Ending frequency in Hz
     fs : float
         Sample frequency. Must be fs >= 2*f2
-    N : int
-        Number of points per period
+    N : int, optional
+        Number of points per period. default = 1024
     P  : int, optional
         Number of periods. default = 1
     M  : int, optional
@@ -136,52 +136,64 @@ def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',rms=1, ngroup=3):
     Best Linear Approximation. https://arxiv.org/pdf/1804.09587.pdf
 
     https://en.wikipedia.org/wiki/Root_mean_square#Relationship_to_other_statistics
+
     """
     if not fs >= 2*f2:
-        raise AssertionError('fs should be fs >= 2*f2. fs={}, f2={}'.format(fs,f2))
+        raise AssertionError('fs should be fs >= 2*f2. fs={}, f2={}'.
+                             format(fs,f2))
+    if not N >= 2*f2:
+        raise AssertionError('N should be higher than Nyquist freq, '
+                             'N >= 2*f2. N={}, f2={}'.format(N,f2))
 
-    valid_ftype = {'full', 'odd', 'oddrandom'}
-    # frequency resolution
-    f0 = fs/N
-    # lines selection - select which frequencies to excite
-    lines_min = np.ceil(f1/f0).astype('int')
-    lines_max = np.floor(f2/f0).astype('int')
-    lines = np.arange(lines_min, lines_max + 1, dtype=int)
+    valid_lines = {'full', 'odd', 'oddrandom'}
+    if isinstance(lines, str):
+        if lines not in valid_lines:
+            raise ValueError('Invalid line-type {}'.format(repr(lines)))
+        else:
+            # frequency resolution
+            f0 = fs/N
+            # lines selection - select which frequencies to excite
+            lines_min = np.ceil(f1/f0).astype('int')
+            lines_max = np.floor(f2/f0).astype('int')
+            _lines = np.arange(lines_min, lines_max + 1, dtype=int)
+    elif isinstance(lines, (np.ndarray, list)):  # user specified lines
+        _lines = np.array(lines)
+    else:
+        raise ValueError('Invalid lines. Should be str or ndarray {}'.
+                         format(type(lines)))
 
     # remove dc
-    if lines[0] == 0:
-        lines = lines[1:]
+    if _lines[0] == 0:
+        _lines = _lines[1:]
 
-    if ftype == 'full':
+    if lines == 'full':
         pass  # do nothing
-    elif ftype == 'odd':
+    elif lines == 'odd':
         # remove even lines
-        if np.remainder(lines[0],2):  # lines[0] is even
-            lines = lines[::2]
+        if np.remainder(_lines[0],2):  # lines[0] is even
+            _lines = _lines[::2]
         else:
-            lines = lines[1::2]
-    elif ftype == 'oddrandom':
-        if np.remainder(lines[0],2):
-            lines = lines[::2]
+            _lines = _lines[1::2]
+    elif lines == 'oddrandom':
+        if np.remainder(_lines[0],2):
+            _lines = _lines[::2]
         else:
-            lines = lines[1::2]
+            _lines = _lines[1::2]
         # remove 1 out of ngroup lines
-        nlines = len(lines)
+        nlines = len(_lines)
         nremove = np.floor(nlines/ngroup).astype('int')
         idx = np.random.randint(ngroup, size=nremove)
         idx = idx + ngroup*np.arange(nremove)
-        lines = np.delete(lines, idx)
-    else:
-        raise ValueError('Invalid ftype {}'.format(repr(ftype)))
+        _lines = np.delete(_lines, idx)
 
-    nlines = len(lines)
+    nlines = len(_lines)
 
     # multisine generation - frequency domain implementation
     U = np.zeros((M,N),dtype=complex)
     # excite the selected frequencies
-    U[:,lines] = np.exp(2j*np.pi*np.random.rand(M,nlines))
+    U[:,_lines] = np.exp(2j*np.pi*np.random.rand(M,nlines))
 
-    u = np.real(ifft(U,axis=1))  # go to time domain
+    u = 2*np.real(ifft(U,axis=1))  # go to time domain
     u = rms*u / np.std(u[0])  # rescale to obtain desired rms/std
 
     # Because the ifft is for [0,2*pi[, there is no need to remove any point
@@ -190,7 +202,7 @@ def multisine(f1, f2, fs, N, P=1, M=1, ftype='full',rms=1, ngroup=3):
     t = np.arange(N*P)/fs
     freq = np.linspace(0, fs, N)
 
-    return u, t, lines, freq
+    return u, t, _lines, freq
 
 
 def sineForce(A, f=None, omega=None, t=None, fs=None, ns=None, phi_f=0):
