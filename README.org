@@ -1,3 +1,45 @@
+* Docs
+Some examples of numpy style docs
+https://www.numpy.org/devdocs/docs/howto_document.html#example-source
+https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_numpy.html
+
+And here's how to do sphinx
+https://lasagne.readthedocs.io/en/latest/
+https://github.com/SamStudio8/gretel/tree/master/docs
+http://www.ericholscher.com/blog/2016/jul/1/sphinx-and-rtd-for-writers/
+https://matplotlib.org/sampledoc/
+
+Create, update or convert docstrings in existing Python files, managing several
+styles.
+pyment -i "numpydoc" -o numpydoc ~/src/vib/vib/fnsi.py
+creates a patch file that can be applied with
+patch -p1 < test.py.patch
+
+
+# add bibtex
+https://github.com/numpy/numpydoc/issues/34
+https://sphinxcontrib-bibtex.readthedocs.io/en/latest/
+
+** Generate docs:
+Guide here: https://samnicholls.net/2016/06/15/how-to-sphinx-readthedocs/
+mkdir docs && cd docs
+sphinx-quickstart
+mkdir source
+sphinx-apidoc --separate -f -o source ../vib  # to generate API documentation stubs
+make html
+
+
+** references between functions
+http://www.sphinx-doc.org/en/master/usage/restructuredtext/domains.html#cross-referencing-python-objects
+fx:
+Se also :py:func:`.common.db`
+
+.. math::
+  W^{3\beta}_{\delta_1 \rho_1 \sigma_2} \approx U^{3\beta}_{\delta_1 \rho_1}
+
+Or inline
+The value of :math:`\omega` is larger than 5.
+
 * pyside2 for qui.
 Choosen over pyqt due to licensing. These two are almost interchangeable. Could
 start with pyqt if docs/examples are nicer.
@@ -7,3 +49,17 @@ start with pyqt if docs/examples are nicer.
 - Limits for cont. are given in rad/s. Initial periodic solution is given in Hz.
   In general consisty wrt. rad/s and Hz is very low.
 - Switching direction for BP bifurcations is not fool-proof. Not even close.
+* Things I learned
+- Nothing works. Ever.
+- In the event that things do work, you just haven’t discovered what didn’t work yet.
+- I’ll never finish everything.
+- There is no consensus on anything.
+- We like to pretend quality control isn’t a problem.
+- Backups are hard.
+- Conferences tend to remind me I am not a engineer, statistician or a computer
+  scientist but a horrible chimera of the three
+- You should have a healthy paranoia in an analysis being wrong, doubly so if it
+  is yours
+- If you say something is simple, you’ve just found this week’s most difficult task
+- Software is not obliged to adhere to any or all of a format specification
+- gzip all of your stupidly large text files

@@ -68,7 +68,7 @@ class FNSI():
         force calculated from the specified polynomial nonlinearity, see eq.(2)
 
         Returns
-        ------
+        -------
         E : ndarray (complex)
             FFT of the concatenated extended input vector e(t)
         Y : ndarray (complex)
@@ -145,6 +145,7 @@ class FNSI():
         W = self.W
 
         # dimensions
+        # TODO l -> p
         # l: measured applied displacements
         m = np.shape(E)[0]
         l = np.shape(Y)[0]
@@ -160,6 +161,7 @@ class FNSI():
 
         # dz is an array containing powers of zvar. Eg. the scaling z's in eq.
         # (10) (ξ is not used, but dz relates to ξ)
+        # TODO dz -> Wr
         dz = np.zeros((ims+1, F), dtype=complex)
         for j in range(ims+1):
             dz[j,:] = zvar**j
@@ -168,6 +170,7 @@ class FNSI():
         # Concatenate external forces and nonlinearities to form the extended
         # input  spectra Ei
         # Initialize Ei and Yi
+        # TODO see subspace for more efficient way of doing this
         Emat = np.empty((m * (ims + 1), F), dtype=complex)
         Ymat = np.empty((l * (ims + 1), F), dtype=complex)
         for j in range(F):
@@ -183,6 +186,7 @@ class FNSI():
         # Compute the orthogonal projection P = Yi/Ei using QR-decomposition,
         # eq. (20)
         print('QR decomposition')
+        # TODO rename P -> Z
         P = np.vstack([Emat, Ymat])
         R, = qr(P.T, mode='r')
         _slice = np.s_[:(ims+1)*(m+l)]

@@ -4,6 +4,7 @@
 import numpy as np
 from .signal import Signal
 from numpy.fft import fft, ifft
+from numpy.linalg import pinv
 
 class FRF(Signal):
     def __init__(self, signal, fmin, fmax):
@@ -58,6 +59,10 @@ class FRF(Signal):
 
     def nonperiodic():
         """Interface to nonperiodic FRF"""
+        pass
+    pass
+
+
 
 def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
     """Calculate the frequency response matrix, and the corresponding noise and
@@ -73,7 +78,8 @@ def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
     Parameters
     ----------
     u : ndarray
-        Forcing signal
+        Forcin
+    g signal
     y : ndarray
         Response signal (displacements)
     nper : int
@@ -131,9 +137,9 @@ def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
                 # product of m*m x m*m and then sum over the p periods.
                 tmpUU = NU_m[...,f].reshape(-1, P)  # create view
                 tmpYY = NY_m[...,f].reshape(-1, P)
-                covU[:,:,mm,f] = np.einsum('ij,kj->ik',tmpUU,tmpUU) / (P-1)/P
-                covY[:,:,mm,f] = np.einsum('ij,kj->ik',tmpYY,tmpYY) / (P-1)/P
-                covYU[:,:,mm,f] = np.einsum('ij,kj->ik',tmpYY,tmpUU) / (P-1)/P
+                covU[:,:,mm,f] = np.einsum('ij,kj->ik',tmpUU,tmpUU.conj()) / (P-1)/P
+                covY[:,:,mm,f] = np.einsum('ij,kj->ik',tmpYY,tmpYY.conj()) / (P-1)/P
+                covYU[:,:,mm,f] = np.einsum('ij,kj->ik',tmpYY,tmpUU.conj()) / (P-1)/P
 
         # Further calculations with averaged spectra
         U = U_mean  # m x m x M x F
@@ -151,8 +157,8 @@ def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
     for f in range(F):
         # Estimate the frequency response matrix (FRM)
         for mm in range(M):
-            # psudo-inverse using svd. A = u*s*v, then A* = vᵀs*u where s*=1/s
-            U_inv_m[:,:,mm] = np.linalg.pinv(U[:,:,mm,f])
+            # psudo-inverse by svd. A = usvᴴ, then A⁺ = vs⁺uᴴ where s⁺=1/s
+            U_inv_m[:,:,mm] = pinv(U[:,:,mm,f].conj())
             # FRM of experiment block m at frequency f
             Gm[:,:,mm] = Y[:,:,mm,f] @ U_inv_m[:,:,mm]
 
@@ -160,10 +166,9 @@ def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
         G[:,:,f] = Gm.mean(2)
 
         # Estimate the total covariance on averaged FRM
-        tmp = 0
         NG = G[:,:,f,None] - Gm
         tmp = NG.reshape(-1, M)
-        covGML[:,:,f] = np.einsum('ij,kj->ik',tmp,tmp) / M/(M-1)
+        covGML[:,:,f] = np.einsum('ij,kj->ik',tmp,tmp.conj()) / M/(M-1)
 
         # Estimate noise covariance on averaged FRM (only if P > 1)
         if P > 1:
