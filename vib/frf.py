@@ -158,7 +158,7 @@ def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
         # Estimate the frequency response matrix (FRM)
         for mm in range(M):
             # psudo-inverse by svd. A = usvᴴ, then A⁺ = vs⁺uᴴ where s⁺=1/s
-            U_inv_m[:,:,mm] = pinv(U[:,:,mm,f].conj())
+            U_inv_m[:,:,mm] = pinv(U[:,:,mm,f])
             # FRM of experiment block m at frequency f
             Gm[:,:,mm] = Y[:,:,mm,f] @ U_inv_m[:,:,mm]
 

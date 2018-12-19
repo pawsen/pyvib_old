@@ -63,3 +63,89 @@ start with pyqt if docs/examples are nicer.
 - If you say something is simple, you’ve just found this week’s most difficult task
 - Software is not obliged to adhere to any or all of a format specification
 - gzip all of your stupidly large text files
+* Timing
+
+import timeit
+
+s1 = """\
+z = np.exp(2j*np.pi*freq)
+"""
+s2 = """\
+zvar = np.empty(freq.shape, dtype=complex)
+zvar.real = np.zeros(freq.shape)
+zvar.imag = 2 * np.pi * freq
+zvar = np.exp(zvar)
+"""
+setup_statement = ';'.join([
+    'import numpy as np',
+    'n = int(1e5)',
+    'freq = np.array(n)',
+])
+
+t1 = timeit.Timer(s1, setup=setup_statement)
+t2 = timeit.Timer(s2, setup=setup_statement)
+print(t1.timeit(number=5))
+print(t2.timeit(number=5))
+
+setup_statement2 = ';'.join([
+    'import numpy as np',
+    'n = int(1e3)',
+    'Hmat = np.ones((n,n)) + 1j*np.ones((n,n))',
+    'Umat = np.ones((n,n)) + 1j*np.ones((n,n))',
+])
+
+s3 = """\
+Hmat = np.hstack([np.real(Hmat), np.imag(Hmat)])
+Umat = np.hstack([np.real(Umat), np.imag(Umat)])
+Z = np.vstack([Hmat, Umat])
+"""
+
+s4 = """\
+Hre = np.hstack([np.real(Hmat), np.imag(Hmat)])
+Ure = np.hstack([np.real(Umat), np.imag(Umat)])
+Z = np.vstack([Hre, Ure])
+"""
+
+s5 = """\
+Z = np.empty((2*n,2*n))
+Z[:n,:n] = Hmat.real
+Z[:n,n:] = Hmat.imag
+Z[n:,:n] = Umat.real
+Z[n:,n:] = Umat.imag
+"""
+
+
+t3 = timeit.Timer(s3, setup=setup_statement2)
+t4 = timeit.Timer(s4, setup=setup_statement2)
+t5 = timeit.Timer(s5, setup=setup_statement2)
+print(t3.timeit(number=3))
+print(t4.timeit(number=3))
+print(t5.timeit(number=3))
+
+
+# import numpy as np
+# n = int(1e3)
+# freq = np.array(n)
+# Emat = np.empty((n,n), dtype=complex)
+# Mmat = np.hstack([np.real(Emat), np.imag(Emat)])
+
+
+import numpy as np
+A = np.random.rand(1000,3,3)
+def slow_inverse(A):
+    Ainv = np.zeros_like(A)
+
+    for i in range(A.shape[0]):
+        Ainv[i] = np.linalg.inv(A[i])
+    return Ainv
+
+def fast_inverse(A):
+    identity = np.identity(A.shape[2], dtype=A.dtype)
+    Ainv = np.zeros_like(A)
+
+    for i in range(A.shape[0]):
+        Ainv[i] = np.linalg.solve(A[i], identity)
+    return Ainv
+
+%timeit -n 20 aI11 = slow_inverse(A)
+%timeit -n 20 aI11 = fast_inverse(A)
