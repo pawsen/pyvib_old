@@ -379,7 +379,7 @@ def subspace(G, covarG, freq, n, r):
     # Check stability of the estimated model
     isstable = is_stable(A)
 
-    return A, B, C, D, isstable
+    return A, B, C, D, z, isstable
 
 
 def fss2frf(A,B,C,D,freq):
@@ -423,16 +423,17 @@ non_exc_odd = data['non_exc_odd'].squeeze()
 
 N = 1024
 freq = (lines-1)/N  # Excited frequencies (normalized)
+F = len(lines)
 
 G, covG, covGn = periodic(U, Y)
 G = G.transpose((2,0,1))
 covG = covG.transpose((2,0,1))
 
+m, p = 1, 1
 n = 2
 r = 3
 fs = 1
 optimize = True
-Kss = np.zeros((n,r))
 
 # weight
 if covG is None:
@@ -440,58 +441,136 @@ if covG is None:
 else:
     covGinv = pinv(covG)
 
-A, B, C, D, isstable = subspace(G, covG, freq/fs, n, r)
+A, B, C, D, z, isstable = subspace(G, covG, freq/fs, n, r)
 
-# frf of the state space model
-Gss = fss2frf(A,B,C,D,freq/fs)
-errSS = G - Gss
-# cost = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k]
-cost = np.real(np.einsum('ki,kij,kj',errSS.conj().reshape(errSS.shape[0],-1),
-                         covGinv,errSS.reshape(errSS.shape[0],-1)) )
 
-# Normalize with the number of excited frequencies
-cost /= F
-Kss[n-1,r-1] = cost
-
-# Do Levenberg-Marquardt optimizations
+## Do Levenberg-Marquardt optimizations
 if optimize:
     pass
 
-""" Optimize state-space matrices using Levenberg-Marquardt.
-
-Optimize state-space matrices A, B, C, and D using at most nmax
-Levenberg-Marquardt runs starting from initial values `A0`, `B0`, `C0`, and `D0`. The
-cost function that is optimized is the weighted sum of the mean-square
-differences between the provided frequency response matrix G at the normalized
-frequencies freq and the estimated frequency response matrix ``Ĝ = C*(zₖ*Iₙ -
-A)⁻¹*B + D``. The cost function is weighted with the inverse of
-the covariance matrix of G, if this covariance matrix covG is provided (no
-weighting if covG = 0).
-
-	Output parameters:
-		A : n x n optimized state matrix
-       B : n x m optimized input matrix
-       C : p x n optimized output matrix
-       D : p x m optimized feed-through matrix
-
-	Input parameters:
-       freq : vector of normalized frequencies at which the FRM is given
-              (0 < freq < 0.5)
-		G : p x m x F array of FRF (or FRM) data
-		covG : p*m x p*m x F covariance tensor on G
-              (0 if no weighting required)
-		A0 : n x n initial state matrix
-       B0 : n x m initial input matrix
-       C0 : p x n initial output matrix
-       D0 : p x m initial feed-through matrix
-		MaxCount : maximum number of Levenberg-Marquardt optimizations
-                  (maximum 1000, if MaxCount = Inf, then the algorithm
-                  stops if the cost functions of the last 10 successful
-                  steps differ by less than 0.1% or if 1000 iterations
-                  were performed)
-"""
-
 # Number of parameters
 npar = n**2 + n*m + p*n + p*m
+info = True
 
-info = False
+JD = np.zeros((p,m,p*m))
+for f in range(p*m):
+    np.put(JD[...,f], f, 1)
+JD = np.tile(JD, (F,1,1,1))
+
+def jacobian(A,B,C,z,weigth=None):
+
+    JA, JB, JC = jacobian_freq_ss(A,B,C,z)
+
+    tmp = np.empty((F,p,m,npar),dtype=complex)
+    tmp[...,:n**2] = JA
+    tmp[...,n**2 +       np.r_[:n*m]] = JB
+    tmp[...,n**2 + n*m + np.r_[:n*p]] = JC
+    tmp[...,n**2 + n*m + n*p:] = JD
+    tmp = tmp.reshape((F,m*p,npar))
+    if weigth is not None:
+        tmp = weight_jacobian_ss(tmp, weigth)
+    tmp = tmp.reshape((F*p*m,npar))
+
+    jac = np.empty((2*F*p*m, npar))
+    jac[:F*p*m] = tmp.real
+    jac[F*p*m:] = tmp.imag
+
+    jac, scaling = normalize_columns(jac)
+
+    return jac, scaling
+
+def costfnc(A,B,C,D,G,freq,weight=None):
+    """Compute the cost function as the square of the weighted error
+
+    cost = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k], where the weight is the inverse of the
+    covariance matrix of `G`
+
+    """
+
+    # frf of the state space model
+    Gss = fss2frf(A,B,C,D,freq/fs)
+    err = G - Gss
+    # cost = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k]
+    cost = np.einsum('ki,kij,kj',err.conj().reshape(err.shape[0],-1),
+                     weight,err.reshape(err.shape[0],-1))
+
+    cost = np.vdot(cost,cost)
+    #cost = np.vstack((cost.real, cost.imag))
+    # Normalize with the number of excited frequencies
+    # cost /= F
+    err_w = np.matmul(weight, err) 
+    return cost, err_w
+
+
+
+cost, err = costfnc(A,B,C,D,G,freq,weight=covGinv)
+cost_old = cost
+err_old = err
+
+# # compute weighted error
+# err_old = np.empty(F*p*m)
+# err_old = np.vstack((err_old.real, err_old.imag))
+# cost = np.vdot(errSS, err_old)
+
+# # Initialization of the Levenberg-Marquardt loop
+nit = 0  #  Iteration number
+nmax = 10
+
+# jacobian wrt. elements of D is a zero matrix where one element is
+lamb = None
+while nit < nmax:
+
+
+    jac, scaling = jacobian(A,B,C,z,weigth=covGinv)
+
+    U, s, Vt = svd(jac, full_matrices=False)
+    #return U * 1/np.sqrt(s) @ U.conj().T
+
+    if lamb is None:
+        # Initialize lambda as largest sing. value of initial jacobian.
+        # pinleton2002
+        lamb = s[0]
+
+    # as long as the step is unsuccessful
+    while cost >= cost_old and nit < nmax:
+
+        # determine rank of jacobian/estimate non-zero singular values(rank
+        # estimate)
+        tol = max(jac.shape)*np.spacing(max(s))
+        r = np.sum(s > tol)
+
+        # step
+        s = s[:r]
+        s /= s**2 + lamb**2
+        ds = -U[:,:r] * s @ Vt[:r] * err_old
+        ds /= scaling
+
+        dA = ds.flat[:n**2].reshape((n,n))
+        dB = ds.flat[n**2 + np.r_[:n*m]].reshape((n,m))
+        dC = ds.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
+        dD = ds.flat[p*m:].reshape((p,m))
+
+        Atest = A + dA
+        Btest = B + dB
+        Ctest = C + dC
+        Dtest = D + dD
+        cost, err = costfnc(Atest,Btest,Ctest,Dtest,G,freq,weight)
+
+        if cost >= cost_old:
+            # step unsuccessful, increase lambda
+            lamb *= np.sqrt(10)
+        else:
+            lamb /= 2
+        if info:
+            print('cost: {}\t i: {}'.format(cost,nit))
+        nit += 1
+
+    if cost < cost_old:
+        cost_old = cost
+        err_old = err
+        A = Atest
+        B = Btest
+        C = Ctest
+        D = Dtest
+
+

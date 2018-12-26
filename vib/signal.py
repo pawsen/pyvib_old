@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-import matplotlib.pylab as plt
+# import matplotlib.pylab as plt
 
 from .common import db, prime_factor
 from .filter import integrate, differentiate
