@@ -533,7 +533,7 @@ def extract_subspace(x0):
 
     return A, B, C, D
 
-def levenberg_marquardt_ls(fun, x0, jac, args=(), kwargs={}):
+def levenberg_marquardt_ls(fun, x0, jac, weight, args=(), kwargs={}):
     """Solve a nonlinear least-squares problem using LM
 
 
@@ -619,106 +619,12 @@ x0[n**2 + np.r_[:n*m]] = B.ravel()
 x0[n**2 + n*m + np.r_[:n*p]] = C.ravel()
 x0[n**2 + n*m + n*p:] = D.ravel()
 
-x, cost, err = levenberg_marquardt_ls(costfnc2,x0,jacobian)
+x, cost, err = levenberg_marquardt_ls(costfnc2,x0,jacobian, weight=covGinvsq)
 
 from functools import partial
 from scipy.optimize import least_squares
 
 pcostfnc = partial(costfnc2, G=G, freq=freq)
 pjac = partial(jacobian, z=z)
-res = least_squares(pcostfnc,x0,pjac, method='lm', kwargs={'weight':covGinvsq})
-
-# def levenberg_marquardt_ls(fun, x0, jac, args=(), kwargs={}):
-#     """Solve a nonlinear least-squares problem using LM
-
-
-#     Parameters
-#     ----------
-#     fun: callable
-#         Function which computes the vector of residuals
-#     x0: array_like with shape (n,) or float
-#         Initial guess on independent variables.
-#     jac : callable
-#         Method of computing the Jacobian matrix (an m-by-n matrix, where
-#         element (i, j) is the partial derivative of f[i] with respect to
-#         x[j]).
-
-
-#     Notes
-#     -----
-#     https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html
-
-#     """
-#     cost, err = costfnc(A,B,C,D,G,freq,weight=covGinv)
-#     cost_old = cost
-
-#     # compute weighted error
-#     err = np.matmul(covGinvsq, err)
-#     errw = np.empty(F*p*m*2)
-#     errw[:F*p*m] = err.real.squeeze()
-#     errw[F*p*m:] = err.imag.squeeze()
-#     err_old = errw.copy()
-#     # same as cost.
-#     cost2 = np.vdot(errw, errw).real
-
-#     # # Initialization of the Levenberg-Marquardt loop
-#     nit = 0  #  Iteration number
-#     nmax = 10
-
-#     # jacobian wrt. elements of D is a zero matrix where one element is
-#     lamb = None
-#     while nit < nmax:
-
-#         jac, scaling = jacobian(A,B,C,z,weigth=covGinvsq)
-
-#         U, s, Vt = svd(jac, full_matrices=False)
-#         #return U * 1/np.sqrt(s) @ U.conj().T
-
-#         if lamb is None:
-#             # Initialize lambda as largest sing. value of initial jacobian.
-#             # pinleton2002
-#             lamb = s[0]
-
-#         # as long as the step is unsuccessful
-#         while cost >= cost_old and nit < nmax:
-#             # determine rank of jacobian/estimate non-zero singular values(rank
-#             # estimate)
-#             tol = max(jac.shape)*np.spacing(max(s))
-#             r = np.sum(s > tol)
-
-#             # step
-#             s = s[:r]
-#             s /= s**2 + lamb**2
-#             ds = -np.linalg.multi_dot((err_old, U[:,:r] * s, Vt[:r]))
-#             ds /= scaling
-
-#             dA = ds.flat[:n**2].reshape((n,n))
-#             dB = ds.flat[n**2 + np.r_[:n*m]].reshape((n,m))
-#             dC = ds.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
-#             dD = ds.flat[n*(p+m+n):].reshape((p,m))
-
-#             Atest = A + dA
-#             Btest = B + dB
-#             Ctest = C + dC
-#             Dtest = D + dD
-#             cost, err = costfnc(Atest,Btest,Ctest,Dtest,G,freq,weight=covGinv)
-#             err = np.matmul(covGinvsq, err)
-#             errw[:F*p*m] = err.real.squeeze()
-#             errw[F*p*m:] = err.imag.squeeze()
-
-#             if cost >= cost_old:
-#                 # step unsuccessful, increase lambda
-#                 lamb *= np.sqrt(10)
-#             else:
-#                 lamb /= 2
-#             if info:
-#                 print('cost: {}\t i: {}'.format(cost,nit))
-#             nit += 1
-
-#         if cost < cost_old:
-#             cost_old = cost.copy()
-#             err_old = errw.copy()
-#             A = Atest
-#             B = Btest
-#             C = Ctest
-#             D = Dtest
+res = least_squares(pcostfnc,x0,pjac, method='lm', x_scale='jac', kwargs={'weight':covGinvsq})
+res2 = least_squares(pcostfnc,x0,pjac, method='lm', kwargs={'weight':covGinvsq})
