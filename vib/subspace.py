@@ -441,6 +441,11 @@ if covG is None:
 else:
     covGinv = pinv(covG)
 
+# I do not know which weight I have to use.
+covGinvsq = np.zeros_like(covG)
+for f in range(F):
+    covGinvsq[f] = _matrix_square_inv(covG[f])
+
 A, B, C, D, z, isstable = subspace(G, covG, freq/fs, n, r)
 
 
@@ -457,8 +462,10 @@ for f in range(p*m):
     np.put(JD[...,f], f, 1)
 JD = np.tile(JD, (F,1,1,1))
 
-def jacobian(A,B,C,z,weigth=None):
+#def jacobian(A,B,C,z,weigth=None):
+def jacobian(x0,z,weight=None):
 
+    A, B, C, D = extract_subspace(x0)
     JA, JB, JC = jacobian_freq_ss(A,B,C,z)
 
     tmp = np.empty((F,p,m,npar),dtype=complex)
@@ -467,110 +474,251 @@ def jacobian(A,B,C,z,weigth=None):
     tmp[...,n**2 + n*m + np.r_[:n*p]] = JC
     tmp[...,n**2 + n*m + n*p:] = JD
     tmp = tmp.reshape((F,m*p,npar))
-    if weigth is not None:
-        tmp = weight_jacobian_ss(tmp, weigth)
+
+    if weight is not None:
+        tmp = weight_jacobian_ss(tmp, weight)
     tmp = tmp.reshape((F*p*m,npar))
 
     jac = np.empty((2*F*p*m, npar))
     jac[:F*p*m] = tmp.real
     jac[F*p*m:] = tmp.imag
 
-    jac, scaling = normalize_columns(jac)
 
-    return jac, scaling
+    #jac, scaling = normalize_columns(jac)
+
+    return jac#, scaling
 
 def costfnc(A,B,C,D,G,freq,weight=None):
-    """Compute the cost function as the square of the weighted error
+    """Compute the cost function as the sum of squares of the weighted error
 
     cost = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k], where the weight is the inverse of the
     covariance matrix of `G`
-
     """
 
     # frf of the state space model
     Gss = fss2frf(A,B,C,D,freq/fs)
-    err = G - Gss
+    err = Gss - G
     # cost = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k]
     cost = np.einsum('ki,kij,kj',err.conj().reshape(err.shape[0],-1),
-                     weight,err.reshape(err.shape[0],-1))
+                     weight,err.reshape(err.shape[0],-1)).real
 
-    cost = np.vdot(cost,cost)
-    #cost = np.vstack((cost.real, cost.imag))
     # Normalize with the number of excited frequencies
     # cost /= F
-    err_w = np.matmul(weight, err) 
-    return cost, err_w
+    #err_w = np.matmul(weight, err)
+    return cost, err
 
 
+def costfnc2(x0,G,freq,weight=None):
+    """Compute the vector of residuals such that the function to mimimize is
 
-cost, err = costfnc(A,B,C,D,G,freq,weight=covGinv)
-cost_old = cost
-err_old = err
+    res = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k], where the weight is the inverse of the
+    covariance matrix of `G`
+    """
 
-# # compute weighted error
-# err_old = np.empty(F*p*m)
-# err_old = np.vstack((err_old.real, err_old.imag))
-# cost = np.vdot(errSS, err_old)
+    A, B, C, D = extract_subspace(x0)
 
-# # Initialization of the Levenberg-Marquardt loop
-nit = 0  #  Iteration number
-nmax = 10
+    # frf of the state space model
+    Gss = fss2frf(A,B,C,D,freq/fs)
+    err = np.matmul(weight, Gss - G)
 
-# jacobian wrt. elements of D is a zero matrix where one element is
-lamb = None
-while nit < nmax:
+    err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
+    return err_w
 
+def extract_subspace(x0):
 
-    jac, scaling = jacobian(A,B,C,z,weigth=covGinv)
+    A = x0.flat[:n**2].reshape((n,n))
+    B = x0.flat[n**2 + np.r_[:n*m]].reshape((n,m))
+    C = x0.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
+    D = x0.flat[n*(p+m+n):].reshape((p,m))
 
-    U, s, Vt = svd(jac, full_matrices=False)
-    #return U * 1/np.sqrt(s) @ U.conj().T
+    return A, B, C, D
 
-    if lamb is None:
-        # Initialize lambda as largest sing. value of initial jacobian.
-        # pinleton2002
-        lamb = s[0]
-
-    # as long as the step is unsuccessful
-    while cost >= cost_old and nit < nmax:
-
-        # determine rank of jacobian/estimate non-zero singular values(rank
-        # estimate)
-        tol = max(jac.shape)*np.spacing(max(s))
-        r = np.sum(s > tol)
-
-        # step
-        s = s[:r]
-        s /= s**2 + lamb**2
-        ds = -U[:,:r] * s @ Vt[:r] * err_old
-        ds /= scaling
-
-        dA = ds.flat[:n**2].reshape((n,n))
-        dB = ds.flat[n**2 + np.r_[:n*m]].reshape((n,m))
-        dC = ds.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
-        dD = ds.flat[p*m:].reshape((p,m))
-
-        Atest = A + dA
-        Btest = B + dB
-        Ctest = C + dC
-        Dtest = D + dD
-        cost, err = costfnc(Atest,Btest,Ctest,Dtest,G,freq,weight)
-
-        if cost >= cost_old:
-            # step unsuccessful, increase lambda
-            lamb *= np.sqrt(10)
-        else:
-            lamb /= 2
-        if info:
-            print('cost: {}\t i: {}'.format(cost,nit))
-        nit += 1
-
-    if cost < cost_old:
-        cost_old = cost
-        err_old = err
-        A = Atest
-        B = Btest
-        C = Ctest
-        D = Dtest
+def levenberg_marquardt_ls(fun, x0, jac, args=(), kwargs={}):
+    """Solve a nonlinear least-squares problem using LM
 
 
+    Parameters
+    ----------
+    fun: callable
+        Function which computes the vector of residuals
+    x0: array_like with shape (n,) or float
+        Initial guess on independent variables.
+    jac : callable
+        Method of computing the Jacobian matrix (an m-by-n matrix, where
+        element (i, j) is the partial derivative of f[i] with respect to
+        x[j]).
+
+
+    Notes
+    -----
+    https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html
+
+    """
+
+    err_old = fun(x0,G,freq,weight)
+    cost = np.dot(err_old,err_old)
+    cost_old = cost.copy()
+
+    # # Initialization of the Levenberg-Marquardt loop
+    nit = 0  #  Iteration number
+    nmax = 10
+
+    # jacobian wrt. elements of D is a zero matrix where one element is
+    lamb = None
+    while nit < nmax:
+
+
+        J = jac(x0,z,weight)
+        J, scaling = normalize_columns(J)
+
+        U, s, Vt = svd(J, full_matrices=False)
+
+        if lamb is None:
+            # Initialize lambda as largest sing. value of initial jacobian.
+            # pinleton2002
+            lamb = s[0]
+
+        # as long as the step is unsuccessful
+        while cost >= cost_old and nit < nmax:
+            # determine rank of jacobian/estimate non-zero singular values(rank
+            # estimate)
+            tol = max(J.shape)*np.spacing(max(s))
+            r = np.sum(s > tol)
+
+            # step with direction from err
+            s = s[:r]
+            s /= s**2 + lamb**2
+            ds = -np.linalg.multi_dot((err_old, U[:,:r] * s, Vt[:r]))
+            ds /= scaling
+
+            x0test = x0 + ds
+            err = fun(x0test,G,freq,weight)
+            cost = np.dot(err,err)
+
+            if cost >= cost_old:
+                # step unsuccessful, increase lambda
+                lamb *= np.sqrt(10)
+            else:
+                lamb /= 2
+            if info:
+                print('cost: {}\t i: {}'.format(cost,nit))
+            nit += 1
+
+        if cost < cost_old:
+            cost_old = cost
+            err_old = err
+            x0 = x0test
+
+    return x0, cost, err
+
+
+# initial guess
+x0 = np.empty(n**2+n*m+n*p+p*m)
+x0[:n**2] = A.ravel()
+x0[n**2 + np.r_[:n*m]] = B.ravel()
+x0[n**2 + n*m + np.r_[:n*p]] = C.ravel()
+x0[n**2 + n*m + n*p:] = D.ravel()
+
+x, cost, err = levenberg_marquardt_ls(costfnc2,x0,jacobian)
+
+from functools import partial
+from scipy.optimize import least_squares
+
+pcostfnc = partial(costfnc2, G=G, freq=freq)
+pjac = partial(jacobian, z=z)
+res = least_squares(pcostfnc,x0,pjac, method='lm', kwargs={'weight':covGinvsq})
+
+# def levenberg_marquardt_ls(fun, x0, jac, args=(), kwargs={}):
+#     """Solve a nonlinear least-squares problem using LM
+
+
+#     Parameters
+#     ----------
+#     fun: callable
+#         Function which computes the vector of residuals
+#     x0: array_like with shape (n,) or float
+#         Initial guess on independent variables.
+#     jac : callable
+#         Method of computing the Jacobian matrix (an m-by-n matrix, where
+#         element (i, j) is the partial derivative of f[i] with respect to
+#         x[j]).
+
+
+#     Notes
+#     -----
+#     https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html
+
+#     """
+#     cost, err = costfnc(A,B,C,D,G,freq,weight=covGinv)
+#     cost_old = cost
+
+#     # compute weighted error
+#     err = np.matmul(covGinvsq, err)
+#     errw = np.empty(F*p*m*2)
+#     errw[:F*p*m] = err.real.squeeze()
+#     errw[F*p*m:] = err.imag.squeeze()
+#     err_old = errw.copy()
+#     # same as cost.
+#     cost2 = np.vdot(errw, errw).real
+
+#     # # Initialization of the Levenberg-Marquardt loop
+#     nit = 0  #  Iteration number
+#     nmax = 10
+
+#     # jacobian wrt. elements of D is a zero matrix where one element is
+#     lamb = None
+#     while nit < nmax:
+
+#         jac, scaling = jacobian(A,B,C,z,weigth=covGinvsq)
+
+#         U, s, Vt = svd(jac, full_matrices=False)
+#         #return U * 1/np.sqrt(s) @ U.conj().T
+
+#         if lamb is None:
+#             # Initialize lambda as largest sing. value of initial jacobian.
+#             # pinleton2002
+#             lamb = s[0]
+
+#         # as long as the step is unsuccessful
+#         while cost >= cost_old and nit < nmax:
+#             # determine rank of jacobian/estimate non-zero singular values(rank
+#             # estimate)
+#             tol = max(jac.shape)*np.spacing(max(s))
+#             r = np.sum(s > tol)
+
+#             # step
+#             s = s[:r]
+#             s /= s**2 + lamb**2
+#             ds = -np.linalg.multi_dot((err_old, U[:,:r] * s, Vt[:r]))
+#             ds /= scaling
+
+#             dA = ds.flat[:n**2].reshape((n,n))
+#             dB = ds.flat[n**2 + np.r_[:n*m]].reshape((n,m))
+#             dC = ds.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
+#             dD = ds.flat[n*(p+m+n):].reshape((p,m))
+
+#             Atest = A + dA
+#             Btest = B + dB
+#             Ctest = C + dC
+#             Dtest = D + dD
+#             cost, err = costfnc(Atest,Btest,Ctest,Dtest,G,freq,weight=covGinv)
+#             err = np.matmul(covGinvsq, err)
+#             errw[:F*p*m] = err.real.squeeze()
+#             errw[F*p*m:] = err.imag.squeeze()
+
+#             if cost >= cost_old:
+#                 # step unsuccessful, increase lambda
+#                 lamb *= np.sqrt(10)
+#             else:
+#                 lamb /= 2
+#             if info:
+#                 print('cost: {}\t i: {}'.format(cost,nit))
+#             nit += 1
+
+#         if cost < cost_old:
+#             cost_old = cost.copy()
+#             err_old = errw.copy()
+#             A = Atest
+#             B = Btest
+#             C = Ctest
+#             D = Dtest
