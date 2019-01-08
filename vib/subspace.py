@@ -416,6 +416,7 @@ U = data['U'].transpose((1,2,3,0))
 G_data = data['G']
 covGML_data = data['covGML']
 covGn_data = data['covGn']
+covY = data['covY'].transpose((2,0,1))
 
 lines = data['lines'].squeeze()
 non_exc_even = data['non_exc_even'].squeeze()

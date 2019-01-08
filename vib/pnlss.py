@@ -473,7 +473,251 @@ def select_active(structure,n,m,q,nx):
     # Sort the active elements
     return np.sort(active)
 
+def remove_transient_indices(T2,N,p):
+    """Remove transients from arbitrary data.
+
+    Computes the indices to be used with a N x p matrix containing p output
+    signals of length N, such that y(indices) contains the transient-free
+    output(s) of length NT stacked on top of each other (if more than one
+    output). The transient samples to be removed are specified in T2 (T2 = 1:T2
+    if T2 is scalar).
+
+    Parameters
+    ----------
+    T2 : int
+        scalar indicating how many samples from the start are removed or vector
+        indicating which samples are removed
+    N : int
+        length of the total signal
+    p : int
+        number of outputs
+
+    Returns
+    -------
+    indices : ndarray(int)
+        vector of indices, such that y(indices) contains the output(s) without
+        transients. If more than one output (p > 1), then y(indices) stacks the
+        transient-free outputs on top of each other.
+    NT : int
+        length of the signal without transients
+
+
+    Examples
+    --------
+    One output, T2 scalar
+    N = 1000 # Total number of samples
+    T2 = 200; % First 200 samples should be removed after filtering
+    p = 1; % One output
+    [indices, NT] = fComputeIndicesTransientRemovalArb(T2,N,p);
+    % => indices = (201:1000).'; % Indices of the transient-free output (in uint32 format in version 1.0)
+    % => NT = 800; % Number of samples in the transient-free output
+
+    Two outputs, T2 scalar
+    N = 1000; % Total number of samples
+    T2 = 200; % First 200 samples should be removed after filtering
+    p = 2; % Two outputs
+    [indices, NT] = fComputeIndicesTransientRemovalArb(T2,N,p);
+    % => indices = ([201:1000 1201:2000]).'; % Indices of the transient-free outputs (in uint32 format in version 1.0)
+    % => NT = 800; % Number of samples in each transient-free output
+    % If y = [y1 y2] is a 1000 x 2 matrix with the two outputs y1 and y2,
+    % then y(indices) = [y1(201:1000);
+    %                    y2(201:1000)]
+    % is a vector with the transient-free outputs stacked on top of
+    % each other
+
+   % One output, T2 is a vector
+    N1 = 1000; % Number of samples in a first data set
+    N2 = 500; % Number of samples in a second data set
+    N = N1 + N2; % Total number of samples
+    T2_1 = 1:200; % Transient samples in first data set
+    T2_2 = 1:100; % Transient samples in second data set
+    T2 = [T2_1 (N1+T2_2)]; % Transient samples
+    p = 1; % One output
+    [indices, NT] = fComputeIndicesTransientRemovalArb(T2,N,p);
+    % => indices = ([201:1000 1101:1500])
+    % => NT = 1200;
+    """
+
+    # TODO make it possible to give T2 as list, T2 = [200]
+    if isinstance(T2, (int, np.integer)):  #np.isscalar(T2):
+        # Remove all samples up to T2
+        T2 = np.arange(T2)
+
+    T2 = np.asarray(T2, dtype=int)
+    # Remove transient samples from the total
+    without_T2 = np.delete(np.arange(N), T2)
+
+    # Length of the transient-free signal(s)
+    NT = len(without_T2)
+    if p > 1:  # for multiple outputs
+        indices = np.zeros(p*NT, dtype=int)
+        for i in range(p):
+            # Stack indices for each output on top of each other
+            indices[i*NT:(i+1)*NT] = without_T2 + i*N
+    else:
+        indices = without_T2
+
+    return indices, NT
+
+
+
+
 n = 2
 m = 1
 p = 1
 nx = np.array((2,3))
+
+#def fLMnlssWeighted(u,y,model,MaxCount,W,lambda,LambdaJump):
+def bla():
+    """
+    Optimize PNLSS model using weighted Levenberg-Marquardt algorithm.
+
+        fLMnlssWeighted performs a Levenberg-Marquardt optimization on the
+        parameters of a PNLSS model (i.e. the elements of the matrices A, B, C, D,
+        E, and F). The difference between the modeled and the measured output is
+        minimized in a weighted least squares sense, either in the time or the
+        frequency domain. A simple stabilization method can be applied by
+        simulating a validation data set during estimation and checking whether or
+        not the modeled output stays within prespecified bounds. If not, the
+        Levenberg-Marquardt iteration acts as if the cost function increased.
+
+        Parameters
+        ----------
+            u : N x m input signal
+           y : N x p output signal
+           model : initial model (see fCreateNLSSmodel). Additionally, two
+                   optional fields can be added to the model to perform a
+                   simple stabilization method (both fields are needed to
+                   perform this method):
+                   u_val : m x N_val matrix with N_val samples of the
+                           validation input (optional, no default value)
+                   max_out : bound on the maximum absolute value of the
+                             simulated validation output (optional, no default
+                             value)
+                   After each Levenberg-Marquardt iteration, the validation
+                   data is simulated (without taking into account the
+                   transient settings). If the simulated validation output
+                   does not respect the max_out bound, then the iteration is
+                   considered unsuccessful.
+           MaxCount : (maximum) number of iterations (there is not yet an
+                      early stopping criterion)
+           W : p x p x NFD weighting matrix if frequency-domain weighting
+               (e.g. square root of covariance matrix of output noise
+               spectrum), where NFD is the number of frequency bins in the
+               positive half of the spectrum (of one period and one phase
+               realization) of the input (e.g. NFD = floor(Npp/2), where Npp
+               is the number of samples in one period and one phase
+               realization for a multisine excitation).
+               N x p weighting sequences if time-domain weighting.
+               [] if no weighting.
+               (optional, default is no weighting)
+           lambda : initial Levenberg-Marquardt parameter
+                    (optional, default = 0, which corresponds to a
+                    Gauss-Newton algorithm). After a successful iteration,
+                    lambda is halved. After an unsuccessful iteration, lambda
+                    is multiplied with a factor sqrt(10), unless lambda was
+                    zero, in which case lambda is put equal to the dominant
+                    singular value of the Jacobian.
+           LambdaJump : each LambdaJump iterations, the Levenberg-Marquardt
+                        parameter is made smaller by a factor 10, so that the
+                        algorithm leans more towards a Gauss-Newton algorithm,
+                        which converges faster than a gradient-descent
+                        algorithm (optional, default = 1001)
+        Returns
+        -------
+            model : optimized model (= best on estimation data)
+           y_mod : output of the optimized model
+           models : collection of models (initial model + model after a
+                    successful iteration)
+           Cost : collection of the unweighted rms error at each iteration
+                  (NaN if iteration was not successful (i.e. when the weighted
+                  rms error increased))
+
+        Example:
+           % Model input/output data of a Hammerstein system
+            N = 2e3; % Number of samples
+           u = randn(N,1); % Input signal
+           f_NL = @(x) x + 0.2*x.^2 + 0.1*x.^3; % Nonlinear function
+           [b,a] = cheby1(2,5,2*0.3); % Filter coefficients
+           x = f_NL(u); % Intermediate signal
+           y = filter(b,a,x); % Output signal
+           scale = u \ x; % Scale factor
+           sys = ss(tf(scale*b,a,[])); % Initial linear model = scale factor times underlying dynamics
+           nx = [2 3]; % Quadratic and cubic terms in state equation
+           ny = [2 3]; % Quadratic and cubic terms in output equation
+           T1 = 0; % No periodic signal transient handling
+           T2 = 200; % Number of transient samples to discard
+           model = fCreateNLSSmodel(sys.a,sys.b,sys.c,sys.d,nx,ny,T1,T2); % Initial linear model
+           model.xactive = fSelectActive('inputsonly',2,1,2,nx); % A Hammerstein system only has nonlinear terms in the input
+           model.yactive = fSelectActive('inputsonly',2,1,1,nx); % A Hammerstein system only has nonlinear terms in the input
+           MaxCount = 50; % Maximum number of iterations
+           W = []; % No weighting
+           [modelOpt,yOpt] = fLMnlssWeighted(u,y,model,MaxCount,W); % Optimized model and modeled output
+           t = 0:N-1;
+           figure
+               plot(t,y,'b')
+               hold on
+               plot(t,yOpt,'r')
+               xlabel('Time')
+               ylabel('Output')
+               legend('True','Modeled')
+
+        Reference:
+            Paduart, J., Lauwers, L., Swevers, J., Smolders, K., Schoukens, J.,
+            and Pintelon, R. (2010). Identification of nonlinear systems using
+            Polynomial Nonlinear State Space models. Automatica, 46:647-656.
+    """
+    pass
+
+lamb = None
+dlamb = 1001
+
+# Compute the (transient-free) modeled output and the corresponding states
+
+
+
+# Number of frequency bins where weighting is specified (ie nfd = floor(npp/2),
+# where npp is the number of samples in one period and one phase realization
+# for a multisine excitation
+nfd = weight.shape[0]
+
+# TODO this only works for T2 scalar. Not for array, as is possible for
+# remove_transient_indices
+# Determine if weighting is in frequency or time domain: only implemented for
+# periodic signals.
+if weight is None:
+    freq_weight = False
+    weight = np.ones((N,p))
+elif nfd > 1:
+    freq_weight = True
+    R = round((N-T2)/NFD/2)
+    if np.mod(N-T2,R) != 0:
+        raise ValueError('Transient handling and weighting matrix are incompatible. T2 {}'.
+                         format(T2))
+else:
+    # time domain
+    freq_weight = False
+
+# If T2 is a scalar, it denotes the number of transient points to discard. If
+# it is a vector, it denotes the indices of the points to discard, e.g. when
+# several data sequences were put together.
+without_T2 = remove_transient_indices(T2,N,p)
+
+# Compute the (weighted) error signal without transient
+err_old = y_mod[without_T2] - y[without_T2]
+
+
+if freq_weight:
+    err_old.reshape(((N-T2)//R,R,p))
+    err_old = fft(err_old)
+    # Select only the positive half of the spectrum
+    err_old = err_old[:NFD]
+    err_old.transpose((3,1,2)) #p,NFD,R
+    err_old = np.matmul()
+    cost = np.vdot(err_old, err_old).real
+    err_old = permute(err_old,[2 3 1]); % NFD x R x p
+    err_old = err_old(:); % NFD R p x 1
+    err_old = np.hstack((err_old.real, err_old.imag))
+else
+    err_old = err_old * weight[without_T2]
+    cost = np.dot(err_old,err_old)
