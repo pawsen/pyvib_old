@@ -258,7 +258,7 @@ def select_active(structure,n,m,q,nx):
         number of rows in corresponding E/F matrix
            q = n if E matrix is considered,
            q = p if F matrix is considered
-    nx : int
+    nx : int | list
         degrees of nonlinearity in E/F matrix
 
 
@@ -473,14 +473,14 @@ def select_active(structure,n,m,q,nx):
     # Sort the active elements
     return np.sort(active)
 
-def remove_transient_indices(T2,N,p):
+def remove_transient_indices_nonperiodic(T2,N,p):
     """Remove transients from arbitrary data.
 
-    Computes the indices to be used with a N x p matrix containing p output
-    signals of length N, such that y(indices) contains the transient-free
+    Computes the indices to be used with a (N,p) matrix containing p output
+    signals of length N, such that y[indices] contains the transient-free
     output(s) of length NT stacked on top of each other (if more than one
-    output). The transient samples to be removed are specified in T2 (T2 = 1:T2
-    if T2 is scalar).
+    output). The transient samples to be removed are specified in T2 (T2 =
+    np.arange(T2) if T2 is scalar).
 
     Parameters
     ----------
@@ -498,7 +498,7 @@ def remove_transient_indices(T2,N,p):
         vector of indices, such that y(indices) contains the output(s) without
         transients. If more than one output (p > 1), then y(indices) stacks the
         transient-free outputs on top of each other.
-    NT : int
+    nt : int
         length of the signal without transients
 
 
@@ -538,17 +538,21 @@ def remove_transient_indices(T2,N,p):
     % => NT = 1200;
     """
 
+    if T2 is None:
+        T2 = [0]
+
     # TODO make it possible to give T2 as list, T2 = [200]
     if isinstance(T2, (int, np.integer)):  #np.isscalar(T2):
         # Remove all samples up to T2
         T2 = np.arange(T2)
 
-    T2 = np.asarray(T2, dtype=int)
+    T2 = np.atleast_1d(np.asarray(T2, dtype=int))
     # Remove transient samples from the total
+    # TODO wrong: now we remove idx 0, which is wrong
     without_T2 = np.delete(np.arange(N), T2)
 
     # Length of the transient-free signal(s)
-    NT = len(without_T2)
+    nt = len(without_T2)
     if p > 1:  # for multiple outputs
         indices = np.zeros(p*NT, dtype=int)
         for i in range(p):
@@ -557,15 +561,194 @@ def remove_transient_indices(T2,N,p):
     else:
         indices = without_T2
 
-    return indices, NT
+    return indices, nt
+
+def transient_indices_periodic(T1,N):
+    """Computes indices for transient handling of periodic signals.
+
+	Computes the indices to be used with a vector u of length N that contains
+	(several realizations of) a periodic signal, such that u[indices] has T1[0]
+	transient samples prepended to each realization. The starting samples of
+	each realization can be specified in T1[1:]. Like this, steady-state
+	data can be obtained from a PNLSS model by using u[indices] as an input
+	signal to a PNLSS model (see fFilterNLSS) and removing the transient
+	samples afterwards (see fComputeIndicesTransientRemoval).
+
+	Parameters
+    ----------
+	T1 : int | ndarray(int)
+        array that indicates how the transient is handled. The first element
+        T1[0] is the number of transient samples that should be prepended to
+        each realization. The other elements T1[1:] indicate the starting
+        sample of each realization in the signal. If T1 has only one element,
+        T1[1] is put to zero, ie. first element.
+    N : int
+        length of the signal containing all realizations
+
+    Returns
+    -------
+	indices : ndarray(int)
+        indices of a vector u that contains (several realizations of) a
+        periodic signal, such that u[indices] has a number of transient samples
+        added before each realization
+
+	Examples
+    --------
+    Npp = 1000; % Number of points per period
+    R = 2; % Number of phase realizations
+    T = 100; % Number of transient samples
+    T1 = [T 1:Npp:(R-1)*Npp+1]; % Transient handling vector
+    N = R*Npp; % Total number of samples
+    indices = fComputeIndicesTransient(T1,N);
+    % => indices = [901:1000 1:1000 1901:2000 1001:2000]
+    %            = [transient samples realization 1, ...
+    %               realization 1, ...
+    %               transient samples realization 2, ...
+    %               realization 2]
+
+    # np.r_[T, np.r_[0:(R-1)*npp+1:npp]]
+    """
+
+    T1 = np.atleast_1d(np.asarray(T1, dtype=int))
+    ntrans = T1[0]
+
+    if ntrans != 0:
+
+        if len(T1) == 1:
+            # If starting samples of realizations not specified, then we assume
+            # the realization start at the first sample
+            T1 = np.append(T1, 0)
+        # starting index of each realization and length of signal
+        T1 = np.append(T1[1:], N)
+
+        indices = np.array([], dtype=int)
+        for i in range(len(T1)-1):
+            trans = T1[i+1] -1 - np.mod(np.arange(ntrans)[::-1], T1[i+1]-T1[i])
+            normal = np.arange(T1[i],T1[i+1])
+            indices = np.hstack((indices, trans, normal))
+    else:
+        # No transient points => output = all indices of the signal
+        indices = np.arange(N)
+
+    return indices
+
+def remove_transient_indices_periodic(T1,N,p):
+    """Computes indices for transient handling for periodic signals after
+    filtering
+
+    Let u be a vector of length N containing (several realizations of) a
+    periodic signal. Let uTot be a vector containing the signal(s) in u with
+    T1[0] transient points prepended to each realization (see
+    fComputeIndicesTransient). The starting samples of each realization can be
+    specified in T1[1:]. Let yTot be a vector/matrix containing the p outputs
+    of a PNLSS model after applying the input uTot. Then
+    fComputeIndicesTransientRemoval computes the indices to be used with the
+    vectorized form of yTot such that the transient samples are removed from
+    yTot, i.e. y = yTot[indices] contains the steady-state output(s) stacked on
+    top of each other.
+
+    Parameters
+    ----------
+	T1 : ndarray(int)
+        vector that indicates how the transient is handled. The first element
+        T1[0] is the number of transient samples that were prepended to each
+        realization. The other elements T1[1:] indicate the starting sample
+        of each realization in the input signal. If T1 has only one element,
+        T1[1] is put to zero.
+    N : int
+        length of the input signal containing all realizations
+    p : int
+        number of outputs
+
+    Returns
+    -------
+	indices : ndarray(int)
+        If uTot is a vector containing (several realizations of) a periodic
+        signal to which T1[0] transient points were added before each
+        realization, and if yTot is the corresponding output vector (or matrix
+        if more than one output), then indices is such that the transient
+        points are removed from y = yTot(indices). If p > 1, then indices is a
+        column vector and y = yTot(indices) is a column vector with the steady
+        state outputs stacked on top of each other.
+
+	Examples
+    --------
+    Npp = 1000; % Number of points per period
+    R = 2; % Number of phase realizations
+    T = 100; % Number of transient samples
+    T1 = [T 1:Npp:(R-1)*Npp+1]; % Transient handling vector
+    N = R*Npp; % Total number of samples
+    indices_tot = fComputeIndicesTransient(T1,N);
+    % => indices_tot = [901:1000 1:1000 1901:2000 1001:2000]
+    %                = [transient samples realization 1, ...
+    %                   realization 1, ...
+    %                   transient samples realization 2, ...
+    %                   realization 2]
+    p = 1; % One output
+    indices_removal = fComputeIndicesTransientRemoval(T1,N,p);
+    % => indices_removal = [101:1100 1201:2200].'
+    % => indices_tot(indices_removal) = 1:2000
+    %                                 = [realization 1, realization 2]
+    p = 2; % More than one output
+    indices_removal = fComputeIndicesTransientRemoval(T1,N,p);
+    % => indices_removal = [101:1100 1201:2200 2301:3300 3401:4400].'
+    % Let u be a vector containing [input realization 1;
+    %                               input realization 2],
+    % then uTot = u(indices_tot) is a vector containing
+    %             [transient samples realization 1;
+    %              input realization 1;
+    %              transient samples realization 2;
+    %              input realization 2]
+    % Let y1 be a vector containing the first output and y2 be a vector
+    % containing the second output when applying uTot as an input to a
+    % PNLSS model, and let yTot = [y1 y2] be a 2200 x 2 matrix with y1
+    % and y2 in its first and second column, respectively.
+    % Note that y1 = yTot(1:2200).' and y2 = yTot(2201:4400).' (see
+    % also ind2sub and sub2ind)
+    % Then yTot(indices_removal) = [y1(101:1100);
+    %                               y1(1201:2200);
+    %                               y2(101:1100);
+    %                               y2(1201:2200)]
+    %                            = [output 1 corresponding to input realization 1;
+    %                               output 1 corresponding to input realization 2;
+    %                               output 2 corresponding to input realization 1;
+    %                               output 2 corresponding to input realization 2]
+    """
+
+    T1 = np.atleast_1d(np.asarray(T1, dtype=int))
+    ntrans = T1[0]
+
+    if ntrans == 0:
+        return np.arange(N)
 
 
+    if len(T1) == 1:
+        # If starting samples of realizations not specified, then we assume
+        # the realization start at the first sample
+        T1 = np.append(T1, 0)
 
+    # starting index of each realization and length of signal
+    T1 = np.append(T1[1:], N)
 
-n = 2
-m = 1
-p = 1
-nx = np.array((2,3))
+    indices = np.array([], dtype=int)
+    for i in range(len(T1)-1):
+        # Concatenate indices without transient samples
+        indices = np.hstack((indices,
+                             np.r_[T1[i]:T1[i+1]] + (i+1)*ntrans))
+
+    # TODO This is not correct for p>1. We still store y.shape -> (N,p)
+    if p > 1:
+        # Total number of samples per output = number of samples without + with
+        # transients
+        nt = N + ntrans*(len(T1)-1)
+
+        tmp = np.empty(p*N, dtype=int)
+        for i in range(p):
+            #Stack indices without transient samples on top of each other
+            tmp[i*N:(i+1)*N] = indices + i*nt
+        indices = tmp
+
+    return indices
 
 #def fLMnlssWeighted(u,y,model,MaxCount,W,lambda,LambdaJump):
 def bla():
@@ -669,55 +852,3 @@ def bla():
     """
     pass
 
-lamb = None
-dlamb = 1001
-
-# Compute the (transient-free) modeled output and the corresponding states
-
-
-
-# Number of frequency bins where weighting is specified (ie nfd = floor(npp/2),
-# where npp is the number of samples in one period and one phase realization
-# for a multisine excitation
-nfd = weight.shape[0]
-
-# TODO this only works for T2 scalar. Not for array, as is possible for
-# remove_transient_indices
-# Determine if weighting is in frequency or time domain: only implemented for
-# periodic signals.
-if weight is None:
-    freq_weight = False
-    weight = np.ones((N,p))
-elif nfd > 1:
-    freq_weight = True
-    R = round((N-T2)/NFD/2)
-    if np.mod(N-T2,R) != 0:
-        raise ValueError('Transient handling and weighting matrix are incompatible. T2 {}'.
-                         format(T2))
-else:
-    # time domain
-    freq_weight = False
-
-# If T2 is a scalar, it denotes the number of transient points to discard. If
-# it is a vector, it denotes the indices of the points to discard, e.g. when
-# several data sequences were put together.
-without_T2 = remove_transient_indices(T2,N,p)
-
-# Compute the (weighted) error signal without transient
-err_old = y_mod[without_T2] - y[without_T2]
-
-
-if freq_weight:
-    err_old.reshape(((N-T2)//R,R,p))
-    err_old = fft(err_old)
-    # Select only the positive half of the spectrum
-    err_old = err_old[:NFD]
-    err_old.transpose((3,1,2)) #p,NFD,R
-    err_old = np.matmul()
-    cost = np.vdot(err_old, err_old).real
-    err_old = permute(err_old,[2 3 1]); % NFD x R x p
-    err_old = err_old(:); % NFD R p x 1
-    err_old = np.hstack((err_old.real, err_old.imag))
-else
-    err_old = err_old * weight[without_T2]
-    cost = np.dot(err_old,err_old)

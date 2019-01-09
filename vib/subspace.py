@@ -421,9 +421,15 @@ covY = data['covY'].transpose((2,0,1))
 lines = data['lines'].squeeze()
 non_exc_even = data['non_exc_even'].squeeze()
 non_exc_odd = data['non_exc_odd'].squeeze()
+A_data = data['A']
+B_data = data['B']
+C_data = data['C']
+D_data = data['D']
 
-N = 1024
-freq = (lines-1)/N  # Excited frequencies (normalized)
+
+# number of samples
+ns = 1024
+freq = (lines-1)/ns  # Excited frequencies (normalized)
 F = len(lines)
 
 G, covG, covGn = periodic(U, Y)
