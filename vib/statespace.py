@@ -1,12 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 from vib.frf import bla_periodic
-from vib.subspace import (subspace, matrix_square_inv, levenberg_marquardt,
-                          costfnc, jacobian, extract_ss)
-import scipy.io as sio
-from vib.common import db, import_npz
-import matplotlib.pyplot as plt
+from vib.subspace import (subspace, costfnc, jacobian, extract_ss)
+from vib.common import (matrix_square_inv, lm)
 from numpy.fft import fft
 from scipy.linalg import norm
-from functools import partial
 from scipy.optimize import least_squares
 import numpy as np
 from copy import deepcopy
@@ -23,6 +22,17 @@ class Signal(object):
         self.lines = lines
         self.F = len(lines)
         self.freq = lines/self.npp  # Excited frequencies (normalized)
+
+    def average(self):
+        """Average over periods and flatten over realizations"""
+        um = self.u.mean(axis=-1)  # (npp,m,R)
+        ym = self.y.mean(axis=-1)
+        self.um = um.swapaxes(1,2).reshape(-1,self.m, order='F')  # (npp*R,m)
+        self.ym = ym.swapaxes(1,2).reshape(-1,self.p, order='F')  # (npp*R,p)
+
+        # number of samples after average over periods
+        self.ns = um.shape[0]  # ns = npp*R
+
 
 class StateSpace(object):
     def __init__(self, *system, **kwargs):
@@ -80,7 +90,7 @@ class StateSpace(object):
 
         self.n, self.m, self.p = self._get_shape()
 
-    def optimize(self, method=None, weight=True, info=False, copy=False):
+    def optimize(self, method=None, weight=True, info=True, copy=False):
         """Optimize the estimated state space matrices"""
 
         # Number of parameters
@@ -100,14 +110,10 @@ class StateSpace(object):
                 covGinvsq[f] = matrix_square_inv(self.covG[f])
             self.weight = covGinvsq
 
-        # TODO cheating and creating partial functions. Should be with kwargs
-        #pcostfnc = partial(costfnc, G=self.G, freq=self.signal.freq)
-        #pjac = partial(jacobian, z=self.z)
         if method is None:
-            x, cost, err, niter = \
-                levenberg_marquardt(costfnc, x0, jacobian, system=self,
-                                    weight=self.weight, info=info)
-            res = {'x':x, 'cost':cost, 'niter':niter}
+            res = lm(costfnc, x0, jacobian, system=self, weight=self.weight,
+                     info=info)
+
         else:
             res = least_squares(costfnc,x0,jacobian, method='lm',
                                 x_scale='jac',
@@ -122,7 +128,7 @@ class StateSpace(object):
             nmodel.res = res
             return nmodel
 
-        self.A, self.B, self.C, self.D = extract_ss(x, self)
+        self.A, self.B, self.C, self.D = extract_ss(res['x'], self)
         self.res = res
 
     def cost(self):
@@ -139,66 +145,3 @@ class StateSpace(object):
 
         return self.cost
 
-
-
-data = sio.loadmat('data.mat')
-
-Y = data['Y'].transpose((1,2,3,0))
-U = data['U'].transpose((1,2,3,0))
-
-G_data = data['G']
-covGML_data = data['covGML']
-covGn_data = data['covGn']
-covY = data['covY'].transpose((2,0,1))
-
-lines = data['lines'].squeeze() - 1 # 0-based!
-non_exc_even = data['non_exc_even'].squeeze() - 1
-non_exc_odd = data['non_exc_odd'].squeeze() - 1
-A_data = data['A']
-B_data = data['B']
-C_data = data['C']
-D_data = data['D']
-W_data = data['W']
-
-y = data['y_orig']
-u = data['u_orig']
-
-n = 2
-r = 3
-fs = 1
-
-sig = Signal(u,y)
-sig.lines(lines)
-model = StateSpace()
-model.bla(sig)
-model.estimate(n,r)
-print(model)
-model_opt = model.optimize(copy=True)
-print(model_opt)
-model_scipy = model.optimize(method=True, copy=True)
-print(model_opt)
-
-print('Cost. LM: {}\t scipy: {}'.format(model_opt.res['cost'],
-                                        model_scipy.res['cost']))
-
-# Note that using inv(A) implicitly calls solve and creates an identity
-    # matrix. Thus it is faster to allocate In once and then call solve.
-
-# def costfnc(A,B,C,D,G,freq,weight=None):
-#     """Compute the cost function as the sum of squares of the weighted error
-
-#     cost = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k], where the weight is the inverse of the
-#     covariance matrix of `G`
-#     """
-
-#     # frf of the state space model
-#     Gss = fss2frf(A,B,C,D,freq/fs)
-#     err = Gss - G
-#     # cost = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k]
-#     cost = np.einsum('ki,kij,kj',err.conj().reshape(err.shape[0],-1),
-#                      weight,err.reshape(err.shape[0],-1)).real
-
-#     # Normalize with the number of excited frequencies
-#     # cost /= F
-#     #err_w = np.matmul(weight, err)
-#     return cost, err

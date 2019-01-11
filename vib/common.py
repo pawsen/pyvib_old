@@ -4,6 +4,7 @@
 import numpy as np
 import math
 import itertools
+from scipy.linalg import svd, norm
 
 class color:
     PURPLE = '\033[95m'
@@ -163,3 +164,171 @@ def meanVar(Y, isnoise=False):
         W = np.sum(np.abs(Y0)**2, axis=2)/(p-1)
 
     return Ymean, W
+
+def matrix_square_inv(A):
+    """Calculate the inverse of the matrix square root of `A`
+    Calculate `X` such that XX = inv(A)
+    `A` is assumed positive definite, thus the all singular values are strictly
+    positive. Given the svd decomposition A=UsVᴴ, we see that
+    AAᴴ = Us²Uᴴ (remember (UsV)ᴴ = VᴴsUᴴ) and it follows that
+    (AAᴴ)⁻¹/² = Us⁻¹Uᴴ
+    Returns
+    -------
+    X : ndarray(n,n)
+       Inverse of matrix square root of A
+    Notes
+    -----
+    See the comments here.
+    https://math.stackexchange.com/questions/106774/matrix-square-root
+    """
+    U, s, _ = svd(A, full_matrices=False)
+    return U * 1/np.sqrt(s) @ U.conj().T
+
+def mmul_weight(mat, weight):
+    """Add weight. Computes the Jacobian of the weighted error ``e_W(f) = W(f,:,:)*e(f)``
+
+    """
+
+    # np.einsum('ijk,kl',weight, mat) or
+    # np.einsum('ijk,kl->ijl',weight, mat) or
+    # np.einsum('ijk,jl->ilk',weight,mat)
+    # np.tensordot(weight, mat, axes=1)
+    # np.matmul(weight, mat)
+    return np.matmul(weight, mat)
+
+def normalize_columns(mat):
+
+    # Rms values of each column
+    scaling = np.sqrt(np.mean(mat**2,axis=0))
+    # or scaling = 1/np.sqrt(mat.shape[0]) * np.linalg.norm(mat,ord=2,axis=0)
+    # Robustify against columns with zero rms value
+    scaling[scaling == 0] = 1
+    # Scale columns with 1/rms value
+    mat /= scaling
+    return mat, scaling
+
+def lm(fun, x0, jac, system, weight, info, nmax=50, lamb=None, ftol=1e-8,
+       xtol=1e-8, gtol=1e-8, args=(), kwargs={}):
+    """Solve a nonlinear least-squares problem using levenberg marquardt
+       algorithm
+
+    Parameters
+    ----------
+    fun : callable
+        Function which computes the vector of residuals
+    x0: array_like with shape (n,) or float
+        Initial guess on independent variables.
+    jac : callable
+        Method of computing the Jacobian matrix (an m-by-n matrix, where
+        element (i, j) is the partial derivative of f[i] with respect to
+        x[j]).
+    ftol : float, optional
+        Tolerance for termination by the change of the cost function. Default
+        is 1e-8. The optimization process is stopped when  ``dF < ftol * F``,
+        and there was an adequate agreement between a local quadratic model and
+        the true model in the last step.
+    xtol : float, optional
+        Tolerance for termination by the change of the independent variables.
+        Default is 1e-8.
+    gtol : float, optional
+        Tolerance for termination by the norm of the gradient. Default is 1e-8.
+    Notes
+    -----
+    https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html
+
+    """
+
+    R, p, npp = system.signal.R, system.signal.p, system.signal.npp
+    nfd = npp//2
+
+    err_old = fun(x0, system, weight)
+    # divide by 2 to match scipy's implementation of minpack
+    cost = np.dot(err_old, err_old)
+    cost_old = cost.copy()
+
+    # # Initialization of the Levenberg-Marquardt loop
+    niter = 0
+    ninner_max = 10
+    cost_vec = np.empty(nmax)
+    x0_mat = np.empty((nmax, len(x0)))
+
+    stop = False
+    while niter < nmax and not stop:
+
+        J = jac(x0, system, weight)
+        # nb. Normalize_columns modifies J in place.
+        J, scaling = normalize_columns(J)
+
+        U, s, Vt = svd(J, full_matrices=False)
+
+        if norm(J) < gtol:
+            stop = True
+            message = 'small jacobian'
+            break
+
+        if lamb is None:
+            # Initialize lambda as largest sing. value of initial jacobian.
+            # pinleton2002
+            lamb = s[0]
+
+        # as long as the step is unsuccessful
+        ninner = 0
+        while cost >= cost_old and ninner < ninner_max:
+            # determine rank of jacobian/estimate non-zero singular values(rank
+            # estimate)
+            tol = max(J.shape)*np.spacing(max(s))
+            r = np.sum(s > tol)
+
+            # step with direction from err
+            s = s[:r]
+            sr = s.copy()  # only saved to calculate cond. number later
+            s /= s**2 + lamb**2
+            ds = -np.linalg.multi_dot((err_old, U[:,:r] * s, Vt[:r]))
+            ds /= scaling
+
+            x0test = x0 + ds
+            err = fun(x0test, system=system, weight=weight)
+            cost = np.dot(err,err)
+
+            if cost >= cost_old:
+                # step unsuccessful, increase lambda, ie. Lean more towards
+                # gradient descent method(converges in larger range)
+                lamb *= np.sqrt(10)
+            else:
+                # Lean more towards Gauss-Newton algorithm(converges faster)
+                lamb /= 2
+            ninner += 1
+
+            if norm(ds) < xtol:
+                stop = True
+                message = 'small step'
+                break
+            if np.abs((cost-cost_old)/cost) < ftol:
+                stop = True
+                message = 'small change in cost fucntion'
+                break
+
+
+        if info:
+            jac_cond = sr[0]/sr[-1]
+            print('i: {:d}\tinner: {:d}\tcost: {:.3f}\tcond: {:.3f}'.
+                  format(niter, ninner, cost/2/nfd/R/p, jac_cond))
+
+        if cost < cost_old:
+            cost_old = cost
+            err_old = err
+            x0 = x0test
+            # save intermediate models
+            x0_mat[niter] = x0.copy()
+            cost_vec[niter] = cost.copy()
+
+        niter += 1
+
+    if niter == nmax:
+        message = 'max iter reached'
+    if info:
+        print('Terminated: {:s}'.format(message))
+
+    res = {'x':x0, 'cost': cost, 'err':err, 'niter': niter, 'x_mat': x0_mat,
+           'cost_vec':cost_vec, 'message':message}
+    return res

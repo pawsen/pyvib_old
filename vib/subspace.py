@@ -1,31 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
+from vib.common import matrix_square_inv, mmul_weight, normalize_columns
 import numpy as np
 from scipy.linalg import (lstsq, qr, svd, logm, inv, norm, eigvals)
 from numpy import kron
 from numpy.linalg import solve, pinv
-
-def matrix_square_inv(A):
-    """Calculate the inverse of the matrix square root of `A`
-
-    Calculate `X` such that XX = inv(A)
-    `A` is assumed positive definite, thus the all singular values are strictly
-    positive. Given the svd decomposition A=UsVᴴ, we see that
-    AAᴴ = Us²Uᴴ (remember (UsV)ᴴ = VᴴsUᴴ) and it follows that
-    (AAᴴ)⁻¹/² = Us⁻¹Uᴴ
-
-    Returns
-    -------
-    X : ndarray(n,n)
-       Inverse of matrix square root of A
-
-    Notes
-    -----
-    See the comments here.
-    https://math.stackexchange.com/questions/106774/matrix-square-root
-
-    """
-    U, s, _ = svd(A, full_matrices=False)
-    return U * 1/np.sqrt(s) @ U.conj().T
 
 def is_stable(A, domain='z'):
     """Determines if a linear state-space model is stable from eigenvalues of `A`
@@ -154,31 +134,6 @@ def jacobian_freq(A,B,C,z):
     JD = np.tile(JD, (F,1,1,1))
 
     return JA, JB, JC, JD
-
-def mmul_weight(tmp, weight):
-    """Computes the Jacobian of the weighted error ``e_W(f) = W(f,:,:)*e(f)``
-
-    """
-
-    # np.einsum('ijk,kl',W, jac) or
-    # np.einsum('ijk,kl->ijl',W, jac) or
-    # np.einsum('ijk,jl->ilk',W,jac)
-    # np.tensordot(W, jac, axes=1)
-    # np.matmul(W, jac)
-    return np.matmul(weight, tmp)
-
-
-def normalize_columns(jac):
-
-    # Rms values of each column
-    scaling = np.sqrt(np.mean(jac**2,axis=0))
-    # or scaling = 1/np.sqrt(jac.shape[0]) * np.linalg.norm(jac,ord=2,axis=0)
-    # Robustify against columns with zero rms value
-    scaling[scaling == 0] = 1
-    # Scale columns with 1/rms value
-    jac /= scaling
-    return jac, scaling
-
 
 def subspace(G, covarG, freq, n, r):
     """Estimate state-space model from Frequency Response Function (or Matrix).
@@ -469,79 +424,3 @@ def extract_ss(x0, system):
     D = x0.flat[n*(p+m+n):].reshape((p,m))
 
     return A, B, C, D
-
-def levenberg_marquardt(fun, x0, jac, system, weight, info, args=(), kwargs={}):
-    """Solve a nonlinear least-squares problem using LM
-
-    Parameters
-    ----------
-    fun : callable
-        Function which computes the vector of residuals
-    x0: array_like with shape (n,) or float
-        Initial guess on independent variables.
-    jac : callable
-        Method of computing the Jacobian matrix (an m-by-n matrix, where
-        element (i, j) is the partial derivative of f[i] with respect to
-        x[j]).
-
-
-    Notes
-    -----
-    https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html
-
-    """
-
-    err_old = fun(x0, system, weight)
-    # divide by 2 to match scipy's implementation of minpack
-    cost = np.dot(err_old, err_old)/2
-    cost_old = cost.copy()
-
-    # # Initialization of the Levenberg-Marquardt loop
-    niter = 0  #  Iteration number
-    nmax = 10
-
-    lamb = None
-    while niter < nmax:
-
-        J = jac(x0, system, weight)
-        J, scaling = normalize_columns(J)
-
-        U, s, Vt = svd(J, full_matrices=False)
-
-        if lamb is None:
-            # Initialize lambda as largest sing. value of initial jacobian.
-            # pinleton2002
-            lamb = s[0]
-
-        # as long as the step is unsuccessful
-        while cost >= cost_old and niter < nmax:
-            # determine rank of jacobian/estimate non-zero singular values(rank
-            # estimate)
-            tol = max(J.shape)*np.spacing(max(s))
-            r = np.sum(s > tol)
-
-            # step with direction from err
-            s = s[:r]
-            s /= s**2 + lamb**2
-            ds = -np.linalg.multi_dot((err_old, U[:,:r] * s, Vt[:r]))
-            ds /= scaling
-
-            x0test = x0 + ds
-            err = fun(x0test, system=system, weight=weight)
-            cost = np.dot(err,err)/2
-
-            if cost >= cost_old:
-                # step unsuccessful, increase lambda
-                lamb *= np.sqrt(10)
-            else:
-                lamb /= 2
-            if info:
-                print('cost: {}\t i: {}'.format(cost,niter))
-            niter += 1
-
-        if cost < cost_old:
-            cost_old = cost
-            err_old = err
-            x0 = x0test
-
-    return x0, cost, err, niter

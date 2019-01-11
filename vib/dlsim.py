@@ -6,9 +6,17 @@ dnlsys -- a collection of classes and functions for modeling nonlinear
 linear state space systems.
 """
 
-from vib.pnlss import combinations, select_active, transient_indices_periodic, remove_transient_indices_periodic
+from vib.pnlss import (combinations, select_active, transient_indices_periodic,
+                       remove_transient_indices_periodic)
+from vib.common import (matrix_square_inv, lm, normalize_columns, mmul_weight)
+import numpy as np
+
+from vib.statespace import StateSpace as linss
+from vib.statespace import Signal
 from scipy.interpolate import interp1d
 from numpy.fft import fft
+from scipy.linalg import norm
+import scipy.io as sio
 
 class StateSpace(object):
     def __init__(self, A,B,C,D, **kwargs):
@@ -24,6 +32,11 @@ class StateSpace(object):
         self.T2 = None
 
         self.dt = 0.1
+
+    def setss(self, *system):
+        if len(system) == 6:
+            self.A, self.B, self.C, self.D, self.E, self.F = system
+
 
     def nlterms(self, eq, degree, structure):
         """Set active nonlinear terms/monomials to be optimized"""
@@ -45,33 +58,54 @@ class StateSpace(object):
                 select_active(self.ystructure,self.n,self.m,self.p,self.ydegree)
             self.F = np.zeros((self.p, self.n_ny))
 
-    # def transient(self, t1, t2=None):
-    #     """Transient handling. t1: periodic, t2: aperiodic"""
+    def transient(self, T1=None, T2=None):
+        """Transient handling. t1: periodic, t2: aperiodic
+        Get transient index. Only needed to run once
+        """
+
+        self.T1 = T1
+        self.T2 = T2
+        sig = self.signal
+        ns = sig.R * sig.npp
+        # Extract the transient part of the input
+        self.idx_trans = transient_indices_periodic(T1, ns)
+        self.idx_remtrans = remove_transient_indices_periodic(T1, ns, sig.p)
+        self.umt = sig.um[self.idx_trans]
+        self.n_trans = self.umt.shape[0]
+
+        # without_T2 = remove_transient_indices_nonperiodic(system.T2,N,system.p)
+        self.without_T2 = np.s_[:ns]
+
 
     def simulate(self, u, t=None, x0=None, T1=None, T2=None):
         """Calculate the output and the states of a nonlinear state-space model with
         transient handling.
 
         """
-        self.T1 = T1
-        self.T2 = T2
+
+        if T1 is None:
+            T1 = self.T1
+            T2 = self.T2
 
         # Number of samples
         ns = u.shape[0]
-        if self.T1 is not None:
+        if T1 is not None:
             # Prepend transient samples to the input
-            idx = transient_indices_periodic(self.T1, ns)
+            idx = self.idx_trans
             u = u[idx]
 
         t, y, x = dnlsim(self, u, t, x0)
 
-        if self.T1 is not None:
-            # remove prepended transient samples
+        if T1 is not None:
+            # remove transient samples. p=1 is correct. TODO why?
             idx = remove_transient_indices_periodic(self.T1, ns, p=1)
             x = x[idx]
             y = y[idx]
 
+        self.x_mod = x
+        self.y_mod = y
         return t, y, x
+
 
 
 # https://github.com/scipy/scipy/blob/master/scipy/signal/ltisys.py
@@ -352,7 +386,7 @@ def element_jacobian(samples, Edwdx, C, Fdwdx, active):
 
     return out
 
-def analytical_jacobian(system, weight):
+def jacobian(x0, system, weight=None):
 
     """Compute the Jacobians in a steady state nonlinear state-space model
 
@@ -364,149 +398,204 @@ def analytical_jacobian(system, weight):
     i.e. the partial derivatives of the modeled output w.r.t. the active
     elements in the A, B, E, F, D, and C matrices
 
+    x0 : ndarray
+        flattened array of state space matrices
+
     """
 
+    n, m, p = system.n, system.m, system.p
+    R, p, npp = system.signal.R, system.signal.p, system.signal.npp
+    nfd = npp//2
+    n_trans = system.n_trans
+    without_T2 = system.without_T2
+
+    A, B, C, D, E, F = extract_ss(x0, system)
+
     # Collect states and outputs with prepended transient sample
+    x_trans = system.x_mod[system.idx_trans]
+    u_trans = system.umt
     contrib = np.hstack((x_trans, u_trans)).T
 
     # E∂ₓζ + A(n,n,NT)
     A_EdwxIdx = multEdwdx(contrib,system.xd_powers,np.squeeze(system.xd_coeff),
-                          system.E,system.n) + system.A[...,None]
+                          E,n) + A[...,None]
     zeta = nl_terms(contrib, system.xpowers).T  # (NT,n_nx)
 
     # F∂ₓη  (p,n,NT)
     FdwyIdx = multEdwdx(contrib,system.yd_powers,np.squeeze(system.yd_coeff),
-                        system.F,system.n)
+                        F,n)
     eta = nl_terms(contrib, system.ypowers).T  # (NT,n_ny)
 
     # calculate jacobians wrt state space matrices
-    JC = np.kron(np.eye(p), x_mod)  # (p*N,p*n)
-    JD = np.kron(np.eye(system.p), um)  # (p*N, p*m)
-    JF = np.kron(np.eye(system.p), eta)  # Jacobian wrt all elements in F
+    JC = np.kron(np.eye(p), system.x_mod)  # (p*N,p*n)
+    JD = np.kron(np.eye(p), system.signal.um)  # (p*N, p*m)
+    JF = np.kron(np.eye(p), eta)  # Jacobian wrt all elements in F
     JF = JF[:,system.yactive]  # all active elements in F. (p*NT,nactiveF)
-    JF = JF[idx_utrans]  # (p*N,nactiveF)
+    JF = JF[system.idx_remtrans]  # (p*N,nactiveF)
 
 
     # Add C to F∂ₓη for all samples at once
     FdwyIdx += system.C[...,None]
     # calculate Jacobian by filtering an alternative state-space model
     JA = element_jacobian(x_trans, A_EdwxIdx, system.C, FdwyIdx,
-                          np.arange(system.n**2))
-    JA = JA.transpose((1,0,2)).reshape((system.p*n_trans, n**2))
-    JA = JA[idx_utrans]  # (p*N,n**2)
+                          np.arange(n**2))
+    JA = JA.transpose((1,0,2)).reshape((p*n_trans, n**2))
+    JA = JA[system.idx_remtrans]  # (p*N,n**2)
 
     JB = element_jacobian(u_trans, A_EdwxIdx, system.C, FdwyIdx,
-                          np.arange(system.n*system.m))
-    JB = JB.transpose((1,0,2)).reshape((system.p*n_trans, system.n*system.m))
-    JB = JB[idx_utrans]  # (p*N,n*m)
+                          np.arange(n*m))
+    JB = JB.transpose((1,0,2)).reshape((p*n_trans, n*m))
+    JB = JB[system.idx_remtrans]  # (p*N,n*m)
 
     JE = element_jacobian(zeta, A_EdwxIdx, system.C, FdwyIdx, system.xactive)
-    JE = JE.transpose((1,0,2)).reshape((system.p*n_trans, len(system.xactive)))
-    JE = JE[idx_utrans]  # (p*N,nactiveE)
+    JE = JE.transpose((1,0,2)).reshape((p*n_trans, len(system.xactive)))
+    JE = JE[system.idx_remtrans]  # (p*N,nactiveE)
 
     jac = np.hstack((JA, JB, JC, JD, JE, JF))[without_T2]
     npar = jac.shape[1]
 
     # add frequency weighting
-    # (p*N, npar) -> (Npp,R,p,npar) -> (Npp,p,R,npar) -> (Npp,p,R*npar)
-    jac = jac.reshape(((N-T2)//R,R,system.p,npar),
-                      order='F').swapaxes(1,2).reshape((-1,system.p,R*npar), order='F')
+    # (p*ns, npar) -> (Npp,R,p,npar) -> (Npp,p,R,npar) -> (Npp,p,R*npar)
+    jac = jac.reshape((npp,R,p,npar),
+                      order='F').swapaxes(1,2).reshape((-1,p,R*npar),
+                                                       order='F')
     # select only the positive half of the spectrum
     jac = fft(jac, axis=0)[:nfd]
-    jac = np.matmul(weight,jac)
+    jac = mmul_weight(jac, weight)
     # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
-    jac = jac.reshape((-1,system.p,R,npar)).swapaxes(1,2).reshape((-1,npar), order='F')
+    jac = jac.reshape((-1,p,R,npar),
+                      order='F').swapaxes(1,2).reshape((-1,npar), order='F')
 
-    J = np.empty((2*nfd*R*system.p,npar))
-    J[:nfd*R*system.p] = jac.real
-    J[nfd*R*system.p:] = jac.imag
+    J = np.empty((2*nfd*R*p,npar))
+    J[:nfd*R*p] = jac.real
+    J[nfd*R*p:] = jac.imag
 
     return J
 
 
+def extract_ss(x0, system):
+
+    n, m, p = system.n, system.m, system.p
+    n_nx, n_ny = system.n_nx, system.n_ny
+    #ne = system.xactive # n*n_nx ?
+    A = x0.flat[:n**2].reshape((n,n))
+    B = x0.flat[n**2 + np.r_[:n*m]].reshape((n,m))
+    C = x0.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
+    D = x0.flat[n*(p+m+n) + np.r_[:p*m]].reshape((p,m))
+    E = x0.flat[n*(p+m+n)+p*m + np.r_[:n*n_nx]].reshape((n,n_nx))
+    F = x0.flat[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]].reshape((p,n_ny))
+
+    return A, B, C, D, E, F
+
+def costfnc(x0, system, weight=None):
+    # TODO fix transient
+    T2 = system.T2
+    R, p, npp = system.signal.R, system.signal.p, system.signal.npp
+    nfd = npp//2
+    without_T2 = system.without_T2
+
+    # update the state space matrices from x0
+    #A, B, C, D, E, F = extract_ss(x0, system)
+    system.setss(*extract_ss(x0, system))
+    # Compute the (transient-free) modeled output and the corresponding states
+    t_mod, y_mod, x_mod = model.simulate(system.signal.um)
+
+    # Compute the (weighted) error signal without transient
+    err = system.y_mod[without_T2] - system.signal.ym[without_T2]
+    if freq_weight:
+        err = err.reshape((npp,R,p),order='F').swapaxes(1,2)
+        # Select only the positive half of the spectrum
+        err = fft(err, axis=0)[:nfd]
+        err = mmul_weight(err, weight)
+        #cost = np.vdot(err, err).real
+        err = err.swapaxes(1,2).ravel(order='F')
+        err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
+    else:
+        err_w = err * weight[without_T2]
+        #cost = np.dot(err,err)
+
+    return err_w
+
+
+data = sio.loadmat('data.mat')
+
+Y_data = data['Y'].transpose((1,2,3,0))
+U_data = data['U'].transpose((1,2,3,0))
+
+G_data = data['G']
+covGML_data = data['covGML']
+covGn_data = data['covGn']
+covY_data = data['covY'].transpose((2,0,1))
+
+lines = data['lines'].squeeze() - 1 # 0-based!
+non_exc_even = data['non_exc_even'].squeeze() - 1
+non_exc_odd = data['non_exc_odd'].squeeze() - 1
+A_data = data['A']
+B_data = data['B']
+C_data = data['C']
+D_data = data['D']
+W_data = data['W']
+
+y = data['y_orig']
+u = data['u_orig']
+
+n = 2
+r = 3
+fs = 1
+
+sig = Signal(u,y)
+sig.lines(lines)
+linmodel = linss()
+linmodel.bla(sig)
+linmodel.estimate(n,r)
+linmodel.optimize(copy=False)
+sig.average()
+
 model = StateSpace(A_data, B_data, C_data, D_data)
+model.signal = linmodel.signal
 system = model
+self = model
 model.nlterms('x', [2,3], 'full')
 model.nlterms('y', [2,3], 'full')
-
-u = data['u_orig']
-y = data['y_orig']
-R = u.shape[2]
-
-# samples per period
-npp = u.shape[0]
-# average time signal over periods and flatten
-um = u.mean(axis=-1)  # (N,m,R)
-ym = y.mean(axis=-1)
-um = um.swapaxes(1,2).reshape(-1,m, order='F')  # (N*R,m)
-ym = ym.swapaxes(1,2).reshape(-1,p, order='F')  # (N*R,p)
-
-# transient settings
-nt = ns
-T1 = np.r_[nt, np.r_[0:(R-1)*npp+1:npp]]
-T2 = 0
-
-# Compute the (transient-free) modeled output and the corresponding states
-t_mod, y_mod, x_mod = model.simulate(um, T1=T1)
-
-covYinvsq = np.empty_like(covY)
-for f in range(F):
-    covYinvsq[f] = _matrix_square_inv(covY[f])
-
-weight = covYinvsq
-weight = W_data.T
-
-N = um.shape[0]
-
-# Number of frequency bins where weighting is specified (ie nfd = floor(npp/2),
-# where npp is the number of samples in one period and one phase realization
-# for a multisine excitation
-nfd = weight.shape[0]
-
-# TODO this only works for T2 scalar.
-# Determine if weighting is in frequency or time domain: only implemented for
-# periodic signals.
-if weight is None:
-    freq_weight = False
-    weight = np.ones((N,p))
-elif nfd > 1:
-    freq_weight = True
-    if system.T2 is not None:
-        R = round((N-T2)/nfd/2)
-        if np.mod(N-T2,R) != 0:
-            raise ValueError('Transient handling and weighting matrix are incompatible. T2 {}'.
-                             format(T2))
-else:
-    # time domain
-    freq_weight = False
-
-# TODO fix transient
-# without_T2 = remove_transient_indices_nonperiodic(system.T2,N,system.p)
-without_T2 = np.s_[:N]
-# Compute the (weighted) error signal without transient
-err_old = y_mod[without_T2] - ym[without_T2]
-if freq_weight:
-    err_old = err_old.reshape(((N-T2)//R,R,p)).swapaxes(1,2)
-    err_old = fft(err_old, axis=0)
-    # Select only the positive half of the spectrum
-    err_old = err_old[:nfd]
-    err_old = np.matmul(weight, err_old)
-    cost = np.vdot(err_old, err_old).real
-    err_old = err_old.swapaxes(1,2).ravel(order='F')
-    err_old = np.hstack((err_old.real, err_old.imag))
-else:
-    err_old = err_old * weight[without_T2]
-    cost = np.dot(err_old,err_old)
 
 # Compute the derivatives of the polynomials zeta and e
 system.xd_powers, system.xd_coeff = poly_deriv(system.xpowers)
 system.yd_powers, system.yd_coeff = poly_deriv(system.ypowers)
 
-# Extract the transient part of the input and states
-idx_trans = transient_indices_periodic(system.T1, N)
-idx_utrans = remove_transient_indices_periodic(system.T1, N, system.p)
-u_trans = um[idx_trans]
-n_trans = u_trans.shape[0]
-x_trans = x_mod[idx_trans]
+# samples per period
+npp, F = self.signal.npp, self.signal.F
+R, P = self.signal.R, self.signal.P
+n, m, p = self.n, self.m, self.p
+n_nx, n_ny = self.n_nx, self.n_ny
 
-J = analytical_jacobian(system, weight)
+# transient settings
+# Add one period before the start of each realization
+nt = npp
+T1 = np.r_[nt, np.r_[0:(R-1)*npp+1:npp]]
+T2 = 0
+model.transient(T1,T2)
+
+
+covYinvsq = np.empty_like(covY_data)
+for f in range(F):
+    covYinvsq[f] = matrix_square_inv(covY_data[f])
+
+weight = covYinvsq
+weight = W_data.T
+freq_weight = True
+
+npar = n**2 + n*m + p*n + p*m + n*n_nx + p*n_ny
+# initial guess
+x0 = np.empty(npar)
+x0[:n**2] = self.A.ravel()
+x0[n**2 + np.r_[:n*m]] = self.B.ravel()
+x0[n**2 + n*m + np.r_[:n*p]] = self.C.ravel()
+x0[n*(p+m+n) + np.r_[:p*m]] = self.D.ravel()
+x0[n*(p+m+n)+p*m + np.r_[:n*n_nx]] = self.E.ravel()
+x0[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]] = self.F.ravel()
+
+res = lm(costfnc, x0, jacobian, system=self, weight=weight,
+         info=True)
+# from scipy.optimize import least_squares
+# res = least_squares(costfnc,x0,jacobian, method='lm', x_scale='jac', verbose=1,
+#                     kwargs={'system':self,'weight':weight})

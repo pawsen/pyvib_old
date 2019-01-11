@@ -149,3 +149,7 @@ def fast_inverse(A):
 
 %timeit -n 20 aI11 = slow_inverse(A)
 %timeit -n 20 aI11 = fast_inverse(A)
+* homepage
+examples
+https://ibotpeaches.github.io/Apktool/
+https://github.com/iBotPeaches/Apktool/tree/gh-pages
