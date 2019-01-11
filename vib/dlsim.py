@@ -6,6 +6,7 @@ dnlsys -- a collection of classes and functions for modeling nonlinear
 linear state space systems.
 """
 
+from vib.pnlss import combinations, select_active, transient_indices_periodic, remove_transient_indices_periodic
 from scipy.interpolate import interp1d
 from numpy.fft import fft
 
@@ -330,15 +331,12 @@ def element_jacobian(samples, Edwdx, C, Fdwdx, active):
     N, npar = samples.shape
     nactive = len(active) # Number of active parameters in A, B, or E
 
-     # Add C to F partial(eta(t))/partial(x(t)) for all samples at once
-    Fdwdx += C[...,None]
-
     out = np.zeros((p,N,nactive))
-    for k in range(nactive):
+    for k, activ in enumerate(active):
         # Which column in A, B, or E matrix
-        j = np.mod(active[k], npar)
+        j = np.mod(activ, npar)
         # Which row in A, B, or E matrix
-        i = (active[k]-j)//npar
+        i = (activ-j)//npar
         # partial derivative of x(0) wrt. A(i,j), B(i,j), or E(i,j)
         Jprev = np.zeros(n)
         for t in range(1,N):
@@ -354,7 +352,7 @@ def element_jacobian(samples, Edwdx, C, Fdwdx, active):
 
     return out
 
-def analytical_jacobian(system):
+def analytical_jacobian(system, weight):
 
     """Compute the Jacobians in a steady state nonlinear state-space model
 
@@ -371,40 +369,59 @@ def analytical_jacobian(system):
     # Collect states and outputs with prepended transient sample
     contrib = np.hstack((x_trans, u_trans)).T
 
-    # E partial(zeta(t))/partial(x(t)) + A(n,n,NT)
+    # E∂ₓζ + A(n,n,NT)
     A_EdwxIdx = multEdwdx(contrib,system.xd_powers,np.squeeze(system.xd_coeff),
                           system.E,system.n) + system.A[...,None]
     zeta = nl_terms(contrib, system.xpowers).T  # (NT,n_nx)
 
-    # F partial(eta(t))/partial(x(t)) (p,n,NT)
+    # F∂ₓη  (p,n,NT)
     FdwyIdx = multEdwdx(contrib,system.yd_powers,np.squeeze(system.yd_coeff),
                         system.F,system.n)
     eta = nl_terms(contrib, system.ypowers).T  # (NT,n_ny)
 
     # calculate jacobians wrt state space matrices
+    JC = np.kron(np.eye(p), x_mod)  # (p*N,p*n)
+    JD = np.kron(np.eye(system.p), um)  # (p*N, p*m)
     JF = np.kron(np.eye(system.p), eta)  # Jacobian wrt all elements in F
     JF = JF[:,system.yactive]  # all active elements in F. (p*NT,nactiveF)
     JF = JF[idx_utrans]  # (p*N,nactiveF)
 
-    JD = np.kron(np.eye(system.p), um)  # (p*N, p*m)
-    JC = np.kron(np.eye(p), x)  # (p*N,p*n)
 
+    # Add C to F∂ₓη for all samples at once
+    FdwyIdx += system.C[...,None]
     # calculate Jacobian by filtering an alternative state-space model
+    JA = element_jacobian(x_trans, A_EdwxIdx, system.C, FdwyIdx,
+                          np.arange(system.n**2))
+    JA = JA.transpose((1,0,2)).reshape((system.p*n_trans, n**2))
+    JA = JA[idx_utrans]  # (p*N,n**2)
+
+    JB = element_jacobian(u_trans, A_EdwxIdx, system.C, FdwyIdx,
+                          np.arange(system.n*system.m))
+    JB = JB.transpose((1,0,2)).reshape((system.p*n_trans, system.n*system.m))
+    JB = JB[idx_utrans]  # (p*N,n*m)
+
     JE = element_jacobian(zeta, A_EdwxIdx, system.C, FdwyIdx, system.xactive)
     JE = JE.transpose((1,0,2)).reshape((system.p*n_trans, len(system.xactive)))
     JE = JE[idx_utrans]  # (p*N,nactiveE)
 
-    JA = element_jacobian(x_trans, A_EdwxIdx, system.C, FdwyIdx,
-                          np.arange(system.n**2))
-    JA = JA.transpose((1,0,2)).reshape((system.p*n_trans, len(system.xactive)))
-    JA = JA[idx_utrans]  # (p*N,n**2)
+    jac = np.hstack((JA, JB, JC, JD, JE, JF))[without_T2]
+    npar = jac.shape[1]
 
-    JB = element_jacobian(u_trans, A_EdwxIdx, system.C, FdwyIdx,
-                          np.arange(system.n+system.m))
-    JB = JB.transpose((1,0,2)).reshape((system.p*n_trans, system.n*system.m))
-    JB = JB[idx_utrans]  # (p*N,n*m)
+    # add frequency weighting
+    # (p*N, npar) -> (Npp,R,p,npar) -> (Npp,p,R,npar) -> (Npp,p,R*npar)
+    jac = jac.reshape(((N-T2)//R,R,system.p,npar),
+                      order='F').swapaxes(1,2).reshape((-1,system.p,R*npar), order='F')
+    # select only the positive half of the spectrum
+    jac = fft(jac, axis=0)[:nfd]
+    jac = np.matmul(weight,jac)
+    # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
+    jac = jac.reshape((-1,system.p,R,npar)).swapaxes(1,2).reshape((-1,npar), order='F')
 
-    J = np.hstack((JA, JB, JC, JD, JE, JF))[without_T2]
+    J = np.empty((2*nfd*R*system.p,npar))
+    J[:nfd*R*system.p] = jac.real
+    J[nfd*R*system.p:] = jac.imag
+
+    return J
 
 
 model = StateSpace(A_data, B_data, C_data, D_data)
@@ -412,8 +429,9 @@ system = model
 model.nlterms('x', [2,3], 'full')
 model.nlterms('y', [2,3], 'full')
 
-u = data['u']
-y = data['y']
+u = data['u_orig']
+y = data['y_orig']
+R = u.shape[2]
 
 # samples per period
 npp = u.shape[0]
@@ -426,6 +444,7 @@ ym = ym.swapaxes(1,2).reshape(-1,p, order='F')  # (N*R,p)
 # transient settings
 nt = ns
 T1 = np.r_[nt, np.r_[0:(R-1)*npp+1:npp]]
+T2 = 0
 
 # Compute the (transient-free) modeled output and the corresponding states
 t_mod, y_mod, x_mod = model.simulate(um, T1=T1)
@@ -435,7 +454,7 @@ for f in range(F):
     covYinvsq[f] = _matrix_square_inv(covY[f])
 
 weight = covYinvsq
-
+weight = W_data.T
 
 N = um.shape[0]
 
@@ -465,7 +484,7 @@ else:
 # without_T2 = remove_transient_indices_nonperiodic(system.T2,N,system.p)
 without_T2 = np.s_[:N]
 # Compute the (weighted) error signal without transient
-err_old = ylin[without_T2] - ym[without_T2]
+err_old = y_mod[without_T2] - ym[without_T2]
 if freq_weight:
     err_old = err_old.reshape(((N-T2)//R,R,p)).swapaxes(1,2)
     err_old = fft(err_old, axis=0)
@@ -488,9 +507,6 @@ idx_trans = transient_indices_periodic(system.T1, N)
 idx_utrans = remove_transient_indices_periodic(system.T1, N, system.p)
 u_trans = um[idx_trans]
 n_trans = u_trans.shape[0]
-x_trans = x[idx_trans]
+x_trans = x_mod[idx_trans]
 
-J = analytical_jacobian(system)
-
-
-
+J = analytical_jacobian(system, weight)

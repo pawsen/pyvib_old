@@ -4,7 +4,7 @@ from scipy.linalg import (lstsq, qr, svd, logm, inv, norm, eigvals)
 from numpy import kron
 from numpy.linalg import solve, pinv
 
-def _matrix_square_inv(A):
+def matrix_square_inv(A):
     """Calculate the inverse of the matrix square root of `A`
 
     Calculate `X` such that XX = inv(A)
@@ -55,7 +55,7 @@ def is_stable(A, domain='z'):
                          format(domain=repr(domain)))
     return True
 
-def jacobian_freq_ss(A,B,C,z):
+def jacobian_freq(A,B,C,z):
     """Compute Jacobians of the unweighted errors wrt. model parameters.
 
     Computes the Jacobians of the unweighted errors ``e(f) = Ĝ(f) - G(f)``
@@ -112,6 +112,8 @@ def jacobian_freq_ss(A,B,C,z):
 
     # get rows and columns in A for a given index: A(i)=A(k(i),ell(i))
     k, ell = np.unravel_index(np.arange(n**2), (n,n))
+    # Note that using inv(A) implicitly calls solve and creates an identity
+    # matrix. Thus it is faster to allocate In once and then call solve.
     In = np.eye(n)
     Im = np.eye(m)
     Ip = np.eye(p)
@@ -120,8 +122,6 @@ def jacobian_freq_ss(A,B,C,z):
     # https://stackoverflow.com/a/11999063/1121523
     # see for multicasting
     # https://docs.scipy.org/doc/numpy/reference/routines.linalg.html#linear-algebra-on-several-matrices-at-once
-    # Note that using inv(A) implicitly calls solve and creates an identity
-    # matrix. Thus it is faster to allocate In once and then call solve.
     for f in range(F):
         temp1 = solve((z[f]*In - A),In)
         temp2 = C @ temp1
@@ -146,13 +146,18 @@ def jacobian_freq_ss(A,B,C,z):
         # JC(k,:,sub2ind([p n],k,l),f) = temp3(l,:)
         JC[f] = np.reshape(kron(temp3.T, Ip), (p,m,n*p))
 
-    return JA, JB, JC
 
-def weight_jacobian_ss(jac, W):
+    # JD does not change over iterations
+    JD = np.zeros((p,m,p*m))
+    for f in range(p*m):
+        np.put(JD[...,f], f, 1)
+    JD = np.tile(JD, (F,1,1,1))
+
+    return JA, JB, JC, JD
+
+def mmul_weight(tmp, weight):
     """Computes the Jacobian of the weighted error ``e_W(f) = W(f,:,:)*e(f)``
 
-
-    This uses broadcasting.
     """
 
     # np.einsum('ijk,kl',W, jac) or
@@ -160,7 +165,7 @@ def weight_jacobian_ss(jac, W):
     # np.einsum('ijk,jl->ilk',W,jac)
     # np.tensordot(W, jac, axes=1)
     # np.matmul(W, jac)
-    return np.matmul(W, jac)
+    return np.matmul(weight, tmp)
 
 
 def normalize_columns(jac):
@@ -329,29 +334,31 @@ def subspace(G, covarG, freq, n, r):
 
     # 3. Estimate B and D given A,C and H: (W)LS estimate
     # Compute weight, W = sqrt(σ²_G^-1)
+    # TODO this is calculated multiple places
     weight = np.zeros_like(covarG) # .transpose((2,0,1))
     for f in range(F):
-        weight[f] = _matrix_square_inv(covarG[f])
+        weight[f] = matrix_square_inv(covarG[f])
 
     # Compute partial derivative of the weighted error, e = W*(Ĝ - G)
     # Ĝ(f) = C*inv(z(f)*I - A)*B + D and W = 1/σ_G.
     # wrt. B
     B = np.zeros((n,m))
     # unweighted jacobian
-    _, JB, _ = jacobian_freq_ss(A,B,C,z)
+    _, JB, _, _ = jacobian_freq(A,B,C,z)
     # add weight
     JB.shape =(F, p*m, m*n)
-    JB = weight_jacobian_ss(JB, weight).reshape((p*m*F, m*n))
+    JB = mmul_weight(JB, weight).reshape((p*m*F, m*n))
 
-    # The jacobian wrt. elements of D is a zero matrix where one element is
-    # one times the weight
+    # The jacobian wrt. elements of D is a zero matrix where one element is one
+    # times the weight
+    # TODO this is already calculated in jacobian
     JD = np.zeros((p*m*F,p*m),dtype=complex)
     for f in range(F):
         JD[p*m*f:(f+1)*p*m,:] = weight[f]
 
     # Compute e = -W*(0 - G), i.e. minus the weighted error(the residual) when
     # considering zero initial estimates for Ĝ
-    resG = weight_jacobian_ss(G, weight).ravel()
+    resG = mmul_weight(G, weight).ravel()
 
     # TODO: test performance vs preallocating. This makes some intermediate copies
     resGre = np.hstack((resG.real, resG.imag))
@@ -382,18 +389,19 @@ def subspace(G, covarG, freq, n, r):
     return A, B, C, D, z, isstable
 
 
-def fss2frf(A,B,C,D,freq):
+def ss2frf(A,B,C,D,freq):
     """Compute frequency response function from state-space parameters
     (discrete-time)
 
-    Computes the frequency response function (FRF) or matrix (FRM) GSS at the
+    Computes the frequency response function (FRF) or matrix (FRM) Ĝ at the
     normalized frequencies `freq` from the state-space matrices `A`, `B`, `C`,
-    and `D`. ```GSS(f) = C*inv(exp(1j*2*pi*f)*I - A)*B + D```
+    and `D`. ```̂G(f) = C*inv(exp(2j*pi*f)*I - A)*B + D```
 
     Returns
     -------
     Gss : ndarray(F,p,m)
         frequency response matrix
+
     """
 
     # Z-transform variable
@@ -404,76 +412,14 @@ def fss2frf(A,B,C,D,freq):
 
     return Gss
 
-from vib.frf import periodic
-import scipy.io as sio
-from vib.common import db, import_npz
-import matplotlib.pyplot as plt
 
-data = sio.loadmat('data.mat')
+def jacobian(x0, system, weight=None):
 
-Y = data['Y'].transpose((1,2,3,0))
-U = data['U'].transpose((1,2,3,0))
-G_data = data['G']
-covGML_data = data['covGML']
-covGn_data = data['covGn']
-covY = data['covY'].transpose((2,0,1))
+    n, m, p, npar = system.n, system.m, system.p, system.npar
+    F = system.signal.F
 
-lines = data['lines'].squeeze()
-non_exc_even = data['non_exc_even'].squeeze()
-non_exc_odd = data['non_exc_odd'].squeeze()
-A_data = data['A']
-B_data = data['B']
-C_data = data['C']
-D_data = data['D']
-
-
-# number of samples
-ns = 1024
-freq = (lines-1)/ns  # Excited frequencies (normalized)
-F = len(lines)
-
-G, covG, covGn = periodic(U, Y)
-G = G.transpose((2,0,1))
-covG = covG.transpose((2,0,1))
-
-m, p = 1, 1
-n = 2
-r = 3
-fs = 1
-optimize = True
-
-# weight
-if covG is None:
-    covGinv = np.tile(np.eye((m*p)),(F,1,1))
-else:
-    covGinv = pinv(covG)
-
-# I do not know which weight I have to use.
-covGinvsq = np.zeros_like(covG)
-for f in range(F):
-    covGinvsq[f] = _matrix_square_inv(covG[f])
-
-A, B, C, D, z, isstable = subspace(G, covG, freq/fs, n, r)
-
-
-## Do Levenberg-Marquardt optimizations
-if optimize:
-    pass
-
-# Number of parameters
-npar = n**2 + n*m + p*n + p*m
-info = True
-
-JD = np.zeros((p,m,p*m))
-for f in range(p*m):
-    np.put(JD[...,f], f, 1)
-JD = np.tile(JD, (F,1,1,1))
-
-#def jacobian(A,B,C,z,weigth=None):
-def jacobian(x0,z,weight=None):
-
-    A, B, C, D = extract_subspace(x0)
-    JA, JB, JC = jacobian_freq_ss(A,B,C,z)
+    A, B, C, D = extract_ss(x0, system)
+    JA, JB, JC, JD = jacobian_freq(A,B,C,system.z)
 
     tmp = np.empty((F,p,m,npar),dtype=complex)
     tmp[...,:n**2] = JA
@@ -483,56 +429,40 @@ def jacobian(x0,z,weight=None):
     tmp = tmp.reshape((F,m*p,npar))
 
     if weight is not None:
-        tmp = weight_jacobian_ss(tmp, weight)
+        tmp = mmul_weight(tmp, weight)
     tmp = tmp.reshape((F*p*m,npar))
 
     jac = np.empty((2*F*p*m, npar))
     jac[:F*p*m] = tmp.real
     jac[F*p*m:] = tmp.imag
 
+    return jac
 
-    #jac, scaling = normalize_columns(jac)
-
-    return jac#, scaling
-
-def costfnc(A,B,C,D,G,freq,weight=None):
-    """Compute the cost function as the sum of squares of the weighted error
-
-    cost = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k], where the weight is the inverse of the
-    covariance matrix of `G`
-    """
-
-    # frf of the state space model
-    Gss = fss2frf(A,B,C,D,freq/fs)
-    err = Gss - G
-    # cost = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k]
-    cost = np.einsum('ki,kij,kj',err.conj().reshape(err.shape[0],-1),
-                     weight,err.reshape(err.shape[0],-1)).real
-
-    # Normalize with the number of excited frequencies
-    # cost /= F
-    #err_w = np.matmul(weight, err)
-    return cost, err
-
-
-def costfnc2(x0,G,freq,weight=None):
+def costfnc(x0, system, weight=None):
     """Compute the vector of residuals such that the function to mimimize is
 
-    res = ∑ₖ e[k]ᴴ*σ_G⁻¹*e[k], where the weight is the inverse of the
-    covariance matrix of `G`
+    res = ∑ₖ e[k]ᴴ*e[k], where the error is given by
+    e = weight*(Ĝ - G)
+    and the weight is the square inverse of the covariance matrix of `G`,
+    weight = \sqrt(σ_G⁻¹) Ĝ⁻¹
+
     """
 
-    A, B, C, D = extract_subspace(x0)
+    freq, fs = system.signal.freq, system.signal.fs
+    A, B, C, D = extract_ss(x0, system)
 
     # frf of the state space model
-    Gss = fss2frf(A,B,C,D,freq/fs)
-    err = np.matmul(weight, Gss - G)
+    Gss = ss2frf(A,B,C,D,freq/fs)
+    err = Gss - system.G
+    if weight is not None:
+        err = mmul_weight(err, weight)
 
     err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
     return err_w
 
-def extract_subspace(x0):
+def extract_ss(x0, system):
 
+    n, m, p = system.n, system.m, system.p
     A = x0.flat[:n**2].reshape((n,n))
     B = x0.flat[n**2 + np.r_[:n*m]].reshape((n,m))
     C = x0.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
@@ -540,13 +470,12 @@ def extract_subspace(x0):
 
     return A, B, C, D
 
-def levenberg_marquardt_ls(fun, x0, jac, weight, args=(), kwargs={}):
+def levenberg_marquardt(fun, x0, jac, system, weight, info, args=(), kwargs={}):
     """Solve a nonlinear least-squares problem using LM
-
 
     Parameters
     ----------
-    fun: callable
+    fun : callable
         Function which computes the vector of residuals
     x0: array_like with shape (n,) or float
         Initial guess on independent variables.
@@ -562,20 +491,19 @@ def levenberg_marquardt_ls(fun, x0, jac, weight, args=(), kwargs={}):
 
     """
 
-    err_old = fun(x0,G,freq,weight)
-    cost = np.dot(err_old,err_old)
+    err_old = fun(x0, system, weight)
+    # divide by 2 to match scipy's implementation of minpack
+    cost = np.dot(err_old, err_old)/2
     cost_old = cost.copy()
 
     # # Initialization of the Levenberg-Marquardt loop
-    nit = 0  #  Iteration number
+    niter = 0  #  Iteration number
     nmax = 10
 
-    # jacobian wrt. elements of D is a zero matrix where one element is
     lamb = None
-    while nit < nmax:
+    while niter < nmax:
 
-
-        J = jac(x0,z,weight)
+        J = jac(x0, system, weight)
         J, scaling = normalize_columns(J)
 
         U, s, Vt = svd(J, full_matrices=False)
@@ -586,7 +514,7 @@ def levenberg_marquardt_ls(fun, x0, jac, weight, args=(), kwargs={}):
             lamb = s[0]
 
         # as long as the step is unsuccessful
-        while cost >= cost_old and nit < nmax:
+        while cost >= cost_old and niter < nmax:
             # determine rank of jacobian/estimate non-zero singular values(rank
             # estimate)
             tol = max(J.shape)*np.spacing(max(s))
@@ -599,8 +527,8 @@ def levenberg_marquardt_ls(fun, x0, jac, weight, args=(), kwargs={}):
             ds /= scaling
 
             x0test = x0 + ds
-            err = fun(x0test,G,freq,weight)
-            cost = np.dot(err,err)
+            err = fun(x0test, system=system, weight=weight)
+            cost = np.dot(err,err)/2
 
             if cost >= cost_old:
                 # step unsuccessful, increase lambda
@@ -608,30 +536,12 @@ def levenberg_marquardt_ls(fun, x0, jac, weight, args=(), kwargs={}):
             else:
                 lamb /= 2
             if info:
-                print('cost: {}\t i: {}'.format(cost,nit))
-            nit += 1
+                print('cost: {}\t i: {}'.format(cost,niter))
+            niter += 1
 
         if cost < cost_old:
             cost_old = cost
             err_old = err
             x0 = x0test
 
-    return x0, cost, err
-
-
-# initial guess
-x0 = np.empty(n**2+n*m+n*p+p*m)
-x0[:n**2] = A.ravel()
-x0[n**2 + np.r_[:n*m]] = B.ravel()
-x0[n**2 + n*m + np.r_[:n*p]] = C.ravel()
-x0[n**2 + n*m + n*p:] = D.ravel()
-
-x, cost, err = levenberg_marquardt_ls(costfnc2,x0,jacobian, weight=covGinvsq)
-
-from functools import partial
-from scipy.optimize import least_squares
-
-pcostfnc = partial(costfnc2, G=G, freq=freq)
-pjac = partial(jacobian, z=z)
-res = least_squares(pcostfnc,x0,pjac, method='lm', x_scale='jac', kwargs={'weight':covGinvsq})
-res2 = least_squares(pcostfnc,x0,pjac, method='lm', kwargs={'weight':covGinvsq})
+    return x0, cost, err, niter

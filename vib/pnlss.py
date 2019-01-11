@@ -210,18 +210,6 @@ class PNLSS(object):
         self.T2 = T2  # for unperiodic data
 
 
-# Nonlinear terms
-nx = [2, 3]  # Nonlinear degrees in state update equation
-ny = [2, 3]  # Nonlinear degrees in output equation
-whichtermsx = 'full'  # Consider all monomials in the state update equation
-whichtermsy = 'full'  # Consider all monomials in the output equation
-
-# Transient settings
-NTrans = N  # Add one period before the start of each realization
-#T1 = [NTrans 1+(0:N:(R-1)*N)]  # Number of transient samples and starting indices of each realization
-T2 = 0  # No non-periodic transient handling
-
-
 def select_active(structure,n,m,q,nx):
     """Select active elements in E or F matrix.
 

@@ -64,7 +64,7 @@ class FRF(Signal):
 
 
 
-def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
+def bla_periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
     """Calculate the frequency response matrix, and the corresponding noise and
     total covariance matrices from the spectra of periodic input/output data.
 
@@ -78,8 +78,7 @@ def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
     Parameters
     ----------
     u : ndarray
-        Forcin
-    g signal
+        Forcing signal
     y : ndarray
         Response signal (displacements)
     nper : int
