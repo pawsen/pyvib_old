@@ -311,7 +311,7 @@ def lm(fun, x0, jac, system, weight, info, nmax=50, lamb=None, ftol=1e-8,
 
         if info:
             jac_cond = sr[0]/sr[-1]
-            print('i: {:d}\tinner: {:d}\tcost: {:.3f}\tcond: {:.3f}'.
+            print('i: {:3d}\tinner: {:2d}\tcost: {:.3f}\tcond: {:.3f}'.
                   format(niter, ninner, cost/2/nfd/R/p, jac_cond))
 
         if cost < cost_old:
