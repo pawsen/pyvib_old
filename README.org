@@ -22,6 +22,8 @@ https://sphinxcontrib-bibtex.readthedocs.io/en/latest/
 
 ** Generate docs:
 Guide here: https://samnicholls.net/2016/06/15/how-to-sphinx-readthedocs/
+pip3 install --user Sphinx
+pip3 install --user sphinx_rtd_theme  # theme
 mkdir docs && cd docs
 sphinx-quickstart
 mkdir source
