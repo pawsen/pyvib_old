@@ -30,7 +30,6 @@ mkdir source
 sphinx-apidoc --separate -f -o source ../vib  # to generate API documentation stubs
 make html
 
-
 ** references between functions
 http://www.sphinx-doc.org/en/master/usage/restructuredtext/domains.html#cross-referencing-python-objects
 fx:
@@ -42,6 +41,8 @@ Se also :py:func:`.common.db`
 Or inline
 The value of :math:`\omega` is larger than 5.
 
+* Projects to learn from
+https://github.com/sunpy/sunpy
 * pyside2 for qui.
 Choosen over pyqt due to licensing. These two are almost interchangeable. Could
 start with pyqt if docs/examples are nicer.

@@ -3,7 +3,7 @@
 pyvib
 =================================
 
-Pyvib is a python program for analysing nonlinear vibrations and estimating(and
+Pyvib is a python program for analyzing nonlinear vibrations and estimating(and
 simulating) models from measured data.
 
 The highlights are
