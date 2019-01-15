@@ -27,9 +27,9 @@ author = u'Paw'
 copyright = u'2017–{0}, '.format(datetime.utcnow().year) + author
 
 # The short X.Y version.
-version = '.'.join(vib.__version__.split('.', 2)[:2])
+version = '.'.join(pyvib.__version__.split('.', 2)[:2])
 # The full version, including alpha/beta/rc tags.
-release = vib.__version__
+release = pyvib.__version__
 
 
 # -- General configuration ---------------------------------------------------
@@ -125,7 +125,7 @@ html_static_path = ['_static']
 # -- Options for HTMLHelp output ---------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'vibdoc'
+htmlhelp_basename = 'pyvibdoc'
 
 
 # -----------------------------------------------------------------------------
@@ -192,9 +192,9 @@ def linkcode_resolve(domain, info):
     else:
         linespec = ""
 
-    fn = relpath(fn, start=dirname(vib.__file__))
+    fn = relpath(fn, start=dirname(pyvib.__file__))
 
-    return "https://github.com/pawsen/vib/blob/master/vib/%s%s" % (fn, linespec)
+    return "https://github.com/pawsen/vib/blob/master/pyvib/%s%s" % (fn, linespec)
 
 #     if 'dev' in numpy.__version__:
 #         return "https://github.com/pawsen/vib/blob/master/vib/%s%s" % (

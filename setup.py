@@ -43,4 +43,16 @@ setup(name='pyvib',
       author_email='pawsen@gmail.com',
       license='BSD',
       packages=['vib'],
-      zip_safe=False)
+      zip_safe=False,
+      install_requires=[
+          'numpy',
+          'scipy'],
+      extras_require={
+          'tests': [
+              #'nose',
+              #'pycodestyle >= 2.1.0'
+          ],
+          'docs': [
+              'sphinx >= 1.4',
+              'sphinx_rtd_theme']}
+)
