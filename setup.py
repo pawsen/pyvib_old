@@ -25,7 +25,7 @@
 # SUCH DAMAGE.
 
 from setuptools import setup
-from . import __version__
+from pyvib import __version__
 
 def readme():
     with open('README.org') as f:
