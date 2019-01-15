@@ -194,7 +194,7 @@ def linkcode_resolve(domain, info):
 
     fn = relpath(fn, start=dirname(pyvib.__file__))
 
-    return "https://github.com/pawsen/vib/blob/master/pyvib/%s%s" % (fn, linespec)
+    return "https://github.com/pawsen/pyvib/blob/master/pyvib/%s%s" % (fn, linespec)
 
 #     if 'dev' in numpy.__version__:
 #         return "https://github.com/pawsen/vib/blob/master/vib/%s%s" % (

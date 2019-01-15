@@ -6,12 +6,12 @@ dnlsys -- a collection of classes and functions for modeling nonlinear
 linear state space systems.
 """
 
-from vib.pnlss import (combinations, select_active, transient_indices_periodic,
-                       remove_transient_indices_periodic)
-from vib.subspace import (matrix_square_inv, levenberg_marquardt,
-                          normalize_columns, mmul_weight)
-from vib.statespace import StateSpace as linss
-from vib.statespace import Signal
+from .pnlss import (combinations, select_active, transient_indices_periodic,
+                    remove_transient_indices_periodic)
+from .subspace import (matrix_square_inv, levenberg_marquardt,
+                       normalize_columns, mmul_weight)
+from .statespace import StateSpace as linss
+from .statespace import Signal
 from scipy.interpolate import interp1d
 from numpy.fft import fft
 from scipy.linalg import norm

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from vib.common import matrix_square_inv, mmul_weight, normalize_columns
+from .common import matrix_square_inv, mmul_weight, normalize_columns
 import numpy as np
 from scipy.linalg import (lstsq, qr, svd, logm, inv, norm, eigvals)
 from numpy import kron

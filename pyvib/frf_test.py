@@ -2,7 +2,7 @@ import numpy as np
 from numpy.fft import fft, ifft
 from numpy.linalg import pinv, norm
 import scipy.io as sio
-from vib.common import db, import_npz
+from .common import db, import_npz
 import matplotlib.pyplot as plt
 
 def periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):

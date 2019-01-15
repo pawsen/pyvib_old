@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from vib.frf import bla_periodic
-from vib.subspace import (subspace, costfnc, jacobian, extract_ss)
-from vib.common import (matrix_square_inv, lm)
+from .frf import bla_periodic
+from .subspace import (subspace, costfnc, jacobian, extract_ss)
+from .common import (matrix_square_inv, lm)
 from numpy.fft import fft
 from scipy.linalg import norm
 from scipy.optimize import least_squares

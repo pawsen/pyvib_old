@@ -1,7 +1,7 @@
-vib
-===
+pyvib
+=====
 
 .. toctree::
    :maxdepth: 4
 
-   vib
+   pyvib
