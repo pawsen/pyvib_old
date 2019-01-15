@@ -25,20 +25,22 @@
 # SUCH DAMAGE.
 
 from setuptools import setup
+from . import __version__
 
 def readme():
-	with open('README.org') as f:
-		return f.read()
+    with open('README.org') as f:
+        return f.read()
 
-setup(name='vib',
-	version='0.1',
-	description='Some vib stuff',
-	long_description=readme(),
-	classifiers=[],
-	keywords='nonlinear identification bifurcation simulation',
-	url='https://github.com/pawsen/vib',
-	author='Paw Møller',
-	author_email='pawsen@gmail.com',
-	license='BSD',
-	packages=['vib'],
-	zip_safe=False)
+
+setup(name='pyvib',
+      version=__version__,
+      description='Some vib stuff',
+      long_description=readme(),
+      classifiers=[],
+      keywords='nonlinear identification bifurcation simulation',
+      url='https://github.com/pawsen/pyvib',
+      author='Paw Møller',
+      author_email='pawsen@gmail.com',
+      license='BSD',
+      packages=['vib'],
+      zip_safe=False)
