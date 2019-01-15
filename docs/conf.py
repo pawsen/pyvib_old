@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.abspath('../'))
 
 # -- Project information -----------------------------------------------------
 
-project = u'vib'
+project = u'pyvib'
 author = u'Paw'
 copyright = u'2017–{0}, '.format(datetime.utcnow().year) + author
 

@@ -42,7 +42,7 @@ setup(name='pyvib',
       author='Paw Møller',
       author_email='pawsen@gmail.com',
       license='BSD',
-      packages=['vib'],
+      packages=['pyvib'],
       zip_safe=False,
       install_requires=[
           'numpy',
