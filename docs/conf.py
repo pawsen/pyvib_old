@@ -16,7 +16,7 @@
 from datetime import datetime
 import os
 import sys
-import vib
+import pyvib
 
 sys.path.insert(0, os.path.abspath('../'))
 
