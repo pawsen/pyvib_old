@@ -246,7 +246,7 @@ def lm(fun, x0, jac, system, weight, info, nmax=50, lamb=None, ftol=1e-8,
     cost = np.dot(err_old, err_old)
     cost_old = cost.copy()
 
-    # # Initialization of the Levenberg-Marquardt loop
+    # Initialization of the Levenberg-Marquardt loop
     niter = 0
     ninner_max = 10
     cost_vec = np.empty(nmax)
@@ -273,15 +273,15 @@ def lm(fun, x0, jac, system, weight, info, nmax=50, lamb=None, ftol=1e-8,
 
         # as long as the step is unsuccessful
         ninner = 0
-        while cost >= cost_old and ninner < ninner_max:
-            # determine rank of jacobian/estimate non-zero singular values(rank
-            # estimate)
-            tol = max(J.shape)*np.spacing(max(s))
-            r = np.sum(s > tol)
+        # determine rank of jacobian/estimate non-zero singular values(rank
+        # estimate)
+        tol = max(J.shape)*np.spacing(max(s))
+        r = np.sum(s > tol)
 
-            # step with direction from err
-            s = s[:r]
-            sr = s.copy()  # only saved to calculate cond. number later
+        # step with direction from err
+        s = s[:r]
+        sr = s.copy()  # only saved to calculate cond. number later
+        while cost >= cost_old and ninner < ninner_max:
             s /= s**2 + lamb**2
             ds = -np.linalg.multi_dot((err_old, U[:,:r] * s, Vt[:r]))
             ds /= scaling
@@ -294,6 +294,7 @@ def lm(fun, x0, jac, system, weight, info, nmax=50, lamb=None, ftol=1e-8,
                 # step unsuccessful, increase lambda, ie. Lean more towards
                 # gradient descent method(converges in larger range)
                 lamb *= np.sqrt(10)
+                s = sr.copy()
             else:
                 # Lean more towards Gauss-Newton algorithm(converges faster)
                 lamb /= 2

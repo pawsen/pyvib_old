@@ -44,7 +44,7 @@ class StateSpace(object):
         N = len(system)
         if N == 4:
             self.A, self.B, self.C, self.D = system  #A, B, C, D
-            self.n, self.m, self.p = _get_shape()
+            self.n, self.m, self.p = self._get_shape()
 
         dt = kwargs.pop('dt', None)
         self.dt = dt
@@ -89,31 +89,26 @@ class StateSpace(object):
             subspace(self.G, self.covG, self.signal.freq/self.signal.fs, n, r)
 
         self.n, self.m, self.p = self._get_shape()
-
-    def optimize(self, method=None, weight=True, info=True, copy=False):
-        """Optimize the estimated state space matrices"""
-
         # Number of parameters
         n, m, p = self.n, self.m, self.p
         self.npar = n**2 + n*m + p*n + p*m
 
-        # initial guess
-        x0 = np.empty(self.npar)
-        x0[:n**2] = self.A.ravel()
-        x0[n**2 + np.r_[:n*m]] = self.B.ravel()
-        x0[n**2 + n*m + np.r_[:n*p]] = self.C.ravel()
-        x0[n**2 + n*m + n*p:] = self.D.ravel()
+
+    def optimize(self, method=None, weight=True, info=True, copy=False, lamb=None):
+        """Optimize the estimated state space matrices"""
 
         if weight is not None:
-            covGinvsq = np.zeros_like(self.covG)
+            covGinvsq = np.empty_like(self.covG)
             for f in range(self.signal.F):
                 covGinvsq[f] = matrix_square_inv(self.covG[f])
             self.weight = covGinvsq
+        else:
+            self.weight = weight
 
+        x0 = self.flatten_ss()
         if method is None:
             res = lm(costfnc, x0, jacobian, system=self, weight=self.weight,
-                     info=info)
-
+                     info=info, lamb=lamb)
         else:
             res = least_squares(costfnc,x0,jacobian, method='lm',
                                 x_scale='jac',
@@ -131,17 +126,24 @@ class StateSpace(object):
         self.A, self.B, self.C, self.D = extract_ss(res['x'], self)
         self.res = res
 
-    def cost(self):
+    def cost(self, weight=None):
+
+        if weight is True:
+            weight = self.weight
+
+        x0 = self.flatten_ss()
+        err = costfnc(x0, self, weight=weight)
+        # TODO maybe divide by 2 to match scipy's implementation of minpack
+        self.cost = np.dot(err, err)
+        return self.cost
+
+    def flatten_ss(self):
+        """Returns the state space as flattened array"""
+
         n, m, p = self.n, self.m, self.p
-        self.npar = n**2 + n*m + p*n + p*m
         x0 = np.empty(self.npar)
         x0[:n**2] = self.A.ravel()
         x0[n**2 + np.r_[:n*m]] = self.B.ravel()
         x0[n**2 + n*m + np.r_[:n*p]] = self.C.ravel()
         x0[n**2 + n*m + n*p:] = self.D.ravel()
-        err = costfnc(x0, self, weight=self.weight)
-        # divide by 2 to match scipy's implementation of minpack
-        self.cost = np.dot(err, err)/2
-
-        return self.cost
-
+        return x0

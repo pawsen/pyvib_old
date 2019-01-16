@@ -6,11 +6,11 @@ dnlsys -- a collection of classes and functions for modeling nonlinear
 linear state space systems.
 """
 
-from .pnlss import (combinations, select_active, transient_indices_periodic,
+from pyvib.pnlss import (combinations, select_active, transient_indices_periodic,
                     remove_transient_indices_periodic)
-from .common import (matrix_square_inv, lm, mmul_weight)
-from .statespace import StateSpace as linss
-from .statespace import Signal
+from pyvib.common import (matrix_square_inv, lm, mmul_weight)
+from pyvib.statespace import StateSpace as linss
+from pyvib.statespace import Signal
 import numpy as np
 from scipy.interpolate import interp1d
 from numpy.fft import fft
@@ -48,6 +48,8 @@ class StateSpace(object):
             self.xactive = \
                 select_active(self.xstructure,self.n,self.m,self.n,self.xdegree)
             self.E = np.zeros((self.n, self.n_nx))
+            # Compute the derivatives of the polynomials zeta and e
+            self.xd_powers, self.xd_coeff = poly_deriv(self.xpowers)
         elif eq in ('output', 'y'):
             self.ydegree = np.asarray(degree)
             self.ystructure = structure
@@ -56,6 +58,7 @@ class StateSpace(object):
             self.yactive = \
                 select_active(self.ystructure,self.n,self.m,self.p,self.ydegree)
             self.F = np.zeros((self.p, self.n_ny))
+            self.yd_powers, self.yd_coeff = poly_deriv(self.ypowers)
 
     def transient(self, T1=None, T2=None):
         """Transient handling. t1: periodic, t2: aperiodic
@@ -74,7 +77,6 @@ class StateSpace(object):
 
         # without_T2 = remove_transient_indices_nonperiodic(system.T2,N,system.p)
         self.without_T2 = np.s_[:ns]
-
 
     def simulate(self, u, t=None, x0=None, T1=None, T2=None):
         """Calculate the output and the states of a nonlinear state-space model with
@@ -105,7 +107,68 @@ class StateSpace(object):
         self.y_mod = y
         return t, y, x
 
+    def optimize(self, method=None, weight=True, info=True, copy=False, lamb=None):
+        """Optimize the estimated the nonlinear state space matrices"""
 
+        self.freq_weight = True
+        if weight is True:
+            covYinvsq = np.empty_like(self.covY)
+            for f in range(self.signal.F):
+                covYinvsq[f] = matrix_square_inv(self.covG[f])
+            self.weight = covYinvsq
+        else:
+            self.weight = weight
+
+        x0 = self.flatten_ss()
+        if method is None:
+            res = lm(costfnc, x0, jacobian, system=self, weight=self.weight,
+                     info=info, lamb=lamb)
+        else:
+            res = least_squares(costfnc,x0,jacobian, method='lm',
+                                x_scale='jac',
+                                kwargs={'system':self,'weight':self.weight})
+
+        if copy:
+            # restore state space matrices as they are
+            self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(x0, self)
+
+            nmodel = deepcopy(self)
+            nmodel.A, nmodel.B, nmodel.C, nmodel.D, model.E, model.F = \
+                extract_ss(res['x'], nmodel)
+            nmodel.res = res
+            return nmodel
+
+        self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(res['x'], self)
+        self.res = res
+
+    def cost(self, weight=None):
+
+        if weight is True:
+            weight = self.weight
+
+        x0 = self.flatten_ss()
+        err = costfnc(x0, self, weight=weight)
+        # TODO maybe divide by 2 to match scipy's implementation of minpack
+        self.cost = np.dot(err, err)
+        return self.cost
+
+    def flatten_ss(self):
+        """Returns the state space as flattened array"""
+
+        # samples per period
+        n, m, p = self.n, self.m, self.p
+        n_nx, n_ny = self.n_nx, self.n_ny
+        self.npar = n**2 + n*m + p*n + p*m + n*n_nx + p*n_ny
+
+        # initial guess
+        x0 = np.empty(self.npar)
+        x0[:n**2] = self.A.ravel()
+        x0[n**2 + np.r_[:n*m]] = self.B.ravel()
+        x0[n**2 + n*m + np.r_[:n*p]] = self.C.ravel()
+        x0[n*(p+m+n) + np.r_[:p*m]] = self.D.ravel()
+        x0[n*(p+m+n)+p*m + np.r_[:n*n_nx]] = self.E.ravel()
+        x0[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]] = self.F.ravel()
+        return x0
 
 # https://github.com/scipy/scipy/blob/master/scipy/signal/ltisys.py
 def dnlsim(system, u, t=None, x0=None):
@@ -494,6 +557,11 @@ def costfnc(x0, system, weight=None):
     without_T2 = system.without_T2
 
     # update the state space matrices from x0
+    # TODO find a way to avoid explicitly updating the state space model.
+    # It is not the expected behavior that calculating the cost should change
+    # the model! Right now it is done because simulating is using the systems
+    # ss matrices
+
     #A, B, C, D, E, F = extract_ss(x0, system)
     system.setss(*extract_ss(x0, system))
     # Compute the (transient-free) modeled output and the corresponding states
@@ -501,7 +569,7 @@ def costfnc(x0, system, weight=None):
 
     # Compute the (weighted) error signal without transient
     err = system.y_mod[without_T2] - system.signal.ym[without_T2]
-    if freq_weight:
+    if weight is not None and system.freq_weight:
         err = err.reshape((npp,R,p),order='F').swapaxes(1,2)
         # Select only the positive half of the spectrum
         err = fft(err, axis=0)[:nfd]
@@ -509,92 +577,12 @@ def costfnc(x0, system, weight=None):
         #cost = np.vdot(err, err).real
         err = err.swapaxes(1,2).ravel(order='F')
         err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
-    else:
+    elif weight is not None:
         err_w = err * weight[without_T2]
         #cost = np.dot(err,err)
+    else:
+        # no weighting
+        return err
 
     return err_w
 
-
-data = sio.loadmat('data.mat')
-
-Y_data = data['Y'].transpose((1,2,3,0))
-U_data = data['U'].transpose((1,2,3,0))
-
-G_data = data['G']
-covGML_data = data['covGML']
-covGn_data = data['covGn']
-covY_data = data['covY'].transpose((2,0,1))
-
-lines = data['lines'].squeeze() - 1 # 0-based!
-non_exc_even = data['non_exc_even'].squeeze() - 1
-non_exc_odd = data['non_exc_odd'].squeeze() - 1
-A_data = data['A']
-B_data = data['B']
-C_data = data['C']
-D_data = data['D']
-W_data = data['W']
-
-y = data['y_orig']
-u = data['u_orig']
-
-n = 2
-r = 3
-fs = 1
-
-sig = Signal(u,y)
-sig.lines(lines)
-linmodel = linss()
-linmodel.bla(sig)
-linmodel.estimate(n,r)
-linmodel.optimize(copy=False)
-sig.average()
-
-model = StateSpace(A_data, B_data, C_data, D_data)
-model.signal = linmodel.signal
-system = model
-self = model
-model.nlterms('x', [2,3], 'full')
-model.nlterms('y', [2,3], 'full')
-
-# Compute the derivatives of the polynomials zeta and e
-system.xd_powers, system.xd_coeff = poly_deriv(system.xpowers)
-system.yd_powers, system.yd_coeff = poly_deriv(system.ypowers)
-
-# samples per period
-npp, F = self.signal.npp, self.signal.F
-R, P = self.signal.R, self.signal.P
-n, m, p = self.n, self.m, self.p
-n_nx, n_ny = self.n_nx, self.n_ny
-
-# transient settings
-# Add one period before the start of each realization
-nt = npp
-T1 = np.r_[nt, np.r_[0:(R-1)*npp+1:npp]]
-T2 = 0
-model.transient(T1,T2)
-
-
-covYinvsq = np.empty_like(covY_data)
-for f in range(F):
-    covYinvsq[f] = matrix_square_inv(covY_data[f])
-
-weight = covYinvsq
-weight = W_data.T
-freq_weight = True
-
-npar = n**2 + n*m + p*n + p*m + n*n_nx + p*n_ny
-# initial guess
-x0 = np.empty(npar)
-x0[:n**2] = self.A.ravel()
-x0[n**2 + np.r_[:n*m]] = self.B.ravel()
-x0[n**2 + n*m + np.r_[:n*p]] = self.C.ravel()
-x0[n*(p+m+n) + np.r_[:p*m]] = self.D.ravel()
-x0[n*(p+m+n)+p*m + np.r_[:n*n_nx]] = self.E.ravel()
-x0[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]] = self.F.ravel()
-
-res = lm(costfnc, x0, jacobian, system=self, weight=weight,
-         info=True)
-# from scipy.optimize import least_squares
-# res = least_squares(costfnc,x0,jacobian, method='lm', x_scale='jac', verbose=1,
-#                     kwargs={'system':self,'weight':weight})
