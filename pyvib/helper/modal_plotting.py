@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from ..common import db
+from ..subspace import ss2frf
 
 class scaler():
     def __init__(self, scale):
@@ -125,18 +126,24 @@ def plot_modes(idof, sr, sca=1, fig=None, ax=None, **kwargs):
 
     return fig, ax
 
-def plot_frf(freq, H, dofs=0, sca=1, fig=None, ax=None, *args, **kwargs):
+def plot_frf(freq, G, p=0, m=0, sca=1, fig=None, ax=None, *args, **kwargs):
+    """FRF plot of specified input/output from frequency response matrix
+
+    Parameters
+    ----------
+    G : ndarray(F,p,m)
+        frequency response matrix (FRM)
+    freq : ndarray(F)
+        vector of frequencies at which the FRM is given (in Hz)
+    """
     fig, ax = fig_ax_getter(fig, ax)
 
-    # If h is only calculated for one dof:
-    if H.shape[0] == 1:
-        dofs = [0]
+    m = np.atleast_1d(m)
+    p = np.atleast_1d(p)
 
-    if not isinstance(dofs, list):
-        dofs = [dofs]
-
-    for dof in dofs:
-        ax.plot(freq*sca, db(np.abs(H[dof])), *args, **kwargs)
+    for i in p:
+        for j in m:
+            ax.plot(freq*sca, db(np.abs(G[:,i,j])), *args, **kwargs)
 
     if ax is None:
         ax.set_title('Nonparametric linear FRF')
@@ -145,11 +152,75 @@ def plot_frf(freq, H, dofs=0, sca=1, fig=None, ax=None, *args, **kwargs):
     else:
         xstr = '(rad/s)'
     ax.set_xlabel('Frequency ' + xstr)
+    ax.set_title(r'$G_{{{}{}}}$'.format(i,j))
 
     # For linear scale: 'Amplitude (m/N)'
     ax.set_ylabel('Amplitude (dB)')
     return fig, ax
 
+def plot_subspace_info(infodict, fig=None, ax=None, *args, **kwargs):
+    """Plot summary of subspace identification"""
+    fig, ax = fig_ax_getter(fig, ax)
+    for k,v in infodict.items():
+        r = np.fromiter(v.keys(), dtype=int)
+        cost_sub = np.asarray([ x['cost_sub'] for x in v.values() ])
+        stable_sub = np.asarray([ x['stable_sub'] for x in v.values() ])
+        cost = np.asarray([ x['cost'] for x in v.values() ])
+        stable = np.asarray([ x['stable'] for x in v.values() ])
+
+        color = next(ax._get_lines.prop_cycler)['color']
+        ax.plot(r, cost_sub, '.', color=color, label=f"n: {k}")
+        ax.plot(r[~stable_sub], cost[~stable_sub], 'o', mfc='none', color='gray')
+        ax.plot(r, cost, '*', mfc='none', color=color)
+        ax.plot(r[~stable], cost[~stable], 'o', mfc='none', color='gray')
+
+    ax.set_title('Cost functions of\n'
+                 'subspace models (dots, stablilized models encircled in gray)\n'
+                 'LM-optimized models (stars, unstable models encircled in gray)')
+    ax.set_xlabel('r')
+    ax.set_ylabel(r'$V_{WLS}$')
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.legend(loc='center right')
+
+    return fig, ax
+
+def plot_subspace_model(models, G, covG, freq, fs, *args, **kwargs):
+    """Plot identified subspace models"""
+
+    dictget = lambda d, *k: [d[i] for i in k]
+    F, m, p = G.shape
+
+    tmp = np.empty((F,m*p), dtype=complex)
+    for i in range(m*p):
+        tmp[:,i] = covG[:,i,i]
+    tmp2 = np.empty_like(G, dtype=complex)
+    for f in range(F):
+        tmp2[f] = tmp[f].reshape((p,m))
+    stdG = np.sqrt(tmp2)
+
+    #len(models)
+    fig_vec = []
+    ax_vec = []
+    for k, model in models.items():
+        fig, ax = plt.subplots(nrows=1, ncols=1)
+        A, B, C, D = dictget(model, 'A', 'B', 'C', 'D')
+        Gss = ss2frf(A,B,C,D,freq/fs)
+
+        lsopt = {'ls':'none', 'marker':'.', 'mfc':'none'}
+        figopt = {'fig':fig, 'ax':ax}
+        # The CN notation allows to get the Nth color of the color cycle
+        plot_frf(freq, G, **figopt, **lsopt, c='C1', label='BLA (non-par)')
+        plot_frf(freq, Gss, **figopt, ls='-', c='C0', label='BLA (par)')
+        plot_frf(freq, G-Gss, **figopt, **lsopt, c='r', label='error')
+        plot_frf(freq, stdG, **figopt, ls='--', c='k', label='stdG')
+
+        ax.legend(loc='upper right')
+        tstr = ax.get_title() + f" | n={k}"
+        ax.set_title(tstr)
+        fig_vec.append(fig)
+        ax_vec.append(ax)
+
+    return fig_vec, ax_vec
 
 def plot_svg(Sn, fig=None, ax=None, **kwargs):
     """Plot singular values of Sn. Alternative to stabilization diagram"""

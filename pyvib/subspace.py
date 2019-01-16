@@ -393,7 +393,7 @@ def jacobian(x0, system, weight=None):
 
     return jac
 
-def costfnc(x0, system, weight=None):
+def costfcn(x0, system, weight=None):
     """Compute the vector of residuals such that the function to mimimize is
 
     res = ∑ₖ e[k]ᴴ*e[k], where the error is given by

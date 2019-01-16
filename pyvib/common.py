@@ -252,6 +252,9 @@ def lm(fun, x0, jac, system, weight, info, nmax=50, lamb=None, ftol=1e-8,
     cost_vec = np.empty(nmax)
     x0_mat = np.empty((nmax, len(x0)))
 
+    if info:
+        print(f"{'i':3} | {'inner':5} | {'cost':12} | {'cond':12}")
+
     stop = False
     while niter < nmax and not stop:
 
@@ -312,8 +315,7 @@ def lm(fun, x0, jac, system, weight, info, nmax=50, lamb=None, ftol=1e-8,
 
         if info:
             jac_cond = sr[0]/sr[-1]
-            print('i: {:3d}\tinner: {:2d}\tcost: {:.3f}\tcond: {:.3f}'.
-                  format(niter, ninner, cost/2/nfd/R/p, jac_cond))
+            print(f"{niter:3d} | {ninner:5d} | {cost/2/nfd/R/p:12.3f} | {jac_cond:12.3f}")
 
         if cost < cost_old:
             cost_old = cost
@@ -328,7 +330,7 @@ def lm(fun, x0, jac, system, weight, info, nmax=50, lamb=None, ftol=1e-8,
     if niter == nmax:
         message = 'max iter reached'
     if info:
-        print('Terminated: {:s}'.format(message))
+        print(f"Terminated: {message:s}")
 
     res = {'x':x0, 'cost': cost, 'err':err, 'niter': niter, 'x_mat': x0_mat,
            'cost_vec':cost_vec, 'message':message}
