@@ -191,6 +191,48 @@ def bla_periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
 
     return G, covGML, covGn
 
+def covariance(y):
+    """Compute covariance matrix output spectra due to noise from signal y
+
+    The variation is calculated along the periods and averaged over the
+    realizations.
+
+    Parameters
+    ----------
+    y : ndarray(npp,p,R,P)
+        signal where npp is the number of points per period, p is the number of
+        outputs, R is the number of  realizations, and P is the number of
+        periods
+
+    Returns
+    -------
+    covY : ndarray(nfd,p,p)
+        covariance matrix of the output(s).
+    """
+
+    # Number of samples, outputs, realizations, and periods
+    npp,p,R,P = y.shape
+    Y = fft(y, axis=0)
+    # Number of bins in positive half of the spectrum
+    nfd = int(npp/2)
+    Y = Y[:nfd]
+    # average over periods
+    Ymean = Y.mean(3)
+    # Variations over periods
+    NY = Y - Ymean[...,None]  # (npp,p,R,P)
+    # TODO fix NY
+    #NY = permute(NY,[2 3 4 1]); % p x R x P x NFD
+    covY = np.empty((p,p,R,nfd), dtype=complex)
+    for f in range(nfd):
+        for r in range(R):
+            tmpYY = NY[f,:,r,:].reshape(-1, P)
+            covY[...,r,f] = np.einsum('ij,kj->ik',tmpYY,tmpYY.conj()) / (P-1)/P
+
+    # average over all realizations
+    covY = covY.mean(2)
+    covY = covY.T
+    return covY
+
 def nonperiodic(u, y, N, fs, fmin, fmax):
     """Calculate FRF for a nonperiodic signal.
 

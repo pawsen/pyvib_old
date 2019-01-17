@@ -2,13 +2,16 @@
 # -*- coding: utf-8 -*-
 
 from .frf import bla_periodic
-from .subspace import (subspace, costfcn, jacobian, extract_ss, is_stable)
+from .subspace import (subspace, costfcn, jacobian, extract_ss, is_stable,
+                       extract_model)
 from .common import (matrix_square_inv, lm)
 from .helper.modal_plotting import plot_subspace_info, plot_subspace_model
+from .pnlss import transient_indices_periodic, remove_transient_indices_periodic
 from copy import deepcopy
 import numpy as np
 from numpy.fft import fft
 from scipy.optimize import least_squares
+from scipy.signal import dlsim
 
 class Signal(object):
     def __init__(self, u, y, fs=1):
@@ -23,15 +26,30 @@ class Signal(object):
         self.F = len(lines)
         self.freq = lines/self.npp  # Excited frequencies (normalized)
 
-    def average(self):
+    def average(self, u=None, y=None):
         """Average over periods and flatten over realizations"""
-        um = self.u.mean(axis=-1)  # (npp,m,R)
-        ym = self.y.mean(axis=-1)
-        self.um = um.swapaxes(1,2).reshape(-1,self.m, order='F')  # (npp*R,m)
-        self.ym = ym.swapaxes(1,2).reshape(-1,self.p, order='F')  # (npp*R,p)
 
-        # number of samples after average over periods
-        self.ns = um.shape[0]  # ns = npp*R
+        saveu = False
+        savey = False
+        if u is None:
+            u = self.u
+            saveu = True
+        if y is None:
+            y = self.y
+            savey = True
+        um = u.mean(axis=-1)  # (npp,m,R)
+        ym = y.mean(axis=-1)
+        um = um.swapaxes(1,2).reshape(-1,self.m, order='F')  # (npp*R,m)
+        ym = ym.swapaxes(1,2).reshape(-1,self.p, order='F')  # (npp*R,p)
+
+        if saveu:
+            self.um = um
+            # number of samples after average over periods
+            self.mns = um.shape[0]  # mns = npp*R
+        if savey:
+            self.ym = ym
+
+        return um, ym
 
 
 class StateSpace(object):
@@ -65,6 +83,52 @@ class StateSpace(object):
     def _get_shape(self):
         # n, m, p
         return self.A.shape[0], self.B.shape[1], self.C.shape[0]
+
+    def transient(self, T1=None, T2=None):
+        """Transient handling. t1: periodic, t2: aperiodic
+        Get transient index. Only needed to run once
+        """
+
+        self.T1 = T1
+        self.T2 = T2
+        sig = self.signal
+        ns = sig.R * sig.npp
+        # Extract the transient part of the input
+        self.idx_trans = transient_indices_periodic(T1, ns)
+        self.idx_remtrans = remove_transient_indices_periodic(T1, ns, sig.p)
+        self.without_T2 = np.s_[:ns]
+
+    def simulate(self, u, t=None, x0=None, T1=None, T2=None):
+        """Calculate the output and the states of a nonlinear state-space model with
+        transient handling.
+
+        """
+        # Number of samples
+        ns = u.shape[0]
+        if T1 is None:
+            T1 = self.T1
+            T2 = self.T2
+            if T1 is not None:
+                idx = self.idx_trans
+        else:
+            idx = transient_indices_periodic(T1, ns)
+
+        if T1 is not None:
+            # Prepend transient samples to the input
+            u = u[idx]
+
+        dt = 1/self.signal.fs
+        system = (self.A, self.B, self.C, self.D, dt)
+        t, y, x = dlsim(system, u, t, x0)
+
+        if T1 is not None:
+            # remove transient samples. p=1 is correct. TODO why?
+            idx = remove_transient_indices_periodic(T1, ns, p=1)
+            x = x[idx]
+            y = y[idx]
+            t = t[idx]
+
+        return t, y, x
 
     def weightfcn(self):
         covGinvsq = np.empty_like(self.covG)
@@ -221,28 +285,28 @@ class StateSpace(object):
             self.infodict = infodict
         return models, infodict
 
-    def plot_info(self):
+    def plot_info(self, fig=None, ax=None):
         """Plot summary of subspace identification"""
-        return plot_subspace_info(self.infodict)
+        return plot_subspace_info(self.infodict, fig, ax)
 
     def plot_models(self):
         """Plot identified subspace models"""
         return plot_subspace_model(self.models, self.G, self.covG,
                                    self.signal.freq, self.signal.fs)
 
-def extract(models, y, u, t=None, x0=None):
-    """extract the best model using validation data"""
+    def extract_model(self, y, u, t=None, x0=None):
+        """extract the best model using validation data"""
 
-    dictget = lambda d, *k: [d[i] for i in k]
-    err_old = np.inf
-    for k, model in models.items():
+        dt = 1/self.signal.fs
+        model, err_vec = extract_model(self.models, y, u, dt, t, x0)
 
-        A, B, C, D = dictget(model, 'A', 'B', 'C', 'D')
-        system = (A, B, C, D, dt)
-        tout, yout, xout = dlsim(system, u, t, x0)
-        err_rms = np.sqrt(np.mean((y - yout)**2))
-        if err_rms < err_old:
-            n = k
-            err_old = err_rms
+        dictget = lambda d, *k: [d[i] for i in k]
+        self.A, self.B, self.C, self.D, self.r, self.stable = \
+            dictget(model, 'A', 'B', 'C', 'D', 'r', 'stable')
 
-    return models[n]
+        self.n, self.m, self.p = self._get_shape()
+        # Number of parameters
+        n, m, p = self.n, self.m, self.p
+        self.npar = n**2 + n*m + p*n + p*m
+
+        return err_vec

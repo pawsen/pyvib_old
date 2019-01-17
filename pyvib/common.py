@@ -207,7 +207,7 @@ def normalize_columns(mat):
     mat /= scaling
     return mat, scaling
 
-def lm(fun, x0, jac, system, weight, info, nmax=50, lamb=None, ftol=1e-8,
+def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
        xtol=1e-8, gtol=1e-8, args=(), kwargs={}):
     """Solve a nonlinear least-squares problem using levenberg marquardt
        algorithm

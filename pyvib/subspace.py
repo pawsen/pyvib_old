@@ -4,6 +4,7 @@
 from .common import matrix_square_inv, mmul_weight, normalize_columns
 import numpy as np
 from scipy.linalg import (lstsq, qr, svd, logm, inv, norm, eigvals)
+from scipy.signal import dlsim
 from numpy import kron
 from numpy.linalg import solve, pinv
 
@@ -424,3 +425,22 @@ def extract_ss(x0, system):
     D = x0.flat[n*(p+m+n):].reshape((p,m))
 
     return A, B, C, D
+
+def extract_model(models, y, u, dt, t=None, x0=None):
+    """extract the best model using validation data"""
+
+    dictget = lambda d, *k: [d[i] for i in k]
+    err_old = np.inf
+    err_vec = np.empty(len(models))
+    for i, (k, model) in enumerate(models.items()):
+
+        A, B, C, D = dictget(model, 'A', 'B', 'C', 'D')
+        system = (A, B, C, D, dt)
+        tout, yout, xout = dlsim(system, u, t, x0)
+        err_rms = np.sqrt(np.mean((y - yout)**2))
+        err_vec[i] = err_rms
+        if err_rms < err_old:
+            n = k
+            err_old = err_rms
+
+    return models[n], err_vec

@@ -147,6 +147,7 @@ def multisine(f1, f2, fs, N=1024, P=1, M=1, lines='full',rms=1, ngroup=4):
 
     valid_lines = {'full', 'odd', 'oddrandom'}
     if isinstance(lines, str):
+        lines = lines.lower()
         if lines not in valid_lines:
             raise ValueError('Invalid line-type {}'.format(repr(lines)))
         else:

@@ -81,30 +81,35 @@ class PNLSS(object):
 
         """
 
+        # Number of samples
+        ns = u.shape[0]
         if T1 is None:
             T1 = self.T1
             T2 = self.T2
+            if T1 is not None:
+                idx = self.idx_trans
+        else:
+            idx = transient_indices_periodic(T1, ns)
 
-        # Number of samples
-        ns = u.shape[0]
         if T1 is not None:
             # Prepend transient samples to the input
-            idx = self.idx_trans
             u = u[idx]
 
         t, y, x = dnlsim(self, u, t, x0)
 
         if T1 is not None:
             # remove transient samples. p=1 is correct. TODO why?
-            idx = remove_transient_indices_periodic(self.T1, ns, p=1)
+            idx = remove_transient_indices_periodic(T1, ns, p=1)
             x = x[idx]
             y = y[idx]
+            t = t[idx]
 
         self.x_mod = x
         self.y_mod = y
         return t, y, x
 
-    def optimize(self, method=None, weight=True, info=True, copy=False, lamb=None):
+    def optimize(self, method=None, weight=True, info=True, nmax=50, lamb=None,
+                 ftol=1e-8, xtol=1e-8, gtol=1e-8, copy=False):
         """Optimize the estimated the nonlinear state space matrices"""
 
         self.freq_weight = True
@@ -119,7 +124,8 @@ class PNLSS(object):
         x0 = self.flatten_ss()
         if method is None:
             res = lm(costfnc, x0, jacobian, system=self, weight=self.weight,
-                     info=info, lamb=lamb)
+                     info=info, nmax=nmax, lamb=lamb, ftol=ftol, xtol=xtol,
+                     gtol=gtol)
         else:
             res = least_squares(costfnc,x0,jacobian, method='lm',
                                 x_scale='jac',
@@ -166,6 +172,35 @@ class PNLSS(object):
         x0[n*(p+m+n)+p*m + np.r_[:n*n_nx]] = self.E.ravel()
         x0[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]] = self.F.ravel()
         return x0
+
+    def extract_model(self, y, u, t=None, x0=None, T1=None, T2=None, copy=False):
+        """extract the best model using validation data"""
+
+        dt = 1/self.signal.fs
+        models = self.res['x_mat']
+        nmodels = models.shape[0]
+        ss0 = self.flatten_ss()
+        err_rms = np.empty(nmodels)
+        for i, ss in enumerate(models):
+            self.A, self.B, self.C, self.D, self.E, self.F = \
+                extract_ss(ss, self)
+            tout, yout, xout = self.simulate(u, t, x0, T1, T2)
+            err_rms[i] = np.sqrt(np.mean((y - yout)**2))
+
+        # best model on new data set
+        ss = models[np.argmin(err_rms)]
+        if copy:
+            # restore state space matrices to original
+            self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(ss0, self)
+
+            nmodel = deepcopy(self)
+            nmodel.A, nmodel.B, nmodel.C, nmodel.D, model.E, model.F = \
+                extract_ss(ss, nmodel)
+            nmodel.res = res
+            return nmodel, err_rms
+
+        self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(ss, self)
+        return err_rms
 
 
 def combinations(n, degrees):
