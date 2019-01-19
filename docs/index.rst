@@ -1,7 +1,7 @@
 .. currentmodule:: pyvib
 
 pyvib
-=================================
+=====
 
 Pyvib is a python program for analyzing nonlinear vibrations and estimating(and
 simulating) models from measured data.
@@ -34,10 +34,12 @@ See the `references`_ for description of the methods and the `credits`_.
 Usage
 -----
 
-The :doc:`user-guide` is the place to go to learn how to use the library and
-accomplish common tasks. The more in-depth :doc:`advanced-usage` guide is the place to go for lower-level tweaking.
+The :doc:`user-guide` provides a detailed description of the `pnlss example
+<https://github.com/pawsen/pyvib/tree/master/examples/pnlss/tutorial.py>`_, to
+show how pyvib works. See the `examples directory
+<https://github.com/pawsen/pyvib/tree/master/examples>`_ for additional examples.
 
-The :doc:`reference/index` documentation provides API-level documentation.
+The :doc:`modules/index` documentation provides API-level documentation.
 :doc:`contributing` shows how to contribute to the program or report bugs.
 
 
@@ -47,7 +49,7 @@ The :doc:`reference/index` documentation provides API-level documentation.
 
    install
    user-guide
-   reference/index
+   modules/index
    contributing
 
 
