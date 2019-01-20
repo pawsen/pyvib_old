@@ -169,10 +169,17 @@ class PNLSS(object):
     def flatten_ss(self):
         """Returns the state space as flattened array"""
 
+        # index of active elements
+        xact = self.xactive
+        yact = self.yactive
+        ne = len(xact)
+        nf = len(yact)
+
         # samples per period
         n, m, p = self.n, self.m, self.p
         n_nx, n_ny = self.n_nx, self.n_ny
         self.npar = n**2 + n*m + p*n + p*m + n*n_nx + p*n_ny
+        self.npar = n**2 + n*m + p*n + p*m + ne + nf
 
         # initial guess
         x0 = np.empty(self.npar)
@@ -180,8 +187,10 @@ class PNLSS(object):
         x0[n**2 + np.r_[:n*m]] = self.B.ravel()
         x0[n**2 + n*m + np.r_[:n*p]] = self.C.ravel()
         x0[n*(p+m+n) + np.r_[:p*m]] = self.D.ravel()
-        x0[n*(p+m+n)+p*m + np.r_[:n*n_nx]] = self.E.ravel()
-        x0[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]] = self.F.ravel()
+        x0[n*(p+m+n)+p*m + np.r_[:ne]] = self.E.flat[xact]
+        x0[n*(p+m+n)+p*m+ne + np.r_[:nf]] = self.F.flat[yact]
+        #x0[n*(p+m+n)+p*m + np.r_[:n*n_nx]] = self.E.ravel()
+        #x0[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]] = self.F.ravel()
         return x0
 
     def extract_model(self, y, u, t=None, x0=None, T1=None, T2=None, copy=False):
@@ -500,10 +509,12 @@ def select_active(structure,n,m,q,nx):
     stype = {'diagonal', 'inputsonly', 'statesonly', 'nocrossprod', 'affine',
              'affinefull', 'full', 'empty', 'nolastinput'}
     if structure == 'diagonal':
-        # Diagonal structure requires as many rows in E (or F) matrix as the number of states
+        # Diagonal structure requires as many rows in E (or F) matrix as the
+        # number of states
         if n != q:
             raise ValueError('Diagonal structure can only be used in state equation, not in output equation')
-        # Find terms that consist of one state, say x_j, raised to a nonzero power
+        # Find terms that consist of one state, say x_j, raised to a nonzero
+        # power
         active = np.where((np.sum(combis[:,:n] != 0,1) == 1) &
                           (np.sum(combis[:,n:] != 0,1) == 0))[0]
         # Select these terms only for row j in the E matrix
@@ -539,8 +550,8 @@ def select_active(structure,n,m,q,nx):
         # Select all terms in E/F matrix
         active = np.arange(q*n_nl)
     elif structure == 'empty':
-        # Select no terms
-        active = []
+        # Select no terms. We need to specify the array as int
+        active = np.array([], dtype=int)
     elif structure == 'nolastinput':
         if m > 0:
             # Find terms where last input is raised to power zero
@@ -554,7 +565,7 @@ def select_active(structure,n,m,q,nx):
             row_E = int(structure)
             active = row_E*n_nl + np.arange(n_nl)
         else:
-           raise ValueError('Wrong structure {}. Should be: {}'.
+            raise ValueError('Wrong structure {}. Should be: {}'.
                             format(structure, stype))
 
     if structure in \
@@ -847,7 +858,7 @@ def remove_transient_indices_periodic(T1,N,p):
 def dnlsim(system, u, t=None, x0=None):
     """Simulate output of a discrete-time nonlinear system.
 
-	Calculate the output and the states of a nonlinear state-space model.
+    Calculate the output and the states of a nonlinear state-space model.
         x(t+1) = A x(t) + B u(t) + E zeta(x(t),u(t))
         y(t)   = C x(t) + D u(t) + F eta(x(t),u(t))
     where zeta and eta are polynomials whose exponents are given in xpowers and
@@ -897,12 +908,12 @@ def dnlsim(system, u, t=None, x0=None):
     for i in range(0, out_samples - 1):
         # State equation x(t+1) = A*x(t) + B*u(t) + E*zeta(x(t),u(t))
         zeta_t = np.prod(np.outer(repmat_x, np.hstack((xout[i], u_dt[i])))
-                          **system.xpowers, axis=1)
+                         **system.xpowers, axis=1)
         xout[i+1, :] = (np.dot(system.A, xout[i, :]) +
                         np.dot(system.B, u_dt[i, :]) +
                         np.dot(system.E, zeta_t))
         # Output equation y(t) = C*x(t) + D*u(t) + F*eta(x(t),u(t))
-        eta_t = np.prod(np.outer(repmat_x, np.hstack((xout[i], u_dt[i])))
+        eta_t = np.prod(np.outer(repmat_y, np.hstack((xout[i], u_dt[i])))
                         **system.ypowers, axis=1)
         yout[i, :] = (np.dot(system.C, xout[i, :]) +
                       np.dot(system.D, u_dt[i, :]) +
@@ -910,7 +921,7 @@ def dnlsim(system, u, t=None, x0=None):
 
     # Last point
     eta_t = np.prod(np.outer(repmat_x, np.hstack((xout[-1], u_dt[-1])))
-                     **system.ypowers, axis=1)
+                    **system.ypowers, axis=1)
     yout[-1, :] = (np.dot(system.C, xout[-1, :]) +
                    np.dot(system.D, u_dt[-1, :]) +
                    np.dot(system.F, eta_t))
@@ -1082,7 +1093,7 @@ def nl_terms(contrib,power):
     out = np.empty((nterms,N))
     for i in range(nterms):
         # All samples of term i
-	    out[i] = np.prod(contrib**power.T[:,None,i], axis=0)
+        out[i] = np.prod(contrib**power.T[:,None,i], axis=0)
 
     return out
 
@@ -1141,6 +1152,8 @@ def jacobian(x0, system, weight=None):
     n, m, p = system.n, system.m, system.p
     R, p, npp = system.signal.R, system.signal.p, system.signal.npp
     nfd = npp//2
+    # total number of points
+    N = R*npp  # system.signal.um.shape[0]
     n_trans = system.n_trans
     without_T2 = system.without_T2
 
@@ -1164,10 +1177,12 @@ def jacobian(x0, system, weight=None):
     # calculate jacobians wrt state space matrices
     JC = np.kron(np.eye(p), system.x_mod)  # (p*N,p*n)
     JD = np.kron(np.eye(p), system.signal.um)  # (p*N, p*m)
-    JF = np.kron(np.eye(p), eta)  # Jacobian wrt all elements in F
-    JF = JF[:,system.yactive]  # all active elements in F. (p*NT,nactiveF)
-    JF = JF[system.idx_remtrans]  # (p*N,nactiveF)
-
+    if system.yactive.size:
+        JF = np.kron(np.eye(p), eta)  # Jacobian wrt all elements in F
+        JF = JF[:,system.yactive]  # all active elements in F. (p*NT,nactiveF)
+        JF = JF[system.idx_remtrans]  # (p*N,nactiveF)
+    else:
+        JF = np.array([]).reshape(p*N,0)
 
     # Add C to F∂ₓη for all samples at once
     FdwyIdx += system.C[...,None]
@@ -1182,9 +1197,12 @@ def jacobian(x0, system, weight=None):
     JB = JB.transpose((1,0,2)).reshape((p*n_trans, n*m))
     JB = JB[system.idx_remtrans]  # (p*N,n*m)
 
-    JE = element_jacobian(zeta, A_EdwxIdx, system.C, FdwyIdx, system.xactive)
-    JE = JE.transpose((1,0,2)).reshape((p*n_trans, len(system.xactive)))
-    JE = JE[system.idx_remtrans]  # (p*N,nactiveE)
+    if system.xactive.size:
+        JE = element_jacobian(zeta, A_EdwxIdx, system.C, FdwyIdx, system.xactive)
+        JE = JE.transpose((1,0,2)).reshape((p*n_trans, len(system.xactive)))
+        JE = JE[system.idx_remtrans]  # (p*N,nactiveE)
+    else:
+        JE = np.array([]).reshape(p*N,0)
 
     jac = np.hstack((JA, JB, JC, JD, JE, JF))[without_T2]
     npar = jac.shape[1]
@@ -1196,7 +1214,9 @@ def jacobian(x0, system, weight=None):
                                                        order='F')
     # select only the positive half of the spectrum
     jac = fft(jac, axis=0)[:nfd]
-    jac = mmul_weight(jac, weight)
+    # TODO should we test if weight is None or just do it in mmul_weight
+    if weight is not None:
+        jac = mmul_weight(jac, weight)
     # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
     jac = jac.reshape((-1,p,R,npar),
                       order='F').swapaxes(1,2).reshape((-1,npar), order='F')
@@ -1212,13 +1232,24 @@ def extract_ss(x0, system):
 
     n, m, p = system.n, system.m, system.p
     n_nx, n_ny = system.n_nx, system.n_ny
-    #ne = system.xactive # n*n_nx ?
+    # index of active elements
+    xact = system.xactive
+    yact = system.yactive
+    ne = len(xact)
+    nf = len(yact)
+
+    E = np.zeros((n, n_nx))
+    F = np.zeros((p, n_ny))
     A = x0.flat[:n**2].reshape((n,n))
     B = x0.flat[n**2 + np.r_[:n*m]].reshape((n,m))
     C = x0.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
     D = x0.flat[n*(p+m+n) + np.r_[:p*m]].reshape((p,m))
-    E = x0.flat[n*(p+m+n)+p*m + np.r_[:n*n_nx]].reshape((n,n_nx))
-    F = x0.flat[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]].reshape((p,n_ny))
+
+    E.flat[xact] = x0.flat[n*(p+m+n)+p*m + np.r_[:ne]]
+    F.flat[yact] = x0.flat[n*(p+m+n)+p*m+ne + np.r_[:nf]]
+
+    #E = x0.flat[n*(p+m+n)+p*m + np.r_[:n*n_nx]].reshape((n,n_nx))
+    #F = x0.flat[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]].reshape((p,n_ny))
 
     return A, B, C, D, E, F
 
@@ -1235,7 +1266,7 @@ def costfnc(x0, system, weight=None):
     # the model! Right now it is done because simulating is using the systems
     # ss matrices
 
-    #A, B, C, D, E, F = extract_ss(x0, system)
+    # A, B, C, D, E, F = extract_ss(x0, system)
     system.setss(*extract_ss(x0, system))
     # Compute the (transient-free) modeled output and the corresponding states
     t_mod, y_mod, x_mod = system.simulate(system.signal.um)
@@ -1251,10 +1282,12 @@ def costfnc(x0, system, weight=None):
         err = err.swapaxes(1,2).ravel(order='F')
         err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
     elif weight is not None:
+        # TODO time domain weighting. Does not work
         err_w = err * weight[without_T2]
         #cost = np.dot(err,err)
     else:
         # no weighting
-        return err
+        # TODO are we sure this is the right order?
+        return err.ravel(order='F')
 
     return err_w

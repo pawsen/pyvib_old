@@ -27,7 +27,7 @@ pip3 install --user sphinx_rtd_theme  # theme
 mkdir docs && cd docs
 sphinx-quickstart
 mkdir source
-sphinx-apidoc --separate -f -o source ../vib  # to generate API documentation stubs
+sphinx-apidoc --separate -f -o modules ../pyvib  # to generate API documentation stubs
 make html
 
 ** references between functions

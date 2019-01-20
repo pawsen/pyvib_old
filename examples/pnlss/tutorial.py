@@ -200,4 +200,4 @@ if savefig:
         fig = fig if isinstance(fig, list) else [fig]
         for i, f in enumerate(fig):
             f[0].tight_layout()
-            f[0].savefig(f"{k}{i}.pdf")
+            f[0].savefig(f"tutorial_{k}{i}.pdf")
