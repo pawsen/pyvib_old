@@ -1,7 +1,7 @@
 .. currentmodule:: pyvib
 
-pyvib
-=====
+Welcome to the pyvib documentation
+==================================
 
 Pyvib is a python program for analyzing nonlinear vibrations and estimating(and
 simulating) models from measured data.

@@ -7,7 +7,6 @@ from pyvib.pnlss import PNLSS
 from pyvib.common import db
 from pyvib.forcing import multisine
 from scipy.linalg import norm
-import scipy.io as sio
 import numpy as np
 import matplotlib.pyplot as plt
 
