@@ -165,6 +165,18 @@ def meanVar(Y, isnoise=False):
 
     return Ymean, W
 
+
+def weightfcn(cov):
+    """Calculate weight. For subspace is the square inverse of covG. For
+    pnlss it is the square inverse of covY"""
+
+    F = cov.shape[0]
+    covinvsq = np.empty_like(cov)
+    for f in range(F):
+        covinvsq[f] = matrix_square_inv(cov[f])
+    return covinvsq
+
+
 def matrix_square_inv(A):
     """Calculate the inverse of the matrix square root of `A`
     Calculate `X` such that XX = inv(A)
@@ -315,7 +327,8 @@ def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
 
         if info:
             jac_cond = sr[0]/sr[-1]
-            print(f"{niter:3d} | {ninner:5d} | {cost/2/nfd/R/p:12.3f} | {jac_cond:12.3f}")
+            # {cost/2/nfd/R/p:12.3f}
+            print(f"{niter:3d} | {ninner:5d} | {cost/p:12.3f} | {jac_cond:12.3f}")
 
         if cost < cost_old:
             cost_old = cost

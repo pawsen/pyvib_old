@@ -11,26 +11,27 @@ import scipy.io as sio
 import numpy as np
 import matplotlib.pyplot as plt
 
+## Generate data from true model ##
 # generate model to estimate
-A = np.array([[0.73915535, -0.62433133],[ 0.6247377,  0.7364469]])
+A = np.array([[0.73915535, -0.62433133],[0.6247377, 0.7364469]])
 B = np.array([[0.79287245], [-0.34515159]])
 C = np.array([[0.71165154, 0.34917771]])
 D = np.array([[0.04498052]])
-E = np.array([[ 1.88130305e-01, -2.70291900e-01,  9.12423046e-03,
-                -5.78088500e-01,  9.54588221e-03,  5.08576019e-04,
-                -1.33890850e+00, -2.02171960e+00, -4.05918956e-01,
-                -1.37744223e+00,  1.21206232e-01, -9.26349423e-02,
-                -5.38072197e-01,  2.34134460e-03,  4.94334690e-02,
-                -1.88329572e-02],
-              [-5.35196110e-01, -3.66250013e-01,  2.34622651e-02,
-               1.43228677e-01, -1.35959331e-02,  1.32052696e-02,
-               7.98717915e-01,  1.35344901e+00, -5.29440815e-02,
-               4.88513652e-01,  7.81285093e-01, -3.41019453e-01,
-               2.27692972e-01,  7.70150211e-02, -1.25046731e-02,
+E = np.array([[1.88130305e-01, -2.70291900e-01, 9.12423046e-03,
+               -5.78088500e-01, 9.54588221e-03, 5.08576019e-04,
+               -1.33890850e+00, -2.02171960e+00,-4.05918956e-01,
+               -1.37744223e+00, 1.21206232e-01,-9.26349423e-02,
+               -5.38072197e-01, 2.34134460e-03, 4.94334690e-02,
+               -1.88329572e-02],
+              [-5.35196110e-01, -3.66250013e-01, 2.34622651e-02,
+               1.43228677e-01, -1.35959331e-02, 1.32052696e-02,
+               7.98717915e-01, 1.35344901e+00, -5.29440815e-02,
+               4.88513652e-01, 7.81285093e-01, -3.41019453e-01,
+               2.27692972e-01, 7.70150211e-02, -1.25046731e-02,
                -1.62456154e-02]])
-F = np.array([[-0.00867042, -0.00636662,  0.00197873, -0.00090865, -0.00088879,
-               -0.02759694, -0.01817546, -0.10299409,  0.00648549,  0.08990175,
-               0.21129849,  0.00030216,  0.03299013,  0.02058325, -0.09202439,
+F = np.array([[-0.00867042, -0.00636662, 0.00197873, -0.00090865, -0.00088879,
+               -0.02759694, -0.01817546, -0.10299409, 0.00648549, 0.08990175,
+               0.21129849, 0.00030216, 0.03299013, 0.02058325, -0.09202439,
                -0.0380775]])
 
 true_model = PNLSS(A, B, C, D)
@@ -43,26 +44,40 @@ true_model.F = F
 RMSu = 0.05  # Root mean square value for the input signal
 npp = 1024   # Number of samples
 R = 4        # Number of phase realizations (one for validation and one for testing)
-P = 3;       # Number of periods
+P = 3        # Number of periods
 kind = 'Odd' # 'Full','Odd','SpecialOdd', or 'RandomOdd': kind of multisine
 f1 = 0       # first excited line
-f2 = round(0.9*npp/2) # Last excited line
+f2 = round(0.9*npp/2)  # Last excited line
 fs = npp
 m = 1        # inputs
 p = 1        # outputs
 
 # get predictable random numbers. https://dilbert.com/strip/2001-10-25
 np.random.seed(10)
-# u:(R,P*npp)
+# shape of u from multisine (R,P*npp)
 u, t, lines, freq = multisine(f1,f2, fs, npp, P, R, lines=kind, rms=RMSu)
 # if multiple input is required, this will copy u m times
 # u = np.repeat(u.ravel()[:,None], m, axis=1)  # (R*P*npp,m)
+lines = lines[:-1]
+
+data = sio.loadmat('data.mat')
+data2 = sio.loadmat('data2.mat')
+Y_data2 = data2['Y'].transpose((1,2,3,0))
+U_data2 = data2['U'].transpose((1,2,3,0))
+
+G_data2 = data2['G']
+covGML_data2 = data2['covGML']
+covGn_data2 = data2['covGn']
+covY_data2 = data2['covY'].transpose((2,0,1))
+u_output = data2['u_output']
+y_output = data2['y_output']
+W_data = data['W'].T
+u = u_output.transpose((2,1,0))
 
 # Transient: Add one period before the start of each realization. To generate
 # steady state data.
 T1 = np.r_[npp, np.r_[0:(R-1)*P*npp+1:P*npp]]
 _, y, _ = true_model.simulate(u.ravel(), T1=T1)
-
 u = u.reshape((R,P,npp)).transpose((2,0,1))  # (npp,R,P)
 u = np.repeat(u[:,None],m,axis=1)  # (npp,m,R,P)
 y = y.reshape((R,P,npp)).transpose((2,0,1))
@@ -78,6 +93,10 @@ y += noise
 # visualize periodicity
 # TODO
 
+## START of Identification ##
+# save figures to disk
+savefig = True
+
 # partitioning the data
 # test for performance testing and val for model selection
 utest = u[:,:,-1,-1]
@@ -91,8 +110,9 @@ y = y[...,:-2,:]
 # model orders and Subspace dimensioning parameter
 nvec = [2,3]
 maxr = 5
-# store figure handle for later saving the figures
-figs = {}
+
+y = data2['y']
+u = data2['u']
 
 # create signal object
 sig = Signal(u,y)
@@ -108,8 +128,6 @@ linmodel.bla(sig)
 # get best model on validation data
 models, infodict = linmodel.scan(nvec, maxr)
 l_errvec = linmodel.extract_model(yval, uval)
-figs['info'] = linmodel.plot_info()
-figs['fmodels'] = linmodel.plot_models()
 
 # estimate PNLSS
 # transient: Add one period before the start of each realization. Note that
@@ -121,10 +139,11 @@ model.signal = linmodel.signal
 model.nlterms('x', [2,3], 'full')
 model.nlterms('y', [2,3], 'full')
 model.transient(T1)
+#model.optimize(lamb=100, weight=W_data, nmax=60)
 model.optimize(lamb=100, weight=True, nmax=60)
 
 # compute linear and nonlinear model output on training data
-tlin, ylin, xlin = linmodel.simulate(um, T1)
+tlin, ylin, xlin = linmodel.simulate(um, T1=T1)
 _, ynlin, _ = model.simulate(um)
 
 # get best model on validation data. Change Transient settings, as there is
@@ -135,6 +154,10 @@ nl_errvec = model.extract_model(yval, uval, T1=sig.npp)
 _, yltest, _ = linmodel.simulate(utest, T1=sig.npp)
 _, ynltest, _ = model.simulate(utest, T1=sig.npp)
 
+## Plots ##
+# store figure handle for saving the figures later
+figs = {}
+
 # linear and nonlinear model error
 plt.figure()
 plt.plot(ym)
@@ -144,6 +167,7 @@ plt.xlabel('Time index')
 plt.ylabel('Output (errors)')
 plt.legend(('output','linear error','PNLSS error'))
 plt.title('Estimation results')
+figs['estimation_error'] = (plt.gcf(), plt.gca())
 
 # optimization path for PNLSS
 plt.figure()
@@ -153,6 +177,7 @@ plt.scatter(imin, db(nl_errvec[imin]))
 plt.xlabel('Successful iteration number')
 plt.ylabel('Validation error [dB]')
 plt.title('Selection of the best model on a separate data set')
+figs['pnlss_path'] = (plt.gcf(), plt.gca())
 
 # result on test data
 plt.figure()
@@ -166,8 +191,20 @@ plt.xlabel('Frequency (normalized)')
 plt.ylabel('Output (errors) (dB)')
 plt.legend(('Output','Linear error','PNLSS error'))
 plt.title('Test results')
+figs['test_data'] = (plt.gcf(), plt.gca())
 
+# subspace plots
+figs['subspace_optim'] = linmodel.plot_info()
+figs['subspace_models'] = linmodel.plot_models()
 
+if savefig:
+    for k, fig in figs.items():
+        fig = fig if isinstance(fig, list) else [fig]
+        for i, f in enumerate(fig):
+            f[0].tight_layout()
+            f[0].savefig(f"{k}{i}.pdf")
+
+# data2 = sio.loadmat('data2.mat')
 # data = sio.loadmat('data.mat')
 
 # Y_data = data['Y'].transpose((1,2,3,0))

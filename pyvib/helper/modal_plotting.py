@@ -199,8 +199,7 @@ def plot_subspace_model(models, G, covG, freq, fs, *args, **kwargs):
     stdG = np.sqrt(tmp2)
 
     #len(models)
-    fig_vec = []
-    ax_vec = []
+    figs = []
     for k, model in models.items():
         fig, ax = plt.subplots(nrows=1, ncols=1)
         A, B, C, D = dictget(model, 'A', 'B', 'C', 'D')
@@ -217,10 +216,9 @@ def plot_subspace_model(models, G, covG, freq, fs, *args, **kwargs):
         ax.legend(loc='upper right')
         tstr = ax.get_title() + f" | n={k}"
         ax.set_title(tstr)
-        fig_vec.append(fig)
-        ax_vec.append(ax)
+        figs.append((fig,ax))
 
-    return fig_vec, ax_vec
+    return figs
 
 def plot_svg(Sn, fig=None, ax=None, **kwargs):
     """Plot singular values of Sn. Alternative to stabilization diagram"""

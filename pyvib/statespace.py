@@ -4,7 +4,7 @@
 from .frf import bla_periodic
 from .subspace import (subspace, costfcn, jacobian, extract_ss, is_stable,
                        extract_model)
-from .common import (matrix_square_inv, lm)
+from .common import (lm, weightfcn)
 from .helper.modal_plotting import plot_subspace_info, plot_subspace_model
 from .pnlss import transient_indices_periodic, remove_transient_indices_periodic
 from copy import deepcopy
@@ -68,6 +68,7 @@ class StateSpace(object):
         self.dt = dt
 
         self.G, self.covG, self.covGn = [None]*3
+        self.T1, self.T1 = [None]*2
 
     def __repr__(self):
         """Return representation of the `StateSpace` system."""
@@ -130,20 +131,13 @@ class StateSpace(object):
 
         return t, y, x
 
-    def weightfcn(self):
-        covGinvsq = np.empty_like(self.covG)
-        for f in range(self.signal.F):
-            covGinvsq[f] = matrix_square_inv(self.covG[f])
-        self.weight = covGinvsq
-        return self.weight
-
     def costfcn(self, weight=None):
 
         if weight is True:
             try:
                 weight = self.weight
             except AttributeError:
-                weight = self.weightfcn()
+                weight = weightfcn(self.covG)
 
         x0 = self.flatten_ss()
         err = costfcn(x0, self, weight=weight)
@@ -174,8 +168,6 @@ class StateSpace(object):
         self.covG = covG.transpose((2,0,1))
         self.covGn = covGn.transpose((2,0,1))
 
-        self.covY = 1
-
     def estimate(self, n, r, copy=False):
         """Subspace estimation"""
 
@@ -196,14 +188,15 @@ class StateSpace(object):
         if copy:
             return A, B, C, D, z, stable
 
-    def optimize(self, method=None, weight=True, info=True, copy=False, lamb=None):
+    def optimize(self, method=None, weight=True, info=True, copy=False,
+                 lamb=None):
         """Optimize the estimated state space matrices"""
 
         if weight is True:
             try:
                 self.weight
             except AttributeError:
-                self.weightfcn()
+                self.weight = weightfcn(self.covG)
         else:
             self.weight = weight
 
@@ -239,7 +232,7 @@ class StateSpace(object):
             try:
                 weight = self.weight
             except AttributeError:
-                weight = self.weightfcn()
+                weight = weightfcn(self.covG)
 
         infodict = {}
         models = {}
@@ -267,13 +260,13 @@ class StateSpace(object):
                 stable_sub = self.stable
                 if optimize:
                     self.optimize(method=method, weight=weight,
-                                    info=info, copy=False, lamb=lamb)
+                                  info=info, copy=False, lamb=lamb)
 
                 cost = self.costfcn(weight=True)/F
                 stable = is_stable(self.A, domain='z')
                 infodict[n][r] = {'cost_sub': cost_sub, 'stable_sub': stable_sub,
                                   'cost': cost, 'stable': stable}
-                if cost < cost_old:
+                if cost < cost_old and stable:
                     # TODO instead of dict of dict, maybe use __slots__ method of
                     # class. Slots defines attributes names that are reserved for
                     # the use as attributes for the instances of the class.

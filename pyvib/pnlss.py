@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from .common import  mmul_weight
+from .common import (lm, mmul_weight, weightfcn)
+from .frf import covariance
 import numpy as np
 from numpy.fft import fft
 from scipy.special import comb
 from scipy.interpolate import interp1d
 
 #only for class PNLSS
-from .common import (matrix_square_inv, lm)
 from copy import deepcopy
 
 """
@@ -108,16 +108,24 @@ class PNLSS(object):
         self.y_mod = y
         return t, y, x
 
+    def weightfcn(self):
+        try:
+            self.covY
+        except AttributeError:
+            self.covY = covariance(self.signal.y)
+        return weightfcn(self.covY)
+
+
     def optimize(self, method=None, weight=True, info=True, nmax=50, lamb=None,
                  ftol=1e-8, xtol=1e-8, gtol=1e-8, copy=False):
         """Optimize the estimated the nonlinear state space matrices"""
 
         self.freq_weight = True
         if weight is True:
-            covYinvsq = np.empty_like(self.covY)
-            for f in range(self.signal.F):
-                covYinvsq[f] = matrix_square_inv(self.covG[f])
-            self.weight = covYinvsq
+            try:
+                self.weight
+            except AttributeError:
+                self.weight = self.weightfcn()
         else:
             self.weight = weight
 
@@ -147,7 +155,10 @@ class PNLSS(object):
     def cost(self, weight=None):
 
         if weight is True:
-            weight = self.weight
+            try:
+                weight = self.weight
+            except AttributeError:
+                weight = self.weightfcn()
 
         x0 = self.flatten_ss()
         err = costfnc(x0, self, weight=weight)
