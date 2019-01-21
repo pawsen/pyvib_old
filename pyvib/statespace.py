@@ -188,8 +188,8 @@ class StateSpace(object):
         if copy:
             return A, B, C, D, z, stable
 
-    def optimize(self, method=None, weight=True, info=True, copy=False,
-                 lamb=None):
+    def optimize(self, method=None, weight=True, info=True, nmax=50, lamb=None,
+                 ftol=1e-8, xtol=1e-8, gtol=1e-8, copy=False):
         """Optimize the estimated state space matrices"""
 
         if weight is True:
@@ -203,7 +203,8 @@ class StateSpace(object):
         x0 = self.flatten_ss()
         if method is None:
             res = lm(costfcn, x0, jacobian, system=self, weight=self.weight,
-                     info=info, lamb=lamb)
+                     info=info, nmax=nmax, lamb=lamb, ftol=ftol, xtol=xtol,
+                     gtol=gtol)
         else:
             res = least_squares(costfcn,x0,jacobian, method='lm',
                                 x_scale='jac',
@@ -222,7 +223,7 @@ class StateSpace(object):
         self.res = res
 
     def scan(self, nvec, maxr, optimize=True, method=None, weight=True,
-             lamb=None, info=True):
+             info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8, gtol=1e-8):
 
         F = self.signal.F
         nvec = np.atleast_1d(nvec)
@@ -255,12 +256,14 @@ class StateSpace(object):
                     print(f"{n:3d} | {r:3d}")
 
                 self.estimate(n, r)
+
                 # normalize with frequency lines to comply with matlab pnlss
                 cost_sub = self.costfcn(weight=True)/F
                 stable_sub = self.stable
                 if optimize:
-                    self.optimize(method=method, weight=weight,
-                                  info=info, copy=False, lamb=lamb)
+                    self.optimize(method=method, weight=weight, info=info,
+                                  nmax=nmax, lamb=lamb, ftol=ftol, xtol=xtol,
+                                  gtol=gtol, copy=False)
 
                 cost = self.costfcn(weight=True)/F
                 stable = is_stable(self.A, domain='z')

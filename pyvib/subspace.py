@@ -3,10 +3,13 @@
 
 from .common import matrix_square_inv, mmul_weight, normalize_columns
 import numpy as np
-from scipy.linalg import (lstsq, qr, svd, logm, inv, norm, eigvals)
+# qr(mode='r') returns r in economic form. This is not the case for scipy
+# svd and solve allows broadcasting when imported from numpy
+from numpy.linalg import qr, svd, solve
 from scipy.signal import dlsim
+from scipy.linalg import (lstsq, norm, eigvals)
 from numpy import kron
-from numpy.linalg import solve, pinv
+
 
 def is_stable(A, domain='z'):
     """Determines if a linear state-space model is stable from eigenvalues of `A`
@@ -23,17 +26,16 @@ def is_stable(A, domain='z'):
     bool
     """
 
-    if domain == 'z': # discrete-time
+    if domain == 'z':  # discrete-time
         # Unstable if at least one pole outside unit circle
         if any(abs(eigvals(A)) > 1):
             return False
-    elif domain == 's': # continuous-time
+    elif domain == 's':  # continuous-time
         # Unstable if at least one pole in right-half plane
         if any(np.real(eigvals(A)) > 0):
             return False
     else:
-        raise ValueError('{domain} wrong. Use "s" or "z"'.
-                         format(domain=repr(domain)))
+        raise ValueError(f"{domain} wrong. Use 's' or 'z'")
     return True
 
 def jacobian_freq(A,B,C,z):
@@ -82,7 +84,7 @@ def jacobian_freq(A,B,C,z):
 
     """
 
-    F = len(z) # Number of frequencies
+    F = len(z)          # Number of frequencies
     n = np.shape(A)[0]  # Number of states
     m = np.shape(B)[1]  # Number of inputs
     p = np.shape(C)[0]  # Number of outputs
@@ -126,7 +128,6 @@ def jacobian_freq(A,B,C,z):
         # fOne(p,n,sub2ind([p n],k,l))*temp3, and thus
         # JC(k,:,sub2ind([p n],k,l),f) = temp3(l,:)
         JC[f] = np.reshape(kron(temp3.T, Ip), (p,m,n*p))
-
 
     # JD does not change over iterations
     JD = np.zeros((p,m,p*m))
@@ -257,7 +258,7 @@ def subspace(G, covarG, freq, n, r):
                 CY += np.real(kron(np.outer(Wr[:,f], Wr[:,f].conj()),temp))
 
     # 1.g. QR decomposition of Z.T, Z=R.T*Q.T, to eliminate U from Z.
-    _, R = qr(Z.T, mode='economic')
+    R = qr(Z.T, mode='r')
     RT = R.T
     RT22 = RT[-r*p:,-r*p:]
 

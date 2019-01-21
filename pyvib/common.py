@@ -328,7 +328,8 @@ def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
         if info:
             jac_cond = sr[0]/sr[-1]
             # {cost/2/nfd/R/p:12.3f}
-            print(f"{niter:3d} | {ninner:5d} | {cost/p:12.3f} | {jac_cond:12.3f}")
+            print(f"{niter:3d} | {ninner:5d} | {cost/p:12.8g} | {jac_cond:12.3f}"
+                  f" | {lamb:6.3f}")
 
         if cost < cost_old:
             cost_old = cost

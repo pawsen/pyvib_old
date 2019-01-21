@@ -21,6 +21,8 @@ See http://www.nonlinearbenchmark.org/#BoucWen
 # save figures to disk
 savefig = True
 
+ABCDdata = sio.loadmat('bw_data.mat')
+
 data = sio.loadmat('BoucWenData.mat')
 # partitioning the data
 uval = data['uval_multisine'].T
@@ -35,11 +37,13 @@ fs = data['fs'].item()
 # model orders and Subspace dimensioning parameter
 nvec = [2,3,4]
 maxr = 7
-#nvec = [3]
-#maxr = 5
+nvec = [3]
+maxr = 5
 
+# TODO carefull with fs here. In the matlab script, they give fs=1 to the
+# subspace, eg freq = freq / fs. Subspace expect normalized freqs.
 # create signal object
-sig = Signal(u,y,fs=fs)
+sig = Signal(u,y,fs=1)
 sig.lines(lines)
 # average signal over periods. Used for training of PNLSS model
 um, ym = sig.average()
@@ -50,7 +54,7 @@ linmodel = linss()
 # estimate bla, total distortion, and noise distortion
 linmodel.bla(sig)
 # get best model on validation data
-models, infodict = linmodel.scan(nvec, maxr)
+models, infodict = linmodel.scan(nvec, maxr, ftol=1e-16, xtol=1e-16)
 l_errvec = linmodel.extract_model(yval, uval)
 
 # estimate PNLSS
@@ -59,6 +63,12 @@ l_errvec = linmodel.extract_model(yval, uval)
 T1 = np.r_[npp, np.r_[0:(R-1)*npp+1:npp]]
 
 model = PNLSS(linmodel.A, linmodel.B, linmodel.C, linmodel.D)
+
+A = ABCDdata['A']
+B = ABCDdata['B']
+C = ABCDdata['C']
+D = ABCDdata['D']
+model = PNLSS(A, B, C, D)
 model.signal = linmodel.signal
 model.nlterms('x', [2,3], 'statesonly')
 model.nlterms('y', [2,3], 'empty')
@@ -81,6 +91,7 @@ _, ynltest, _ = model.simulate(utest, T1=0)
 # store figure handle for saving the figures later
 figs = {}
 
+plt.ion()
 # linear and nonlinear model error
 plt.figure()
 plt.plot(ym)

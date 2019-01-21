@@ -131,11 +131,11 @@ class PNLSS(object):
 
         x0 = self.flatten_ss()
         if method is None:
-            res = lm(costfnc, x0, jacobian, system=self, weight=self.weight,
+            res = lm(costfcn, x0, jacobian, system=self, weight=self.weight,
                      info=info, nmax=nmax, lamb=lamb, ftol=ftol, xtol=xtol,
                      gtol=gtol)
         else:
-            res = least_squares(costfnc,x0,jacobian, method='lm',
+            res = least_squares(costfcn,x0,jacobian, method='lm',
                                 x_scale='jac',
                                 kwargs={'system':self,'weight':self.weight})
 
@@ -161,7 +161,7 @@ class PNLSS(object):
                 weight = self.weightfcn()
 
         x0 = self.flatten_ss()
-        err = costfnc(x0, self, weight=weight)
+        err = costfcn(x0, self, weight=weight)
         # TODO maybe divide by 2 to match scipy's implementation of minpack
         self.cost = np.dot(err, err)
         return self.cost
@@ -1253,7 +1253,7 @@ def extract_ss(x0, system):
 
     return A, B, C, D, E, F
 
-def costfnc(x0, system, weight=None):
+def costfcn(x0, system, weight=None):
     # TODO fix transient
     T2 = system.T2
     R, p, npp = system.signal.R, system.signal.p, system.signal.npp

@@ -1,8 +1,9 @@
-- Frequency weighting in time domain
+- weighting in time domain
 - What to do if unstable models are encountered during subspace optimization
 - detect Unstable models in pnlss optim by comparing output with new data
 - Estimation of initial state x0, u0
-- multisine generation seems suspicious
+- multisine generation seems suspicious (especially the returned lines)
+- subspace expects normalized frequency vector
 - tests
 - documentation
 - check all todo's in code
