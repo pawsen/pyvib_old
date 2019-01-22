@@ -115,12 +115,10 @@ class PNLSS(object):
             self.covY = covariance(self.signal.y)
         return weightfcn(self.covY)
 
-
     def optimize(self, method=None, weight=True, info=True, nmax=50, lamb=None,
                  ftol=1e-8, xtol=1e-8, gtol=1e-8, copy=False):
         """Optimize the estimated the nonlinear state space matrices"""
 
-        self.freq_weight = True
         if weight is True:
             try:
                 self.weight
@@ -128,6 +126,10 @@ class PNLSS(object):
                 self.weight = self.weightfcn()
         else:
             self.weight = weight
+
+        self.freq_weight = True
+        if self.weight is None:
+            self.freq_weight = False
 
         x0 = self.flatten_ss()
         if method is None:
@@ -144,7 +146,7 @@ class PNLSS(object):
             self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(x0, self)
 
             nmodel = deepcopy(self)
-            nmodel.A, nmodel.B, nmodel.C, nmodel.D, model.E, model.F = \
+            nmodel.A, nmodel.B, nmodel.C, nmodel.D, nmodel.E, nmodel.F = \
                 extract_ss(res['x'], nmodel)
             nmodel.res = res
             return nmodel
@@ -214,9 +216,8 @@ class PNLSS(object):
             self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(ss0, self)
 
             nmodel = deepcopy(self)
-            nmodel.A, nmodel.B, nmodel.C, nmodel.D, model.E, model.F = \
+            nmodel.A, nmodel.B, nmodel.C, nmodel.D, nmodel.E, nmodel.F = \
                 extract_ss(ss, nmodel)
-            nmodel.res = res
             return nmodel, err_rms
 
         self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(ss, self)
@@ -270,7 +271,7 @@ def combinations(n, degrees):
     # Determine total number of combinations/monomials
     ncomb = 0
     for degree in degrees:
-	    ncomb += comb(n+degree-1, degree, exact=True)
+        ncomb += comb(n+degree-1, degree, exact=True)
 
     # List the exponents of each input in all monomials
     monomials = np.zeros((ncomb,n),dtype=int)
@@ -309,7 +310,7 @@ def hom_combinations(n,degree):
             # Try to increase the last factor, but if this is not possible,
             # look the previous one that can be increased
             j -= 1
-         # Increase factor j wrt previous monomial, e.g. x1*x1*x1 -> x1*x1*x2
+        # Increase factor j wrt previous monomial, e.g. x1*x1*x1 -> x1*x1*x2
         monomials[i,j] += 1
         # Monomial after x1*x1*xmax is x1*x2*x2, and not x1*x2*xmax
         monomials[i,j+1:degree] = monomials[i,j]
@@ -572,7 +573,7 @@ def select_active(structure,n,m,q,nx):
        ('inputsonly','statesonly','nocrossprod','affine','affinefull'):
         # Select terms for all rows in E/F matrix
         active = (np.tile(active[:,None], q) +
-                  np.tile(np.linspace(0,n_nl,q, dtype=int) ,(len(active),1))).ravel()
+                  np.tile(np.linspace(0,(q-1)*n_nl,q, dtype=int) ,(len(active),1))).ravel()
 
     # Sort the active elements
     return np.sort(active)
@@ -658,6 +659,7 @@ def remove_transient_indices_nonperiodic(T2,N,p):
     # Length of the transient-free signal(s)
     nt = len(without_T2)
     if p > 1:  # for multiple outputs
+        # TODO define NT
         indices = np.zeros(p*NT, dtype=int)
         for i in range(p):
             # Stack indices for each output on top of each other
@@ -727,7 +729,7 @@ def transient_indices_periodic(T1,N):
 
         indices = np.array([], dtype=int)
         for i in range(len(T1)-1):
-            trans = T1[i+1] -1 - np.mod(np.arange(ntrans)[::-1], T1[i+1]-T1[i])
+            trans = T1[i+1] - 1 - np.mod(np.arange(ntrans)[::-1], T1[i+1]-T1[i])
             normal = np.arange(T1[i],T1[i+1])
             indices = np.hstack((indices, trans, normal))
     else:
@@ -825,7 +827,6 @@ def remove_transient_indices_periodic(T1,N,p):
     if ntrans == 0:
         return np.arange(N)
 
-
     if len(T1) == 1:
         # If starting samples of realizations not specified, then we assume
         # the realization start at the first sample
@@ -848,7 +849,7 @@ def remove_transient_indices_periodic(T1,N,p):
 
         tmp = np.empty(p*N, dtype=int)
         for i in range(p):
-            #Stack indices without transient samples on top of each other
+            # Stack indices without transient samples on top of each other
             tmp[i*N:(i+1)*N] = indices + i*nt
         indices = tmp
 
@@ -1024,7 +1025,7 @@ def multEdwdx(contrib, power, coeff, E, n):
     # n_all = number of signals x and u; N = number of samples
     n_all, N = contrib.shape
     # n_out = number of rows in E; n_nx = number of monomials in w
-    n_out, n_nx =E.shape
+    n_out, n_nx = E.shape
     out = np.zeros((n_out,n,N))
     # Loop over all signals x w.r.t. which derivatives are taken
     for k in range(n):
@@ -1109,7 +1110,7 @@ def element_jacobian(samples, Edwdx, C, Fdwdx, active):
     p, n = C.shape  # Number of outputs and number of states
     # Number of samples and number of inputs in alternative state-space model
     N, npar = samples.shape
-    nactive = len(active) # Number of active parameters in A, B, or E
+    nactive = len(active)  # Number of active parameters in A, B, or E
 
     out = np.zeros((p,N,nactive))
     for k, activ in enumerate(active):
@@ -1208,25 +1209,29 @@ def jacobian(x0, system, weight=None):
     npar = jac.shape[1]
 
     # add frequency weighting
-    # (p*ns, npar) -> (Npp,R,p,npar) -> (Npp,p,R,npar) -> (Npp,p,R*npar)
-    jac = jac.reshape((npp,R,p,npar),
-                      order='F').swapaxes(1,2).reshape((-1,p,R*npar),
-                                                       order='F')
-    # select only the positive half of the spectrum
-    jac = fft(jac, axis=0)[:nfd]
-    # TODO should we test if weight is None or just do it in mmul_weight
-    if weight is not None:
-        jac = mmul_weight(jac, weight)
-    # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
-    jac = jac.reshape((-1,p,R,npar),
-                      order='F').swapaxes(1,2).reshape((-1,npar), order='F')
+    if weight is not None and system.freq_weight:
+        # (p*ns, npar) -> (Npp,R,p,npar) -> (Npp,p,R,npar) -> (Npp,p,R*npar)
+        jac = jac.reshape((npp,R,p,npar),
+                          order='F').swapaxes(1,2).reshape((-1,p,R*npar),
+                                                           order='F')
+        # select only the positive half of the spectrum
+        jac = fft(jac, axis=0)[:nfd]
+        # TODO should we test if weight is None or just do it in mmul_weight
+        if weight is not None:
+            jac = mmul_weight(jac, weight)
+        # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
+        jac = jac.reshape((-1,p,R,npar),
+                          order='F').swapaxes(1,2).reshape((-1,npar), order='F')
 
-    J = np.empty((2*nfd*R*p,npar))
-    J[:nfd*R*p] = jac.real
-    J[nfd*R*p:] = jac.imag
+        J = np.empty((2*nfd*R*p,npar))
+        J[:nfd*R*p] = jac.real
+        J[nfd*R*p:] = jac.imag
+    elif weight is not None:
+        raise ValueError('Time weighting not possible')
+    else:
+        return jac
 
     return J
-
 
 def extract_ss(x0, system):
 
@@ -1247,9 +1252,6 @@ def extract_ss(x0, system):
 
     E.flat[xact] = x0.flat[n*(p+m+n)+p*m + np.r_[:ne]]
     F.flat[yact] = x0.flat[n*(p+m+n)+p*m+ne + np.r_[:nf]]
-
-    #E = x0.flat[n*(p+m+n)+p*m + np.r_[:n*n_nx]].reshape((n,n_nx))
-    #F = x0.flat[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]].reshape((p,n_ny))
 
     return A, B, C, D, E, F
 

@@ -216,8 +216,9 @@ def normalize_columns(mat):
     # Robustify against columns with zero rms value
     scaling[scaling == 0] = 1
     # Scale columns with 1/rms value
-    mat /= scaling
-    return mat, scaling
+    # This modifies mat in place(ie the input mat). We do not want that.
+    # mat /= scaling
+    return mat/scaling, scaling
 
 def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
        xtol=1e-8, gtol=1e-8, args=(), kwargs={}):
@@ -271,7 +272,6 @@ def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
     while niter < nmax and not stop:
 
         J = jac(x0, system, weight)
-        # nb. Normalize_columns modifies J in place.
         J, scaling = normalize_columns(J)
 
         U, s, Vt = svd(J, full_matrices=False)
@@ -308,6 +308,11 @@ def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
             if cost >= cost_old:
                 # step unsuccessful, increase lambda, ie. Lean more towards
                 # gradient descent method(converges in larger range)
+                lamb *= np.sqrt(10)
+                s = sr.copy()
+            elif np.isnan(cost):
+                print('Unstable model. Increasing lambda')
+                cost = np.inf
                 lamb *= np.sqrt(10)
                 s = sr.copy()
             else:

@@ -290,11 +290,23 @@ class StateSpace(object):
         return plot_subspace_model(self.models, self.G, self.covG,
                                    self.signal.freq, self.signal.fs)
 
-    def extract_model(self, y, u, t=None, x0=None):
+    def extract_model(self, y=None, u=None, models=None, n=None, t=None, x0=None):
         """extract the best model using validation data"""
 
         dt = 1/self.signal.fs
-        model, err_vec = extract_model(self.models, y, u, dt, t, x0)
+        if models is None:
+            models = self.models
+
+        if n is None:
+            if None in (y,u):
+                raise ValueError('y and u cannot be None when several models'
+                                 ' are given')
+            model, err_vec = extract_model(models, y, u, dt, t, x0)
+        elif {'A', 'B', 'C', 'D'} <= models.keys() and n is None:
+            model = models
+        else:
+            model = models[n]
+            err_vec = []
 
         dictget = lambda d, *k: [d[i] for i in k]
         self.A, self.B, self.C, self.D, self.r, self.stable = \

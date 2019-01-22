@@ -5,7 +5,6 @@ from pyvib.statespace import StateSpace as linss
 from pyvib.statespace import Signal
 from pyvib.pnlss import PNLSS
 from pyvib.common import db
-from pyvib.forcing import multisine
 from scipy.linalg import norm
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,8 +20,6 @@ See http://www.nonlinearbenchmark.org/#BoucWen
 # save figures to disk
 savefig = True
 
-ABCDdata = sio.loadmat('bw_data.mat')
-
 data = sio.loadmat('BoucWenData.mat')
 # partitioning the data
 uval = data['uval_multisine'].T
@@ -37,8 +34,6 @@ fs = data['fs'].item()
 # model orders and Subspace dimensioning parameter
 nvec = [2,3,4]
 maxr = 7
-nvec = [3]
-maxr = 5
 
 # TODO carefull with fs here. In the matlab script, they give fs=1 to the
 # subspace, eg freq = freq / fs. Subspace expect normalized freqs.
@@ -53,9 +48,12 @@ R, P = sig.R, sig.P
 linmodel = linss()
 # estimate bla, total distortion, and noise distortion
 linmodel.bla(sig)
-# get best model on validation data
-models, infodict = linmodel.scan(nvec, maxr, ftol=1e-16, xtol=1e-16)
-l_errvec = linmodel.extract_model(yval, uval)
+models, infodict = linmodel.scan(nvec, maxr,ftol=1e-16, xtol=1e-16)
+# set model manual, as in matlab program
+# NOTE: in matlab the best model(on test data) have r=7. Here it is n=4. The
+# difference between the r's are very small ~ 1e-16 so the choosing is due
+# machine precision and we cannot really say which r is best. See infodict
+linmodel.extract_model(n=3)
 
 # estimate PNLSS
 # transient: Add one period before the start of each realization. Note that
@@ -63,13 +61,7 @@ l_errvec = linmodel.extract_model(yval, uval)
 T1 = np.r_[npp, np.r_[0:(R-1)*npp+1:npp]]
 
 model = PNLSS(linmodel.A, linmodel.B, linmodel.C, linmodel.D)
-
-A = ABCDdata['A']
-B = ABCDdata['B']
-C = ABCDdata['C']
-D = ABCDdata['D']
-model = PNLSS(A, B, C, D)
-model.signal = linmodel.signal
+model.signal = sig
 model.nlterms('x', [2,3], 'statesonly')
 model.nlterms('y', [2,3], 'empty')
 model.transient(T1)
@@ -84,6 +76,10 @@ _, ynlin, _ = model.simulate(um)
 nl_errvec = model.extract_model(yval, uval, T1=npp)
 
 # compute model output on test data(unseen data)
+_, ylval, _ = linmodel.simulate(uval, T1=npp)
+_, ynlval, _ = model.simulate(uval, T1=npp)
+
+# compute model output on test data(unseen data)
 _, yltest, _ = linmodel.simulate(utest, T1=0)
 _, ynltest, _ = model.simulate(utest, T1=0)
 
@@ -93,10 +89,11 @@ figs = {}
 
 plt.ion()
 # linear and nonlinear model error
+resamp = 20
 plt.figure()
-plt.plot(ym)
-plt.plot(ym-ylin)
-plt.plot(ym-ynlin)
+plt.plot(ym[::resamp])
+plt.plot(ym[::resamp]-ylin[::resamp])
+plt.plot(ym[::resamp]-ynlin[::resamp])
 plt.xlabel('Time index')
 plt.ylabel('Output (errors)')
 plt.legend(('output','linear error','PNLSS error'))
@@ -113,16 +110,32 @@ plt.ylabel('Validation error [dB]')
 plt.title('Selection of the best model on a separate data set')
 figs['pnlss_path'] = (plt.gcf(), plt.gca())
 
-# result on test data
+# result on validation data
 plt.figure()
-#  Normalized frequency vector
+N = len(yval)
+freq = np.arange(N)/N*fs
+plottime = np.hstack((yval, yval-ylval, yval-ynlval))
+plotfreq = np.fft.fft(plottime, axis=0)
+nfd = plotfreq.shape[0]
+plt.plot(freq[:nfd//2], db(plotfreq[:nfd//2]), '.')
+plt.xlim((5, 150))
+plt.xlabel('Frequency')
+plt.ylabel('Output (errors) (dB)')
+plt.legend(('Output','Linear error','PNLSS error'))
+plt.title('Validation results')
+figs['val_data'] = (plt.gcf(), plt.gca())
+
+# result on test data
+# resample factor, as there is 153000 points in test data
+resamp = 30
+plt.figure()
 N = len(ytest)
 freq = np.arange(N)/N*fs
 plottime = np.hstack((ytest, ytest-yltest, ytest-ynltest))
 plotfreq = np.fft.fft(plottime, axis=0)
 nfd = plotfreq.shape[0]
-plt.plot(freq[:nfd//2], db(plotfreq[:nfd//2]), '.')
-plt.xlabel('Frequency (normalized)')
+plt.plot(freq[:nfd//2:resamp], db(plotfreq[:nfd//2:resamp]), '.')
+plt.xlabel('Frequency')
 plt.ylabel('Output (errors) (dB)')
 plt.legend(('Output','Linear error','PNLSS error'))
 plt.title('Test results')
