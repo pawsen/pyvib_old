@@ -30,7 +30,8 @@ See http://www.nonlinearbenchmark.org/#Silverbox
 #         return data['ym']
 
 def load(var, amp, k):
-    fname = f"SNJP_{var}m_full_FNSI_{amp}.mat"
+    path = 'data/'
+    fname = f"{path}SNJP_{var}m_full_FNSI_{amp}.mat"
     return sio.loadmat(fname)[k]
 
 # save figures to disk

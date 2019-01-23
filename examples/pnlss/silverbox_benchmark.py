@@ -23,7 +23,7 @@ See http://www.nonlinearbenchmark.org/#Silverbox
 
 # save figures to disk
 savefig = True
-data = sio.loadmat('SNLS80mV.mat')
+data = sio.loadmat('data/SNLS80mV.mat')
 # partitioning the data
 u = data['V1'].T
 y = data['V2'].T
@@ -103,7 +103,7 @@ model.signal = sig
 model.nlterms('x', [2,3], 'full')
 model.nlterms('y', [2,3], 'empty')
 model.transient(T1)
-model.optimize(weight=None, nmax=100)
+model.optimize(weight=None, nmax=20)
 
 # compute linear and nonlinear model output on training data
 tlin, ylin, xlin = linmodel.simulate(um, T1=T1)

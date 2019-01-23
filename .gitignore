@@ -14,4 +14,5 @@ plots/
 *.pkl
 *.npz
 !/examples/nlbeam/data/*.mat
+!/examples/pnlss/data/
 docs/_build/
