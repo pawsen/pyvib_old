@@ -190,13 +190,15 @@ def plot_subspace_model(models, G, covG, freq, fs, *args, **kwargs):
     dictget = lambda d, *k: [d[i] for i in k]
     F, m, p = G.shape
 
-    tmp = np.empty((F,m*p), dtype=complex)
-    for i in range(m*p):
-        tmp[:,i] = covG[:,i,i]
-    tmp2 = np.empty_like(G, dtype=complex)
-    for f in range(F):
-        tmp2[f] = tmp[f].reshape((p,m))
-    stdG = np.sqrt(tmp2)
+    stdG = None
+    if covG is not None and len(covG) > 1:
+        tmp = np.empty((F,m*p), dtype=complex)
+        for i in range(m*p):
+            tmp[:,i] = covG[:,i,i]
+        tmp2 = np.empty_like(G, dtype=complex)
+        for f in range(F):
+            tmp2[f] = tmp[f].reshape((p,m))
+        stdG = np.sqrt(tmp2)
 
     #len(models)
     figs = []
@@ -211,7 +213,8 @@ def plot_subspace_model(models, G, covG, freq, fs, *args, **kwargs):
         plot_frf(freq, G, **figopt, **lsopt, c='C1', label='BLA (non-par)')
         plot_frf(freq, Gss, **figopt, ls='-', c='C0', label='BLA (par)')
         plot_frf(freq, G-Gss, **figopt, **lsopt, c='r', label='error')
-        plot_frf(freq, stdG, **figopt, ls='--', c='k', label='stdG')
+        if stdG is not None:
+            plot_frf(freq, stdG, **figopt, ls='--', c='k', label='stdG')
 
         ax.legend(loc='upper right')
         tstr = ax.get_title() + f" | n={k}"

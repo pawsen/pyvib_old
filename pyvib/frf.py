@@ -143,6 +143,9 @@ def bla_periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
         # Further calculations with averaged spectra
         U = U_mean  # m x m x M x F
         Y = Y_mean
+    else:
+        U = U.squeeze(axis=3)
+        Y = Y.squeeze(axis=3)
 
     # Compute FRM and noise and total covariance on averaged(over experiment
     # blocks and periods) FRM
@@ -184,10 +187,10 @@ def bla_periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
 
     # No total covariance estimate possible if only one experiment block
     if M < 2:
-        covGML = 0
+        covGML = [0]
     # No noise covariance estimate possible if only one period
     if P == 1:
-        covGn = 0
+        covGn = [0]
 
     return G, covGML, covGn
 

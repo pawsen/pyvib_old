@@ -163,10 +163,12 @@ class StateSpace(object):
         # TODO bla expects  m, R, P, F = U.shape
         self.U = fft(signal.u, axis=0)[signal.lines].transpose((1,2,3,0))
         self.Y = fft(signal.y, axis=0)[signal.lines].transpose((1,2,3,0))
-        G, covG, covGn = bla_periodic(self.U, self.Y)
-        self.G = G.transpose((2,0,1))
-        self.covG = covG.transpose((2,0,1))
-        self.covGn = covGn.transpose((2,0,1))
+        self.G, self.covG, self.covGn = bla_periodic(self.U, self.Y)
+        self.G = self.G.transpose((2,0,1))
+        if len(self.covG) > 1:
+            self.covG = self.covG.transpose((2,0,1))
+        if len(self.covGn) > 1:
+            self.covGn = self.covGn.transpose((2,0,1))
 
     def estimate(self, n, r, copy=False):
         """Subspace estimation"""
@@ -258,7 +260,7 @@ class StateSpace(object):
                 self.estimate(n, r)
 
                 # normalize with frequency lines to comply with matlab pnlss
-                cost_sub = self.costfcn(weight=True)/F
+                cost_sub = self.costfcn(weight=weight)/F
                 stable_sub = self.stable
                 if optimize:
                     self.optimize(method=method, weight=weight, info=info,

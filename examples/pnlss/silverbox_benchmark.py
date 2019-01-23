@@ -43,7 +43,7 @@ Nz = 100           # number of zero samples separating the blocks visually.
 Ntr = 400          # number of transient samples.
 
 # odd multisine till 200 Hz, without DC.
-lines = np.arange(0,2683,2)
+lines = np.arange(1,2683,2)
 
 # partitioning the data
 # Test data: only 86 zero samples in the initial arrow-like input.
@@ -74,8 +74,8 @@ yest = yest.reshape(npp,p,R,P)
 u = np.delete(u, np.s_[:Nz+Ntr])
 y = np.delete(y, np.s_[:Nz+Ntr])
 
-uval = u[:npp]
-yval = y[:npp]
+uval = u[:npp, None]
+yval = y[:npp, None]
 
 # model orders and Subspace dimensioning parameter
 n = 2
@@ -91,7 +91,7 @@ um, ym = sig.average()
 linmodel = linss()
 # estimate bla, total distortion, and noise distortion
 linmodel.bla(sig)
-models, infodict = linmodel.scan(n, maxr)
+models, infodict = linmodel.scan(n, maxr, weight=None)
 
 # estimate PNLSS
 # transient: Add two periods before the start of each realization. Note that
@@ -120,6 +120,8 @@ _, ynlval, _ = model.simulate(uval, T1=2*npp)
 # compute model output on test data(unseen data)
 _, yltest, _ = linmodel.simulate(utest, T1=0)
 _, ynltest, _ = model.simulate(utest, T1=0)
+yltest = np.delete(yltest,np.s_[:Ntr])[:,None]
+ynltest = np.delete(ynltest,np.s_[:Ntr])[:,None]
 
 ## Plots ##
 # store figure handle for saving the figures later
@@ -151,11 +153,12 @@ figs['pnlss_path'] = (plt.gcf(), plt.gca())
 # result on validation data
 plt.figure()
 N = len(yval)
+resamp = 2
 freq = np.arange(N)/N*fs
 plottime = np.hstack((yval, yval-ylval, yval-ynlval))
 plotfreq = np.fft.fft(plottime, axis=0)
 nfd = plotfreq.shape[0]
-plt.plot(freq[:nfd//2], db(plotfreq[:nfd//2]), '.')
+plt.plot(freq[1:nfd//2:resamp], db(plotfreq[1:nfd//2:resamp]), '.')
 plt.xlim((0, 300))
 plt.xlabel('Frequency')
 plt.ylabel('Output (errors) (dB)')
@@ -167,12 +170,12 @@ figs['val_data'] = (plt.gcf(), plt.gca())
 # resample factor, as there is 153000 points in test data
 plt.figure()
 N = len(ytest)
-resamp = 1
+resamp = 10
 freq = np.arange(N)/N*fs
 plottime = np.hstack((ytest, ytest-yltest, ytest-ynltest))
 plotfreq = np.fft.fft(plottime, axis=0)
 nfd = plotfreq.shape[0]
-plt.plot(freq[:nfd//2:resamp], db(plotfreq[:nfd//2:resamp]), '.')
+plt.plot(freq[1:nfd//2:resamp], db(plotfreq[1:nfd//2:resamp]), '.')
 plt.xlim((0, 300))
 plt.xlabel('Frequency')
 plt.ylabel('Output (errors) (dB)')
@@ -189,4 +192,4 @@ if savefig:
         fig = fig if isinstance(fig, list) else [fig]
         for i, f in enumerate(fig):
             f[0].tight_layout()
-            f[0].savefig(f"boucwen_{k}{i}.pdf")
+            f[0].savefig(f"SNbenchmark_{k}{i}.pdf")
