@@ -532,9 +532,12 @@ class FNSI():
         }
         return
 
-    def plot_frf(self, dofs=[0], sca=1, fig=None, ax=None, **kwargs):
+    def plot_frf(self, p=0, m=0, sca=1, fig=None, ax=None, **kwargs):
         # Plot identified frequency response function
-        H = self.H
+        m = np.atleast_1d(m)
+        p = np.atleast_1d(p)
+
+        H = np.atleast_3d(self.H.T)
         fs = self.fs
         nsper = self.nsper
         flines = self.flines
@@ -542,7 +545,7 @@ class FNSI():
         freq = np.arange(0,nsper)*fs/nsper
         freq_plot = freq[flines]
 
-        return plot_frf(freq_plot, H, dofs, sca, fig, ax, **kwargs)
+        return plot_frf(freq_plot, H, p=p, m=m, sca=sca, fig=fig, ax=ax, **kwargs)
 
     def plot_stab(self, sca=1, fig=None, ax=None):
         " plot stabilization"

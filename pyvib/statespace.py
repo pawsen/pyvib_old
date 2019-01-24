@@ -165,9 +165,9 @@ class StateSpace(object):
         self.Y = fft(signal.y, axis=0)[signal.lines].transpose((1,2,3,0))
         self.G, self.covG, self.covGn = bla_periodic(self.U, self.Y)
         self.G = self.G.transpose((2,0,1))
-        if len(self.covG) > 1:
+        if self.covG is not None:
             self.covG = self.covG.transpose((2,0,1))
-        if len(self.covGn) > 1:
+        if self.covGn is not None:
             self.covGn = self.covGn.transpose((2,0,1))
 
     def estimate(self, n, r, copy=False):
@@ -240,6 +240,8 @@ class StateSpace(object):
         infodict = {}
         models = {}
         if info:
+            print('Starting subspace scanning')
+            print(f"n: {nvec.min()}-{nvec.max()}. r: {maxr}")
             print(f"{'n':3} | {'r':3}")
         for n in nvec:
             minr = n + 1
@@ -300,7 +302,7 @@ class StateSpace(object):
             models = self.models
 
         if n is None:
-            if None in (y,u):
+            if y is None or u is None:
                 raise ValueError('y and u cannot be None when several models'
                                  ' are given')
             model, err_vec = extract_model(models, y, u, dt, t, x0)

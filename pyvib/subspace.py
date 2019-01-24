@@ -115,7 +115,7 @@ def jacobian_freq(A,B,C,z):
         # equal to temp2*fOne(n,n,i)*temp3, and thus
         # JA(:,:,i,f) = temp2(:,k(i))*temp3(ell(i),:)
         for i in range(n**2): # Loop over all elements in A
-            JA[f,:,:,i] = temp2[:,k[i]] @ temp3[ell[i],:]
+            JA[f,:,:,i] = np.outer(temp2[:,k[i]], temp3[ell[i],:])
 
         # Jacobian w.r.t. all elements in B
         # Note that the partial derivative of e(f) w.r.t. B(k,l) is equal to
@@ -228,8 +228,8 @@ def subspace(G, covarG, freq, n, r):
     Gmat = np.empty((r*p,F*m), dtype=complex)
     Umat = np.empty((r*m,F*m), dtype=complex)
     for f in range(F):
-        Gmat[:,f*m:(f+1)*m] = kron(Wr[:,f], G[f]).T
-        Umat[:,f*m:(f+1)*m] = kron(Wr[:,f], np.eye(m)).T
+        Gmat[:,f*m:(f+1)*m] = kron(Wr[:,f,None], G[f])
+        Umat[:,f*m:(f+1)*m] = kron(Wr[:,f,None], np.eye(m))
 
     # 1.e. and 1.f: split into real and imag part and stack into Z
     # we do it in a memory efficient way and avoids intermediate memory copies.
@@ -238,10 +238,10 @@ def subspace(G, covarG, freq, n, r):
     # Gre = np.hstack([Gmat.real, Gmat.imag]) is more efficient than
     # Gmat = np.hstack([Gmat.real, Gmat.imag])
     Z = np.empty((r*(p+m), 2*F*m))
-    Z[:r*p,:F*m] = Umat.real
-    Z[:r*p,F*m:] = Umat.imag
-    Z[r*p:,:F*m] = Gmat.real
-    Z[r*p:,F*m:] = Gmat.imag
+    Z[:r*m,:F*m] = Umat.real
+    Z[:r*m,F*m:] = Umat.imag
+    Z[r*m:,:F*m] = Gmat.real
+    Z[r*m:,F*m:] = Gmat.imag
 
     # 1.f. Calculate CY from σ²_G
     if covarG is None:
@@ -413,9 +413,9 @@ def costfcn(x0, system, weight=None):
     err = Gss - system.G
     if weight is not None:
         err = mmul_weight(err, weight)
+    err_w = np.hstack((err.real.ravel(), err.imag.ravel()))
 
-    err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
-    return err_w
+    return err_w  # err.ravel()
 
 def extract_ss(x0, system):
 

@@ -131,6 +131,9 @@ class PNLSS(object):
         if self.weight is None:
             self.freq_weight = False
 
+        if info:
+            print('\nStarting PNLSS optimization')
+
         x0 = self.flatten_ss()
         if method is None:
             res = lm(costfcn, x0, jacobian, system=self, weight=self.weight,

@@ -20,7 +20,7 @@ connection can be seen as a nonlinear spring. """
 savefig = True
 
 data = sio.loadmat('data/NLbeam_u_15.mat')
-lines = data['flines'].squeeze() - 1  # TODO
+lines = data['flines'].squeeze()  # TODO
 fs = data['fs'].item()
 npp = data['N'].item()
 P = data['P'].item()
@@ -40,7 +40,7 @@ R = 1
 u = u.reshape((npp,P,m,R)).transpose(0,2,3,1)
 y = y.reshape((npp,P,p,R), order='F').transpose(0,2,3,1)
 
-y = y[:,3:27:4]
+y = y[:,3:28:4]
 p = 7
 
 # partitioning the data

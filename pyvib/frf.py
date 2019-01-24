@@ -2,66 +2,51 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from .signal import Signal
-from numpy.fft import fft, ifft
+from numpy.fft import fft
 from numpy.linalg import pinv
 
-class FRF(Signal):
-    def __init__(self, signal, fmin, fmax):
+def periodic(u, y, fs=None, fmin=None, fmax=None): # signal
+    """Interface to periodic FRF
 
-        self.signal = signal
-        # self.u = signal.u
-        # self.y = signal.y
-        # self.fs = signal.fs
-        self.fmin = fmin
-        self.fmax = fmax
+    Extract periodic signal from original signal and call periodic FRF
 
-    def periodic(self, fmin=None, fmax=None, nper=1):
-        """Interface to periodic FRF
+    Parameters
+    ----------
+    nper : int (optional)
+        Number of periods in measurement
+    """
 
-        Extract periodic signal from original signal and call periodic FRF
-
-        Parameters
-        ----------
-        nper : int (optional)
-            Number of periods in measurement
-        """
-        if fmin is not None:
-            self.fmin = fmin
-        if fmax is not None:
-            self.fmax = fmax
-        # if fmin or fmax is None:
-        #     raise ValueError('fmin or fmax not specified')
-
-        # Call signal.cut before this. Or call signal.cut from here?
-
-        # If signal is cut, used that. Otherwise use the full signal.
-        if self.signal.iscut:
-            u = self.signal.u_per.squeeze()
-            y = self.signal.y_per
-            nper = self.signal.nper
-        else:
-            u = self.signal.u.squeeze()
-            y = self.signal.y
-
-        fs = self.signal.fs
-        ndof = y.shape[0]
-        for i in range(ndof):
-            # TODO maybe save sigN (and freq) in matrix as well. sigN is
-            # different for each dof, while freq is not.
-            freq, H1, sigN = periodic(u, y[i,:], nper, fs, self.fmin,
-                                      self.fmax)
-            if i == 0:
-                H = np.empty((ndof, len(freq)), dtype=complex)
-            H[i,:] = H1
-
-        return freq, H
-
-    def nonperiodic():
-        """Interface to nonperiodic FRF"""
+    if fs is None:
+        # fs = signal.fs
         pass
-    pass
 
+    if None in (fmin, fmax):
+        # flines = signal.flines
+        pass
+    else:
+        npp = u.shape[0]
+        freq = np.arange(npp) * fs/npp
+        flines = np.where((freq >= fmin) & (freq <= fmax))
+        freq = freq[flines]
+
+    # If signal is cut, used that. Otherwise use the full signal.
+    # if signal.iscut:
+    #     u = signal.u_per.squeeze()
+    #     y = signal.y_per
+    # else:
+    #     u = signal.u
+    #     y = signal.y
+
+    U = fft(u, axis=0)[flines].transpose((1,2,3,0))
+    Y = fft(y, axis=0)[flines].transpose((1,2,3,0))
+    G, covG, covGn = bla_periodic(U, Y)
+    G = G.transpose((2,0,1))
+    if covG is not None:
+        covG = covG.transpose((2,0,1))
+    if covGn is not None:
+        covGn = covGn.transpose((2,0,1))
+
+    return freq, G, covG, covGn
 
 
 def bla_periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
@@ -72,7 +57,7 @@ def bla_periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
     misleading. The NL contribution is deterministic given the same forcing
     buy differs between realizations.
 
-    H(f) = FRF(f) = Y(f)/U(f) (Y/F in classical notation)
+    G(f) = FRF(f) = Y(f)/U(f) (Y/F in classical notation)
     Y and U is the output and input of the system in frequency domain.
 
     Parameters
@@ -81,8 +66,6 @@ def bla_periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
         Forcing signal
     y : ndarray
         Response signal (displacements)
-    nper : int
-        Number of periods in signal
     fs : float
         Sampling frequency
     fmin : float
@@ -168,9 +151,10 @@ def bla_periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
         G[:,:,f] = Gm.mean(2)
 
         # Estimate the total covariance on averaged FRM
-        NG = G[:,:,f,None] - Gm
-        tmp = NG.reshape(-1, M)
-        covGML[:,:,f] = np.einsum('ij,kj->ik',tmp,tmp.conj()) / M/(M-1)
+        if M > 1:
+            NG = G[:,:,f,None] - Gm
+            tmp = NG.reshape(-1, M)
+            covGML[:,:,f] = np.einsum('ij,kj->ik',tmp,tmp.conj()) / M/(M-1)
 
         # Estimate noise covariance on averaged FRM (only if P > 1)
         if P > 1:
@@ -187,10 +171,10 @@ def bla_periodic(U, Y):  #(u, y, nper, fs, fmin, fmax):
 
     # No total covariance estimate possible if only one experiment block
     if M < 2:
-        covGML = [0]
+        covGML = None
     # No noise covariance estimate possible if only one period
     if P == 1:
-        covGn = [0]
+        covGn = None
 
     return G, covGML, covGn
 

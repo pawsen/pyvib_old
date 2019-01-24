@@ -6,12 +6,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import namedtuple
 
-from vib.signal import Signal
-from vib.fnsi import FNSI
-from vib.fnsi import NL_force, NL_polynomial
-from vib.modal import modal_ac , frf_mkc
-from vib.helper.modal_plotting import (plot_modes, plot_knl, plot_frf)
-from vib.frf import FRF
+from pyvib.signal import Signal
+from pyvib.fnsi import FNSI
+from pyvib.fnsi import NL_force, NL_polynomial
+from pyvib.modal import modal_ac, frf_mkc
+from pyvib.helper.modal_plotting import (plot_modes, plot_knl, plot_frf)
+from pyvib.frf import periodic
 
 sca = 1
 def print_modal(fnsi):
@@ -115,8 +115,13 @@ print('## nonlinear identified at high level')
 print_modal(fnsi_nl2)
 
 # FRF
-frf = FRF(snlin, fmin=nlin.fmin, fmax=nlin.fmax)
-frf_freq, frf_H = frf.periodic()
+m = snlin.u_per.shape[0]
+p = snlin.y_per.shape[0]
+R = 1
+u = snlin.u_per.reshape((m,snlin.nsper,R,snlin.nper),order='F').swapaxes(0,1)
+y = snlin.y_per.reshape((p,snlin.nsper,R,snlin.nper),order='F').swapaxes(0,1)
+frf_freq, frf_H, covG, covGn = periodic(u,y, fs=snlin.fs, fmin=nlin.fmin, fmax=nlin.fmax)
+
 
 # Do some plotting
 dof = 6
@@ -131,10 +136,12 @@ dof = 6
 
 # FRF
 fH1, ax = plt.subplots()
-plot_frf(frf_freq, frf_H, dof,sca, ax=ax, ls='-.', c='k', label='From signal')
-fnsi.plot_frf(dof, fig=fH1, ax=ax, label='lin')
-fnsi_nl1.plot_frf(dof, fig=fH1, ax=ax, label='nl_1')
-fnsi_nl2.plot_frf(dof, fig=fH1, ax=ax, ls='--', label='nl2')
+nfd = len(frf_freq)
+plot_frf(frf_freq, frf_H, p=dof,sca=sca, ax=ax, ls='-.',
+         c='k', label='From signal')
+fnsi.plot_frf(fig=fH1, ax=ax, label='lin')
+fnsi_nl1.plot_frf(fig=fH1, ax=ax, label='nl_1')
+fnsi_nl2.plot_frf(fig=fH1, ax=ax, ls='--', label='nl2')
 #ax.set_title(''); ax.legend_ = None
 ax.legend()
 

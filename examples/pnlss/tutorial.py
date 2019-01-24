@@ -9,6 +9,7 @@ from pyvib.forcing import multisine
 from scipy.linalg import norm
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.io as sio
 
 """This tutorial shows the work flow of modeling a single input single output
 (SISO) polynomial nonlinear state-space (PNLSS) model.
@@ -78,6 +79,11 @@ u, t, lines, freq = multisine(f1,f2, fs, npp, P, R, lines=kind, rms=RMSu)
 lines = lines[:-1]
 # if multiple input is required, this will copy u m times
 # u = np.repeat(u.ravel()[:,None], m, axis=1)  # (R*P*npp,m)
+
+data2 = sio.loadmat('data/data2.mat')
+u_output = data2['u_output']
+y_output = data2['y_output']
+u = u_output.transpose((2,1,0))
 
 # Transient: Add one period before the start of each realization. To generate
 # steady state data.
