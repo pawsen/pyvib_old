@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 from collections import namedtuple
 import pickle
 
-from vib.hb.hbcommon import hb_components
-from vib.helper.plotting import (phase, periodic, stability, harmonic,
+from pyvib.hb.hbcommon import hb_components
+from pyvib.helper.plotting import (phase, periodic, stability, harmonic,
                                  nfrc)
 
 path='data/'

@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy.linalg import eigvals
-from vib.helper.plotting import (phase, periodic, stability, configuration,
+from pyvib.helper.plotting import (phase, periodic, stability, configuration,
                                  nfrc)
 
 plot = False

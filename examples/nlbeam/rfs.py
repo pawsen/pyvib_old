@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import pickle
 from collections import namedtuple
 
-from vib.signal import Signal
-from vib.rfs import RFS
+from pyvib.signal import Signal
+from pyvib.rfs import RFS
 
 Nm = namedtuple('Nm', 'y yd ydd u t finst fs')
 sweep1 = pickle.load(open('data/sweep1.pkl', 'rb'))

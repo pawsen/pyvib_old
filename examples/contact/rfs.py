@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import pickle
 from collections import namedtuple
 
-from vib.signal import Signal
-from vib.rfs import RFS
+from pyvib.signal import Signal
+from pyvib.rfs import RFS
 
 path = 'data/'
 filename = 'pyds_sweepvrms0.03'

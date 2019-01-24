@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from collections import namedtuple
 import pickle
 
-from vib.hb.hbcommon import hb_components
+from pyvib.hb.hbcommon import hb_components
 
 savefig = True
 # savefig = False

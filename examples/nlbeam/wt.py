@@ -7,8 +7,8 @@ import pickle
 
 from collections import namedtuple
 
-from vib.morletWT import WT
-from vib.signal import Signal
+from pyvib.morletWT import WT
+from pyvib.signal import Signal
 
 Nm = namedtuple('Nm', 'y yd ydd u t finst fs')
 sweep1 = pickle.load(open('data/sweep1.pkl', 'rb'))

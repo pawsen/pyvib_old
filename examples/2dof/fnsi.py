@@ -7,13 +7,13 @@ import matplotlib.pyplot as plt
 from collections import namedtuple
 import pickle
 
-# vibration libraries
-from vib.signal import Signal
-from vib.fnsi import FNSI
-from vib.modal import modal_ac, frf_mkc
-from vib.helper.modal_plotting import (plot_knl, plot_frf, plot_svg)
-from vib.frf import FRF
-from vib.fnsi import NL_force, NL_polynomial, NL_spline
+# pyvib.ation libraries
+from pyvib.signal import Signal
+from pyvib.fnsi import FNSI
+from pyvib.modal import modal_ac, frf_mkc
+from pyvib.helper.modal_plotting import (plot_knl, plot_frf, plot_svg)
+from pyvib.frf import FRF
+from pyvib.fnsi import NL_force, NL_polynomial, NL_spline
 
 # Parameters for 2dof model
 from parameters import par

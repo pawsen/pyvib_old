@@ -7,10 +7,10 @@ from scipy import io
 import pickle
 from collections import namedtuple
 
-from vib.hb.hb import HB
-from vib.hb.hbcommon import hb_signal
-from vib.nlforce import NL_force, NL_polynomial
-from vib.helper.plotting import (phase, periodic, stability, harmonic, nfrc)
+from pyvib.hb.hb import HB
+from pyvib.hb.hbcommon import hb_signal
+from pyvib.nlforce import NL_force, NL_polynomial
+from pyvib.helper.plotting import (phase, periodic, stability, harmonic, nfrc)
 
 savedata = True
 

@@ -7,7 +7,7 @@ import numpy as np
 import time
 from collections import namedtuple
 import pickle
-from vib import forcing
+from pyvib.import forcing
 
 savedata = True
 saveacc = True

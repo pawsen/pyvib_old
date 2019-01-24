@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 from scipy import io
 
 
-from vib.newmark import newmark_beta_nl as newmark_beta
-from vib.forcing import sineForce, randomPeriodic, sineSweep, toMDOF
-from vib.nlforce import NL_force, NL_polynomial
+from pyvib.newmark import newmark_beta_nl as newmark_beta
+from pyvib.forcing import sineForce, randomPeriodic, sineSweep, toMDOF
+from pyvib.nlforce import NL_force, NL_polynomial
 from collections import namedtuple
 import pickle
 

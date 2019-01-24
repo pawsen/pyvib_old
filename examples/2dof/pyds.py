@@ -8,7 +8,7 @@ from collections import namedtuple
 import pickle
 import time
 
-from vib.forcing import sineForce, randomPeriodic, sineSweep
+from pyvib.forcing import sineForce, randomPeriodic, sineSweep
 import parameters
 par = parameters.par
 

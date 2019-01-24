@@ -7,14 +7,14 @@ import matplotlib.pyplot as plt
 import pickle
 from collections import namedtuple
 
-from vib.signal import Signal
-from vib.fnsi import FNSI
-from vib.common import modal_properties, db, frf_mkc
-from vib.helper.fnsi_plots import (plot_modes, plot_knl, plot_linfrf,
+from pyvib.signal import Signal
+from pyvib.fnsi import FNSI
+from pyvib.common import modal_properties, db, frf_mkc
+from pyvib.helper.fnsi_plots import (plot_modes, plot_knl, plot_linfrf,
                                    plot_stab, plot_svg)
-from vib.frf import FRF
-from vib.fnsi import NL_force, NL_polynomial, NL_spline
-from vib.interpolate import piecewise_linear
+from pyvib.frf import FRF
+from pyvib.fnsi import NL_force, NL_polynomial, NL_spline
+from pyvib.interpolate import piecewise_linear
 
 
 

@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import io
 
-# from vib.interpolate import piecewise_linear
+# from pyvib.interpolate import piecewise_linear
 
 # delta = None
 # delta = [5e-5,5e-5]

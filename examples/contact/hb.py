@@ -7,10 +7,10 @@ import numpy as np
 import pickle
 import parameters
 
-from vib.hb.hb import HB
-from vib.hb.hbcommon import hb_signal
-from vib.nlforce import NL_force, NL_piecewise_linear
-from vib.helper.plotting import (phase, periodic, stability, harmonic,
+from pyvib.hb.hb import HB
+from pyvib.hb.hbcommon import hb_signal
+from pyvib.nlforce import NL_force, NL_piecewise_linear
+from pyvib.helper.plotting import (phase, periodic, stability, harmonic,
                                  nfrc)
 
 

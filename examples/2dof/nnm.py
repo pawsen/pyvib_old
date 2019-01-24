@@ -6,8 +6,8 @@ import numpy as np
 import pickle
 import parameters
 
-from vib.nnm import NNM
-from vib.nlforce import NL_force, NL_polynomial
+from pyvib.nnm import NNM
+from pyvib.nlforce import NL_force, NL_polynomial
 
 savedata = True
 
