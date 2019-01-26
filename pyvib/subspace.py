@@ -7,7 +7,7 @@ import numpy as np
 # svd and solve allows broadcasting when imported from numpy
 from numpy.linalg import qr, svd, solve
 from scipy.signal import dlsim
-from scipy.linalg import (lstsq, norm, eigvals)
+from scipy.linalg import (lstsq, logm, eigvals, pinv, norm)
 from numpy import kron
 
 
@@ -37,6 +37,86 @@ def is_stable(A, domain='z'):
     else:
         raise ValueError(f"{domain} wrong. Use 's' or 'z'")
     return True
+
+def discrete2cont(ad, bd, cd, dd, dt, method='zoh', alpha=None):
+    """Convert linear system from discrete to continuous time-domain.
+
+    This is the inverse of :func:`scipy.signal.cont2discrete`. This will not
+    work in general, for instance with the ZOH method when the system has
+    discrete poles at ``0``.
+
+    Parameters
+    ----------
+    A,B,C,D : :data:`linear_system_like`
+       Linear system representation.
+    dt : ``float``
+       Time-step used to *undiscretize* ``sys``.
+    method : ``string``, optional
+       Method of discretization. Defaults to zero-order hold discretization
+       (``'zoh'``), which assumes that the input signal is held constant over
+       each discrete time-step.
+    alpha : ``float`` or ``None``, optional
+       Weighting parameter for use with ``method='gbt'``.
+    Returns
+    -------
+    :class:`.LinearSystem`
+       Continuous linear system (``analog=True``).
+    See Also
+    --------
+    :func:`scipy.signal.cont2discrete`
+    Examples
+    --------
+    Converting a linear system
+    >>> from nengolib.signal import discrete2cont, cont2discrete
+    >>> from nengolib import DoubleExp
+    >>> sys = DoubleExp(0.005, 0.2)
+    >>> assert dsys == discrete2cont(cont2discrete(sys, dt=0.1), dt=0.1)
+
+    """
+
+    if dt <= 0:
+        raise ValueError("dt (%s) must be positive" % (dt,))
+
+    n = ad.shape[0]
+    m = n + bd.shape[1]
+
+    if method == 'gbt':
+        if alpha is None or alpha < 0 or alpha > 1:
+            raise ValueError("alpha (%s) must be in range [0, 1]" % (alpha,))
+
+        In = np.eye(n)
+        ar = linalg.solve(alpha*dt*ad.T + (1-alpha)*dt*In, ad.T - In).T
+        M = In - alpha*dt*ar
+
+        br = np.dot(M, bd) / dt
+        cr = np.dot(cd, M)
+        dr = dd - alpha*np.dot(cr, bd)
+
+    elif method in ('bilinear', 'tustin'):
+        return discrete2cont(sys, dt, method='gbt', alpha=0.5)
+
+    elif method in ('euler', 'forward_diff'):
+        return discrete2cont(sys, dt, method='gbt', alpha=0.0)
+
+    elif method == 'backward_diff':
+        return discrete2cont(sys, dt, method='gbt', alpha=1.0)
+
+    elif method == 'zoh':
+        # see https://en.wikipedia.org/wiki/Discretization#Discretization_of_linear_state_space_models
+        M = np.zeros((m, m))
+        M[:n, :n] = ad
+        M[:n, n:] = bd
+        M[n:, n:] = np.eye(bd.shape[1])
+        E = logm(M) / dt
+
+        ar = E[:n, :n]
+        br = E[:n, n:]
+        cr = cd
+        dr = dd
+    else:
+        raise ValueError("invalid method: '%s'" % (method,))
+
+    return ar, br, cr, dr
 
 def jacobian_freq(A,B,C,z):
     """Compute Jacobians of the unweighted errors wrt. model parameters.
@@ -137,7 +217,7 @@ def jacobian_freq(A,B,C,z):
 
     return JA, JB, JC, JD
 
-def subspace(G, covarG, freq, n, r):
+def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr'):
     """Estimate state-space model from Frequency Response Function (or Matrix).
 
     The linear state-space model is estimated from samples of the frequency
@@ -194,7 +274,7 @@ def subspace(G, covarG, freq, n, r):
           d. Split real and imaginary parts of Umat and Hmat
           e. Z=[Umat; Hmat]
           f. Calculate CY
-          g. QR decomposition of Zᵀ
+          g. QR decomposition of Zᵀ (orthogonal projection)
           h. CY^(-1/2)*RT22=USV'
           i. Oᵣ=U(:,1:n)
       2. Estimate A and C from the shift property of Oᵣ
@@ -215,21 +295,45 @@ def subspace(G, covarG, freq, n, r):
        Paduart J. (2008). Identification of nonlinear systems using polynomial
        nonlinear state space models. PhD thesis, Vrije Universiteit Brussel.
 
+    .. _noel2013:
+       Noël, J.P., Kerschen G. (2013)
+       Frequency-domain subspace identification for nonlinear mechanical
+       systems. MSSP, doi:10.1016/j.ymssp.2013.06.034
+
     """
-    #  number of outputs/inputs and number of frequencies
-    F,p,m = G.shape
+    # number of outputs/inputs and number of frequencies
+    # When using G as input, _m reflects that G is 3d: (F,p,m), ie U: (F,m)
+    if U is None and Y is None:
+        F,p,m = G.shape
+        is_frf =True
+        _m = m
+    else:
+        F = len(freq)
+        p = Y.shape[1]
+        m = U.shape[1]
+        is_frf = False
+        _m = 1
 
     # 1.a. Construct Wr with z
     z = np.exp(2j*np.pi*freq)
+    # if B,D is calculated explicit, we need an additional p and m rows in Gmat
+    # and Umat. See eq (30) in noel2013.
+    expl = 0
+    if bd_method == 'explicit':
+        expl = 1
 
-    Wr = (np.tile(z[:,None], r)**np.tile(np.arange(r),(len(z),1))).T
-
+    Wr = (z[:,None]**np.arange(r+expl)).T
     # 1.b. and 1.c. Construct Gmat and Umat
-    Gmat = np.empty((r*p,F*m), dtype=complex)
-    Umat = np.empty((r*m,F*m), dtype=complex)
-    for f in range(F):
-        Gmat[:,f*m:(f+1)*m] = kron(Wr[:,f,None], G[f])
-        Umat[:,f*m:(f+1)*m] = kron(Wr[:,f,None], np.eye(m))
+    Gmat = np.empty(((r+expl)*p,F*_m), dtype=complex)
+    Umat = np.empty(((r+expl)*m,F*_m), dtype=complex)
+    if U is None and Y is None:
+        for f in range(F):
+            Gmat[:,f*m:(f+1)*m] = kron(Wr[:,f,None], G[f])
+            Umat[:,f*m:(f+1)*m] = kron(Wr[:,f,None], np.eye(m))
+    else:
+        for f in range(F):
+            Gmat[:,f] = kron(Wr[:,f], Y[f])
+            Umat[:,f] = kron(Wr[:,f], U[f])
 
     # 1.e. and 1.f: split into real and imag part and stack into Z
     # we do it in a memory efficient way and avoids intermediate memory copies.
@@ -237,30 +341,33 @@ def subspace(G, covarG, freq, n, r):
     # memory location, than overwriting the old). Ie.
     # Gre = np.hstack([Gmat.real, Gmat.imag]) is more efficient than
     # Gmat = np.hstack([Gmat.real, Gmat.imag])
-    Z = np.empty((r*(p+m), 2*F*m))
-    Z[:r*m,:F*m] = Umat.real
-    Z[:r*m,F*m:] = Umat.imag
-    Z[r*m:,:F*m] = Gmat.real
-    Z[r*m:,F*m:] = Gmat.imag
+    Z = np.empty(((r+expl)*(p+m), 2*F*_m))
+    Z[:(r+expl)*m,:F*_m] = Umat.real
+    Z[:(r+expl)*m,F*_m:] = Umat.imag
+    Z[(r+expl)*m:,:F*_m] = Gmat.real
+    Z[(r+expl)*m:,F*_m:] = Gmat.imag
 
     # 1.f. Calculate CY from σ²_G
     if covarG is None:
-        CY = np.eye(p*Wr.shape[0])
-        covarG = np.tile(np.eye(p*m), (F,1,1))
+        CY = np.eye(p*r)
+        #covarG = np.tile(np.eye(p*m), (F,1,1))
     else:
-        CY = np.zeros((p*Wr.shape[0],p*Wr.shape[0]))
+        CY = np.zeros((p*r,p*r))
         for f in range(F):
             # Take sum over the diagonal blocks of cov(vec(H)) (see
             # paduart2008(5-93))
             temp = np.zeros((p,p),dtype=complex)
             for i in range(m):
                 temp += covarG[f, i*p:(i+1)*p, i*p:(i+1)*p]
-                CY += np.real(kron(np.outer(Wr[:,f], Wr[:,f].conj()),temp))
+                CY += np.real(kron(np.outer(Wr[:r,f], Wr[:r,f].conj()),temp))
 
     # 1.g. QR decomposition of Z.T, Z=R.T*Q.T, to eliminate U from Z.
     R = qr(Z.T, mode='r')
     RT = R.T
-    RT22 = RT[-r*p:,-r*p:]
+    if bd_method == 'explicit':
+        RT22 = RT[-(r+1)*p:-p,-(r+1)*p:-p]
+    else:
+        RT22 = RT[-r*p:,-r*p:]
 
     # 1.h. CY^(-1/2)*RT22=USV', Calculate CY^(-1/2) using svd decomp.
     # Use gesdd as driver. Matlab uses gesvd. The only reason to use dgesvd
@@ -275,76 +382,219 @@ def subspace(G, covarG, freq, n, r):
     invsqrtCY = UC * 1/np.sqrt(sc) @ UC.conj().T
 
     # Remove noise. By taking svd of CY^(-1/2)*RT22
-    Un, sn, _ = svd(invsqrtCY @ RT22)
-
-    ## RETURN HERE
+    Un, sn, _ = svd(invsqrtCY @ RT22)  # , full_matrices=False)
 
     # 1.i. Estimate extended observability matrix
     Or = sqrtCY @ Un[:,:n]
 
     # 2. Estimate A and C from shift property of Or
-    # Recompute G from A and C. G plays a major role in determining B
-    # and D, thus J.P. Noel suggest that G is recalculated
-    # A = pinv(Or[:-p,:]) @ Or[p:,:]
     A, *_ = lstsq(Or[:-p,:], Or[p:,:])
     C = Or[:p,:].copy()
+    # Recompute Or from A and C. Or plays a major role in determining B
+    # and D, thus J.P. Noel suggest that Or might be recalculated
+    # Equal to Or[] = C @ np.linalg.matrix_power(A,j)
+    # for j in range(1,r):
+    #     Or[j*p:(j+1)*p,:] = Or[(j-1)*p:j*p,:] @ A
 
     # 3. Estimate B and D given A,C and H: (W)LS estimate
     # Compute weight, W = sqrt(σ²_G^-1)
-    # TODO this is calculated multiple places
-    weight = np.zeros_like(covarG) # .transpose((2,0,1))
-    for f in range(F):
-        weight[f] = matrix_square_inv(covarG[f])
+    weight = None
+    if covarG is not None:
+        weight = np.zeros_like(covarG)  # .transpose((2,0,1))
+        for f in range(F):
+            weight[f] = matrix_square_inv(covarG[f])
 
-    # Compute partial derivative of the weighted error, e = W*(Ĝ - G)
-    # Ĝ(f) = C*inv(z(f)*I - A)*B + D and W = 1/σ_G.
-    # wrt. B
-    B = np.zeros((n,m))
-    # unweighted jacobian
-    _, JB, _, _ = jacobian_freq(A,B,C,z)
-    # add weight
-    JB.shape =(F, p*m, m*n)
-    JB = mmul_weight(JB, weight).reshape((p*m*F, m*n))
-
-    # The jacobian wrt. elements of D is a zero matrix where one element is one
-    # times the weight
-    # TODO this is already calculated in jacobian
-    JD = np.zeros((p*m*F,p*m),dtype=complex)
-    for f in range(F):
-        JD[p*m*f:(f+1)*p*m,:] = weight[f]
-
-    # Compute e = -W*(0 - G), i.e. minus the weighted error(the residual) when
-    # considering zero initial estimates for Ĝ
-    resG = mmul_weight(G, weight).ravel()
-
-    # TODO: test performance vs preallocating. This makes some intermediate copies
-    resGre = np.hstack((resG.real, resG.imag))
-    # B and D as one parameter vector => concatenate Jacobians
-    # We do: J = np.hstack([JB, JD]), Jre = np.vstack([J.real, J.imag]), but faster
-    Jre = np.empty((2*p*m*F, m*(n+p)))
-    Jre[:p*m*F, :m*n] = JB.real
-    Jre[:p*m*F, m*n:] = JD.real
-    Jre[p*m*F:, :m*n] = JB.imag
-    Jre[p*m*F:, m*n:] = JD.imag
-
-    # Normalize columns of Jacobian with their rms value
-    Jre, scaling = normalize_columns(Jre)
-    # Compute Gauss-Newton parameter update. For small residuals e(Θ), the
-    # Hessian can be approximated by the Jacobian of e. See (5.140) in
-    # paduart2008.
-    dtheta, res, rank, s = lstsq(Jre, resGre, check_finite=False)
-    dtheta /= scaling
-
-    # Parameter estimates = parameter update, since zero initial estimates considered
-    B.flat[:] = dtheta[:n*m]
-    D = np.zeros((p,m))
-    D.flat[:] = dtheta[n*m:]
+    if bd_method == 'explicit':
+        B, D = bd_explicit(A,C,Or,n,r,m,p,RT)
+    else:  # bd_method == 'nr':
+        B, D = bd_nr(A,C,G,freq,n,r,m,p,U,Y,weight)
 
     # Check stability of the estimated model
     isstable = is_stable(A)
-
     return A, B, C, D, z, isstable
 
+def bd_explicit(A,C,Or,n,r,m,p,RT):
+    """Estimate B, D using explicit solution
+
+    """
+    # R_U: Ui+1, R_Y: Yi+1
+    R_U = RT[:m*(r+1),:(m+p)*(r+1)]
+    R_Y = RT[m*(r+1):(m+p)*(r+1),:(m+p)*(r+1)]
+
+    # eq. 30
+    Or_inv = pinv(Or)
+    Q = np.vstack([
+        Or_inv @ np.hstack([np.zeros((p*r,p)), np.eye(p*r)]) @ R_Y,
+        R_Y[:p,:]]) - \
+        np.vstack([
+            A,
+            C]) @ Or_inv @ np.hstack([np.eye(p*r), np.zeros((p*r,p))]) @ R_Y
+
+    Rk = R_U
+
+    # eq (34) with zeros matrix appended to the end. eq. L1,2 = [L1,2, zeros]
+    L1 = np.hstack([A @ Or_inv, np.zeros((n,p))])
+    L2 = np.hstack([C @ Or_inv, np.zeros((p,p))])
+
+    # The pseudo-inverse of G. eq (33), prepended with zero matrix.
+    M = np.hstack([np.zeros((n,p)), Or_inv])
+
+    # The reason for appending/prepending zeros in P and M, is to easily
+    # form the submatrices of N, given by eq. 40. Thus ML is equal to first
+    # row of N1
+    ML = M - L1
+
+    # rhs multiplicator of eq (40)
+    Z = np.vstack([
+        np.hstack([np.eye(p), np.zeros((p,n))]),
+        np.hstack([np.zeros((p*r,p)), Or])
+    ])
+
+    # Assemble the kron_prod in eq. 44.
+    for j in range(r+1):
+        # Submatrices of N_k. Given by eq (40).
+        # eg. N1 corresspond to first row, N2 to second row of the N_k's
+        # submatrices
+        N1 = np.zeros((n,p*(r+1)))
+        N2 = np.zeros((p,p*(r+1)))
+
+        N1[:, :p*(r-j+1)] = ML[:, j*p:p*(r+1)]
+        N2[:, :p*(r-j)] = -L2[:, j*p:p*r]
+
+        if j == 0:
+            N2[:p, :p] += np.eye(p)
+
+        # Evaluation of eq (40)
+        Nk = np.vstack([N1, N2]) @ Z
+
+        if j == 0:
+            kron_prod = np.kron(Rk[j*m:(j+1)*m,:].T, Nk)
+        else:
+            kron_prod += np.kron(Rk[j*m:(j+1)*m,:].T, Nk)
+
+    DB, *_ = lstsq(kron_prod, Q.ravel(order='F'), check_finite=False)
+    DB = DB.reshape(n+p,m, order='F')
+    D = DB[:p,:]
+    B = DB[p:,:]
+
+    return B, D
+
+def bd_nr(A,C,G,freq,n,r,m,p,U=None,Y=None,weight=None):
+    """Estimate B, D using transfer function-based optimization
+    (Newton-Raphson iterations)
+
+    """
+
+    # initial guess for B and D
+    theta = np.zeros((m*(n+p)))
+    niter = 1  # one iteration is enough
+    for i in range(niter):
+        if U is None and Y is None:
+            cost = frf_costfcn(theta, G, weight)
+        else:
+            cost = output_costfcn(theta,A,C,n,m,p,freq,U,Y,weight)
+        jac = frf_jacobian(theta,A,C,n,m,p,freq,U,weight)
+
+        # Normalize columns of Jacobian with their rms value. Might increase
+        # numerical condition
+        jac, scaling = normalize_columns(jac)
+        # Compute Gauss-Newton parameter update. For small residuals e(Θ), the
+        # Hessian can be approximated by the Jacobian of e. See (5.140) in
+        # paduart2008.
+        dtheta, res, rank, s = lstsq(jac, cost, check_finite=False)
+        dtheta /= scaling
+        theta += dtheta
+
+    B = theta[:n*m].reshape((n,m))
+    D = theta[n*m:].reshape((p,m))
+
+    return B, D
+
+def frf_costfcn(x0, G, weight=None):
+    """Compute the cost, V = -W*(0 - G), i.e. minus the weighted error(the
+    residual) when considering zero initial estimates for Ĝ
+
+    Using x0, it would be possible to extract B, D and create an estimate G
+    Ĝ(f) = C*inv(z(f)*I - A)*B + D and W = 1/σ_G.
+
+    """
+    if weight is None:
+        resG = G.ravel()
+    else:
+        resG = mmul_weight(G, weight).ravel()
+
+    return np.hstack((resG.real, resG.imag))
+
+def frf_jacobian(x0,A,C,n,m,p,freq,U=None,weight=None):
+    """Compute partial derivative of the weighted error, e = W*(Ĝ - G) wrt B, D
+
+    Ĝ(f) = C*inv(z(f)*I - A)*B + D and W = 1/σ_G.
+
+    For FNSI:
+    Compute partial derivative of the weighted error, e = W*(Ŷ - Y) wrt B, D
+
+    Ĝ(f) = C*inv(z(f)*I - A)*B + D and W = 1/σ_G.
+    Ŷ(f) = U(f) * Ĝ(f)
+
+    """
+
+    z = np.exp(2j*np.pi*freq)
+    B = x0[:n*m].reshape(n,m)
+    D = x0[n*m:m*(n+p)].reshape(p,m)
+    # unweighted jacobian
+    _, JB, _, JD = jacobian_freq(A,B,C,z)
+    # add weight
+    F = len(z)
+    npar = m*(n+p)
+    if U is None:
+        _m = m
+        tmp = np.empty((F,p,m,npar),dtype=complex)
+        tmp[...,:n*m] = JB
+        tmp[...,n*m:] = JD
+    else:
+        _m = 1
+        tmp = np.empty((F,p,npar),dtype=complex)
+        # fast way of doing: JB[f] = U[f] @ JB[f].T
+        tmp[...,:n*m] = np.einsum('ij,iljk->ilk',U,JB)
+        tmp[...,n*m:] = np.einsum('ij,iljk->ilk',U,JD)
+
+    tmp.shape = (F,p*_m,npar)
+    if weight is not None:
+        tmp = mmul_weight(tmp, weight)
+    tmp.shape = (F*p*_m,npar)
+
+    # B and D as one parameter vector => concatenate Jacobians
+    # We do: J = np.hstack([JB, JD]), jac = np.vstack([J.real, J.imag]), but
+    # faster
+    jac = np.empty((2*F*p*_m, npar))
+    jac[:F*p*_m] = tmp.real
+    jac[F*p*_m:] = tmp.imag
+
+    return jac
+
+def output_costfcn(x0,A,C,n,m,p,freq,U,Y,weight):
+    """Compute the cost, e = W*(Ŷ - Y)
+
+    Ĝ(f) = C*inv(z(f)*I - A)*B + D and W = 1/σ_G.
+    Ŷ(f) = U(f) * Ĝ(f)
+    """
+
+    F = len(freq)
+    B = x0[:n*m].reshape(n,m)
+    D = x0[n*m:m*(n+p)].reshape(p,m)
+
+    Gss = ss2frf(A,B,C,D,freq)
+    Gss = np.random.rand(*Gss.shape)
+    # fast way of doing: Ymodel[f] = U[f] @ Gss[f].T
+    Ymodel = np.einsum('ij,ilj->il',U,Gss)
+    V = Ymodel - Y
+    if weight is None:
+        V = V.ravel(order='F')
+    else:
+        # TODO order='F' ?
+        V = mmul_weight(V, weight).ravel()
+
+    return np.hstack((V.real, V.imag))
 
 def ss2frf(A,B,C,D,freq):
     """Compute frequency response function from state-space parameters
@@ -373,7 +623,7 @@ def ss2frf(A,B,C,D,freq):
 def jacobian(x0, system, weight=None):
 
     n, m, p, npar = system.n, system.m, system.p, system.npar
-    F = system.signal.F
+    F = len(system.z)
 
     A, B, C, D = extract_ss(x0, system)
     JA, JB, JC, JD = jacobian_freq(A,B,C,system.z)
@@ -383,11 +633,11 @@ def jacobian(x0, system, weight=None):
     tmp[...,n**2 +       np.r_[:n*m]] = JB
     tmp[...,n**2 + n*m + np.r_[:n*p]] = JC
     tmp[...,n**2 + n*m + n*p:] = JD
-    tmp = tmp.reshape((F,m*p,npar))
+    tmp.shape = (F,m*p,npar)
 
     if weight is not None:
         tmp = mmul_weight(tmp, weight)
-    tmp = tmp.reshape((F*p*m,npar))
+    tmp.shape = (F*p*m,npar)
 
     jac = np.empty((2*F*p*m, npar))
     jac[:F*p*m] = tmp.real
