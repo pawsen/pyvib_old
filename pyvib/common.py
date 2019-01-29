@@ -108,6 +108,17 @@ def import_npz(npz_file, namespace=globals()):
         except ValueError:
             namespace[varName] = data[varName]
 
+def window(iterable, n=3):
+    """Returns a sliding window (of width n) over data from the iterable
+    s -> (s0,s1,...s[n-1]), (s1,s2,...,sn), ..."""
+    # https://stackoverflow.com/a/6822773/1121523
+    it = iter(iterable)
+    result = tuple(itertools.islice(it, n))
+    if len(result) == n:
+        yield result
+    for element in it:
+        result = result[1:] + (element,)
+        yield result
 
 def rescale(x, mini=None, maxi=None):
     """Rescale x to 0-1.
@@ -175,7 +186,6 @@ def weightfcn(cov):
     for f in range(F):
         covinvsq[f] = matrix_square_inv(cov[f])
     return covinvsq
-
 
 def matrix_square_inv(A):
     """Calculate the inverse of the matrix square root of `A`

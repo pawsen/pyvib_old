@@ -576,7 +576,8 @@ def select_active(structure,n,m,q,nx):
        ('inputsonly','statesonly','nocrossprod','affine','affinefull'):
         # Select terms for all rows in E/F matrix
         active = (np.tile(active[:,None], q) +
-                  np.tile(np.linspace(0,(q-1)*n_nl,q, dtype=int) ,(len(active),1))).ravel()
+                  np.tile(np.linspace(0,(q-1)*n_nl,q, dtype=int),
+                          (len(active),1))).ravel()
 
     # Sort the active elements
     return np.sort(active)

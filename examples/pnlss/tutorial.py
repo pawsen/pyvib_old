@@ -28,7 +28,7 @@ http://homepages.vub.ac.be/~ktiels/pnlss.html
 """
 
 # save figures to disk
-savefig = True
+savefig = False
 
 ## Generate data from true model ##
 # generate model to estimate
@@ -207,3 +207,5 @@ if savefig:
         for i, f in enumerate(fig):
             f[0].tight_layout()
             f[0].savefig(f"tutorial_{k}{i}.pdf")
+
+plt.show()

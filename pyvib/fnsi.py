@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from scipy.linalg import (lstsq, solve, qr, svd, logm, pinv, norm)
+from scipy.linalg import (solve, norm)
+from scipy.interpolate import interp1d
 
 from .common import meanVar
-from .subspace import subspace, discrete2cont
-from .frf import bla_periodic
+from .subspace import subspace, discrete2cont, modal_list, ss2phys
 from .modal import modal_ac, stabilization
+from .pnlss import transient_indices_periodic, remove_transient_indices_periodic
 from .spline import spline
 from .helper.modal_plotting import plot_frf, plot_stab
 
@@ -58,6 +59,8 @@ class FNSI():
         self.fs = fs
         self.fmin = fmin
         self.fmax = fmax
+        self.T1 = None
+        self.T2 = None
 
     def calc_EY(self, isnoise=False):
         """Calculate FFT of the extended input vector e(t) and the measured
@@ -239,14 +242,12 @@ class FNSI():
         self.He = He
         return H, He
 
-    def stabilization(self, nlist, tol_freq=1, tol_damping=5, tol_mode=0.98,
+    def stabilization(self, nvec, tol_freq=1, tol_damping=5, tol_mode=0.98,
                       macchoice='complex'):
         """
-
         Parameters
         ----------
         # tol for freq and damping is in %
-
 
         Returns
         -------
@@ -256,63 +257,72 @@ class FNSI():
         """
         print('FNSI stabilisation diagram')
         fs = self.fs
-        l = self.l
-        m = self.m
-        F = self.F
-        U = self.Un
-        s = self.sn
-        sqCY = self.sqCY
         # for postprocessing
         fmin = self.fmin
         fmax = self.fmax
-        self.nlist = nlist
+        self.nvec = nvec
 
-        # estimate modal properties for increasing model order
-        sr = [None]*len(nlist)
-        for k, n in enumerate(nlist):
-            U1 = U[:,:n]
-            S1 = s[:n]
-            # Estimation of the extended observability matrix, Γi, eq (21)
-            G = sqCY @ U1 @ np.diag(np.sqrt(S1))
+        flines = self.flines
+        E = self.E.T[flines]
+        Y = self.Y.T[flines]
 
-            # Estimate A from eq(24) and C as the first block row of G.
-            G_up = G[l:,:]
-            G_down = G[:-l,:]
-            A, *_ = lstsq(G_down, G_up)
-            C = G[:l, :]
-            # Convert A into continous-time arrays using eq (8)
-            A = fs * logm(A)
-            sr[k] = modal_ac(A, C)
+        freq = self.flines / self.nsper
+        r = self.ims
+        covG = None
+        G = None
 
+        ml = modal_list(G, covG, freq, nvec, r, fs, E, Y)
         # postprocessing
-        sdout = stabilization(sr, nlist, fmin, fmax, tol_freq, tol_damping,
-                              tol_mode, macchoice)
-        self.sr = sr
-        self.sd = sdout
-        return sdout
+        sd = stabilization(ml, fmin, fmax, tol_freq, tol_damping, tol_mode,
+                           macchoice)
+        self.sr = ml
+        self.sd = sd
+        return sd
 
     def calc_modal(self):
         """Calculate modal properties after identification is done"""
         self.modal = modal_ac(self.A, self.C)
 
-    def state_space(self):
+    def ss2phys(self):
         """Calculate state space matrices in physical domain using a similarity
         transform T
-
-        See eq 20.10 in
-        Etienne Gourc, JP Noel, et.al
-        "Obtaining Nonlinear Frequency Responses from Broadband Testing"
         """
 
-        # Similarity transform
-        T = np.vstack((self.C, self.C @ self.A))
-        C = solve(T.T, self.C.T).T  # (C = C*T^-1)
-        A = solve(T.T, (T @ self.A).T).T  # (A = T*A*T^-1)
-        B = T @ self.B
-        self.state = {
-            'T': T, 'C': C, 'A': A, 'B': B,
-        }
-        return
+        # returns A, B, C, T. T is similarity transform
+        return ss2phys(self.A, self.B, self.C)
+
+    def simulate(self, u, t=None, x0=None, T1=None, T2=None):
+        """Calculate the output and the states of a nonlinear state-space model with
+        transient handling.
+
+        """
+
+        # Number of samples
+        ns = u.shape[0]
+        if T1 is None:
+            T1 = self.T1
+            T2 = self.T2
+            if T1 is not None:
+                idx = self.idx_trans
+        else:
+            idx = transient_indices_periodic(T1, ns)
+
+        if T1 is not None:
+            # Prepend transient samples to the input
+            u = u[idx]
+
+        t, y, x = dnlsim(self, u, t, x0)
+
+        if T1 is not None:
+            # remove transient samples. p=1 is correct. TODO why?
+            idx = remove_transient_indices_periodic(T1, ns, p=1)
+            x = x[idx]
+            y = y[idx]
+            t = t[idx]
+
+        self.x_mod = x
+        self.y_mod = y
+        return t, y, x
 
     def plot_frf(self, p=0, m=0, sca=1, fig=None, ax=None, **kwargs):
         # Plot identified frequency response function
@@ -327,12 +337,12 @@ class FNSI():
         freq = np.arange(0,nsper)*fs/nsper
         freq_plot = freq[flines]
 
-        return plot_frf(freq_plot, H, p=p, m=m, sca=sca, fig=fig, ax=ax, **kwargs)
+        return plot_frf(freq_plot, H, p=p, m=m, sca=sca, fig=fig, ax=ax,
+                        **kwargs)
 
     def plot_stab(self, sca=1, fig=None, ax=None):
         " plot stabilization"
-        return plot_stab(self.sd, self.nlist, self.fmin, self.fmax, sca, fig,
-                         ax)
+        return plot_stab(self.sd, self.fmin, self.fmax, sca, fig, ax)
 
 class NL_force(object):
 
@@ -411,15 +421,12 @@ class NL_polynomial():
 
             # Convert to the right index
             idx1 = np.where(i1==idof)
-            x1 = x[idx1]
-
             # if connected to ground
             if i2 == -1:
-                x2 = 0
+                x12 = x[idx1]
             else:
                 idx2 = np.where(i2==idof)
-                x2 = x[idx2]
-            x12 = x1 - x2
+                x12 = x[idx1] - x[idx2]
             # in case of even functional
             if (self.enl[j] % 2 == 0):
                 x12 = np.abs(x12)
@@ -450,15 +457,12 @@ class NL_spline():
             i1 = inl[j,0]
             i2 = inl[j,1]
             idx1 = np.where(i1==idof)
-            x1 = x[idx1]
             # if connected to ground
             if i2 == -1:
-                x2 = 0
+                x12 = x[idx1]
             else:
                 idx2 = np.where(i2==idof)
-                x2 = x[idx2]
-            x12 = x1 - x2
-
+                x12 = x[idx1] - x[idx2]
             fnl_t, kn, dx = spline(x12.squeeze(), self.nspline)
 
             fnl.extend(fnl_t)
@@ -468,3 +472,65 @@ class NL_spline():
         self.fnl = fnl
 
         return fnl
+
+# https://github.com/scipy/scipy/blob/master/scipy/signal/ltisys.py
+def dnlsim(system, u, t=None, x0=None):
+    """Simulate output of a discrete-time nonlinear system.
+
+    Calculate the output and the states of a nonlinear FNSI state-space model.
+        x(t+1) = A x(t) + B u(t) + E zeta(y(t))
+        y(t)   = C x(t) + D u(t)
+
+    where zeta is polynomials whose exponents are given in xpowers.The initial
+    state is given in x0.
+
+    """
+
+    u = np.asarray(u)
+
+    if u.ndim == 1:
+        u = np.atleast_2d(u).T
+
+    if t is None:
+        out_samples = len(u)
+        stoptime = (out_samples - 1) * system.dt
+    else:
+        stoptime = t[-1]
+        out_samples = int(np.floor(stoptime / system.dt)) + 1
+
+    # Pre-build output arrays
+    xout = np.empty((out_samples, system.A.shape[0]))
+    yout = np.empty((out_samples, system.C.shape[0]))
+    tout = np.linspace(0.0, stoptime, num=out_samples)
+
+    # Check initial condition
+    if x0 is None:
+        xout[0, :] = np.zeros((system.A.shape[1],))
+    else:
+        xout[0, :] = np.asarray(x0)
+
+    # Pre-interpolate inputs into the desired time steps
+    if t is None:
+        u_dt = u
+    else:
+        if len(u.shape) == 1:
+            u = u[:, np.newaxis]
+
+        u_dt_interp = interp1d(t, u.transpose(), copy=False, bounds_error=True)
+        u_dt = u_dt_interp(tout).transpose()
+
+    # Simulate the system
+    for i in range(0, out_samples - 1):
+        # State equation x(t+1) = A*x(t) + B*u(t) + E*zeta(y(t))
+        fnl = system.nonlin.force(yout[i, :].T, 0).T
+        xout[i+1, :] = (np.dot(system.A, xout[i, :]) +
+                        np.dot(system.B, u_dt[i, :]) +
+                        fnl)
+        # Output equation y(t) = C*x(t) + D*u(t)
+        yout[i, :] = (np.dot(system.C, xout[i, :]) +
+                      np.dot(system.D, u_dt[i, :]))
+
+    yout[-1, :] = (np.dot(system.C, xout[-1, :]) +
+                   np.dot(system.D, u_dt[-1, :]))
+
+    return tout, yout, xout

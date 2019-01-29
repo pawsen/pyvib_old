@@ -58,6 +58,9 @@ slin.cut(lin.nsper, per)
 idof = np.arange(7)
 # dof where nonlinearity is
 nldof = 6
+# method to estimate BD
+bd_method = 'explicit'
+#bd_method = 'nr'
 
 # ims: matrix block order. At least n+1
 # nmax: max model order for stabilisation diagram
@@ -73,7 +76,7 @@ fnsi.calc_EY()
 fnsi.svd_comp(ims)
 fnsi.stabilization(nlist)
 # Do identification
-fnsi.id(ncur)
+fnsi.id(ncur, bd_method)
 fnsi.calc_modal()
 fnsi.nl_coeff(lin.iu, nldof)
 
@@ -87,7 +90,7 @@ fnsi_nl1 = FNSI(snlin, nl, idof, nlin.fmin, nlin.fmax)
 fnsi_nl1.calc_EY()
 fnsi_nl1.svd_comp(ims)
 fnsi_nl1.stabilization(nlist)
-fnsi_nl1.id(ncur)
+fnsi_nl1.id(ncur, bd_method)
 fnsi_nl1.calc_modal()
 fnsi_nl1.nl_coeff(nlin.iu, nldof)
 
@@ -102,7 +105,7 @@ fnsi_nl2 = FNSI(snlin, nl, idof, nlin.fmin, nlin.fmax)
 fnsi_nl2.calc_EY()
 fnsi_nl2.svd_comp(ims)
 fnsi_nl2.stabilization(nlist)
-fnsi_nl2.id(ncur)
+fnsi_nl2.id(ncur, bd_method)
 fnsi_nl2.calc_modal()
 fnsi_nl2.nl_coeff(nlin.iu, nldof)
 

@@ -233,18 +233,18 @@ def plot_svg(Sn, fig=None, ax=None, **kwargs):
     return fig, ax
 
 
-def plot_stab(sd, nlist, fmin=None, fmax=None, sca=1, fig=None, ax=None):
+def plot_stab(sd,fmin=None, fmax=None, sca=1, fig=None, ax=None):
     fig, ax = fig_ax_getter(fig, ax)
 
-    orUNS = []    # Unstabilised model order
-    freqUNS = []  # Unstabilised frequency for current model order
-    orSfreq = []  # stabilized model order, frequency
-    freqS = []    # stabilized frequency for current model order
-    orSep = []    # stabilized model order, damping
-    freqSep = []  # stabilized damping for current model order
-    orSmode = []  # stabilized model order, mode
-    freqSmode = []# stabilized damping for current model order
-    orSfull = []  # full stabilized
+    orUNS = []      # Unstabilised model order
+    freqUNS = []    # Unstabilised frequency for current model order
+    orSfreq = []    # stabilized model order, frequency
+    freqS = []      # stabilized frequency for current model order
+    orSep = []      # stabilized model order, damping
+    freqSep = []    # stabilized damping for current model order
+    orSmode = []    # stabilized model order, mode
+    freqSmode = []  # stabilized damping for current model order
+    orSfull = []    # full stabilized
     freqSfull = []
     for k, v in sd.items():
         # Short notation for the explicit for-loop
@@ -291,9 +291,10 @@ def plot_stab(sd, nlist, fmin=None, fmax=None, sca=1, fig=None, ax=None):
     if fmax is not None:
         ax.set_xlim(right=fmax*sca)
 
-    ax.set_ylim([nlist[0]-2, nlist[-1]])
-    step = round(nlist[-2]/5)
-    major_ticks = np.arange(0, nlist[-2]+1, step)
+    nvec = list(sd.keys())
+    ax.set_ylim([nvec[0]-2, nvec[-1]])
+    step = round(nvec[-2]/5)
+    major_ticks = np.arange(0, nvec[-2]+1, step)
     ax.set_yticks(major_ticks)
 
     if sca == 1:

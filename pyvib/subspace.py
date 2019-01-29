@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from .common import matrix_square_inv, mmul_weight, normalize_columns
+from .modal import modal_ac
 import numpy as np
 # qr(mode='r') returns r in economic form. This is not the case for scipy
 # svd and solve allows broadcasting when imported from numpy
@@ -37,6 +38,22 @@ def is_stable(A, domain='z'):
     else:
         raise ValueError(f"{domain} wrong. Use 's' or 'z'")
     return True
+
+def ss2phys(a, b, c, d=None):
+    """Calculate state space matrices in physical domain using a similarity
+    transform T
+
+    See eq. (20.10) in
+    Etienne Gourc, JP Noel, et.al
+    "Obtaining Nonlinear Frequency Responses from Broadband Testing"
+    """
+
+    # Similarity transform
+    T = np.vstack((C, C @ A))
+    C = solve(T.T, C.T).T        # (C = C*T^-1)
+    A = solve(T.T, (T @ A).T).T  # (A = T*A*T^-1)
+    B = T @ B
+    return A, B, C, T
 
 def discrete2cont(ad, bd, cd, dd, dt, method='zoh', alpha=None):
     """Convert linear system from discrete to continuous time-domain.
@@ -217,8 +234,44 @@ def jacobian_freq(A,B,C,z):
 
     return JA, JB, JC, JD
 
-def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr'):
-    """Estimate state-space model from Frequency Response Function (or Matrix).
+def modal_list(G, covG, freq, nvec, r, fs, U=None, Y=None):
+    """Calculate modal properties for list of system size ``n``
+
+    Used for creating stabilization diagram.
+
+    Returns
+    -------
+    dict of dicts with modal properties
+    """
+
+    if U is None and Y is None:
+        F,p,m = G.shape
+    else:
+        p = Y.shape[1]
+
+    nmax = np.max(nvec)
+    sqrtCY, U, s = subspace(G, covG, freq, nmax, r, U, Y, modal=True)
+
+    # estimate modal properties for increasing model order
+    md = {}
+    for n in sorted(nvec):
+        # Estimation of the extended observability matrix Or, eq (21)
+        Or = sqrtCY @ U[:,:n]  # @ np.diag(np.sqrt(s[:n]))
+
+        # Estimate A from eq(24) and C as the first block row of Or.
+        A, *_ = lstsq(Or[:-p,:], Or[p:,:])
+        C = Or[:p, :]
+        stable = is_stable(A, domain='z')
+        # Convert A into continous-time arrays using eq (8)
+        A = fs * logm(A)
+        modal = modal_ac(A, C)
+        md[n] = {**modal, 'stable': stable}
+
+    return md
+
+def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr',
+             modal=False):
+    """Estimate state-space model from Frequency Response Function (or Matrix)
 
     The linear state-space model is estimated from samples of the frequency
     response function (or frequency response matrix). The frequency-domain
@@ -239,6 +292,8 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr'):
         Model order
     r : int
         Number of block rows in the extended observability matrix (r > n)
+    bd_method : str {'nr', 'explicit'}, optional
+        Method used for BD estimation
 
     Returns
     -------
@@ -305,7 +360,7 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr'):
     # When using G as input, _m reflects that G is 3d: (F,p,m), ie U: (F,m)
     if U is None and Y is None:
         F,p,m = G.shape
-        is_frf =True
+        is_frf = True
         _m = m
     else:
         F = len(freq)
@@ -384,8 +439,12 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr'):
     # Remove noise. By taking svd of CY^(-1/2)*RT22
     Un, sn, _ = svd(invsqrtCY @ RT22)  # , full_matrices=False)
 
+    if modal:
+        # in case we want to calculate A, C for different n's
+        return sqrtCY, Un, sn
+
     # 1.i. Estimate extended observability matrix
-    Or = sqrtCY @ Un[:,:n]
+    Or = sqrtCY @ Un[:,:n]  # @ np.diag(np.sqrt(sn[:n]))
 
     # 2. Estimate A and C from shift property of Or
     A, *_ = lstsq(Or[:-p,:], Or[p:,:])

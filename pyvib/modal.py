@@ -14,6 +14,7 @@ import numpy as np
 from numpy.fft import irfft
 from scipy.linalg import lstsq, toeplitz, eig, inv, norm, solve
 from collections import defaultdict
+from .common import window
 
 
 def lsce(frf, f, low_lim, nmax, fs, additional_timepoints=0):
@@ -389,20 +390,15 @@ def irfft_adjusted_lower_limit(x, low_lim, indices):
     b = (irfft(x[:, :low_lim], n=nf)[:, indices]) * nf
     return a - b
 
-
-
-
-def stabilization(SD, nlist, fmin=0, fmax=np.inf, tol_freq=1, tol_damping=5,
+def stabilization(sd, fmin=0, fmax=np.inf, tol_freq=1, tol_damping=5,
                   tol_mode=0.98, macchoice='complex'):
     """Calculate stabilization of modal parameters for increasing model order.
     Used for plotting stabilization diagram
 
     Parameters
     ----------
-    SD: dict with keys {'wn', 'zeta', 'realmode'/'cpxmode'}
-        List of dicts having modal parameters for each model order.
-    nlist: list of int
-        List of model orders corresponding to SD
+    sd: dict with keys {'wn', 'zeta', 'realmode'/'cpxmode', 'stable'}
+        dict of dicts having modal parameters for each model order.
     fmin: float, default 0
         Minimum frequency to consider
     fmax: float, default np.inf
@@ -426,54 +422,57 @@ def stabilization(SD, nlist, fmin=0, fmax=np.inf, tol_freq=1, tol_damping=5,
 
     # Initialize SDout as 2 nested defaultdict
     SDout = defaultdict(lambda: defaultdict(list))
-    # loop over model orders
-    for ior, nval in enumerate(nlist[:-1]):
+    # loop over model orders except the last.
+    for n, nnext in window(sd, 2):
+        val = sd[n]
+        # is A stable?
+        SDout[n]['a_stable'].append(val['stable'])
         # loop over frequencies for current model order
-        for ifr, natfreq in enumerate(SD[ior]['wn']):
+        for ifr, natfreq in enumerate(val['wn']):
             if natfreq < fmin or natfreq > fmax:
                 continue
 
+            SDout[n]['freq'].append(natfreq)
             # compare with frequencies from one model order higher.
-            nfreq = SD[ior+1]['wn']
+            nfreq = sd[nnext]['wn']
             tol_low = (1 - tol_freq / 100) * natfreq
             tol_high = (1 + tol_freq / 100) * natfreq
             ifreqS, = np.where((nfreq >= tol_low) & (nfreq <= tol_high))
             if ifreqS.size == 0:  # ifreqS is empty
                 # the current natfreq is not stabilized
-                SDout[nval]['stab'].append(False)
-                SDout[nval]['freq'].append(natfreq)
-                SDout[nval]['zeta'].append(False)
-                SDout[nval]['mode'].append(False)
+                SDout[n]['stab'].append(False)
+                SDout[n]['zeta'].append(False)
+                SDout[n]['mode'].append(False)
             else:
                 # Stabilized in natfreq
-                SDout[nval]['stab'].append(True)
-                SDout[nval]['freq'].append(natfreq)
+                SDout[n]['stab'].append(True)
                 # Only in very rare cases, ie multiple natfreqs are very
                 # close, is len(ifreqS) != 1
                 for ii in ifreqS:
-                    nep = SD[ior+1]['zeta'][ii]
-                    tol_low = (1 - tol_damping / 100) * SD[ior]['zeta'][ifr]
-                    tol_high = (1 + tol_damping / 100) * SD[ior]['zeta'][ifr]
+                    nep = sd[nnext]['zeta'][ii]
+                    ep = val['zeta'][ifr]
+                    tol_low = (1 - tol_damping / 100) * ep
+                    tol_high = (1 + tol_damping / 100) * ep
 
                     iepS, = np.where((nep >= tol_low) & (nep <= tol_high))
                     if iepS.size == 0:
-                        SDout[nval]['zeta'].append(False)
+                        SDout[n]['zeta'].append(False)
                     else:
-                        SDout[nval]['zeta'].append(True)
+                        SDout[n]['zeta'].append(True)
                 if macchoice == 'complex':
-                    m1 = SD[ior]['cpxmode'][ifr]
-                    m2 = SD[ior+1]['cpxmode'][ifreqS]
+                    m1 = val['cpxmode'][ifr]
+                    m2 = sd[nnext]['cpxmode'][ifreqS]
                     MAC = ModalACX(m1, m2)
                 elif macchoice == 'real':
-                    m1 = SD[ior]['realmode'][ifr]
-                    m2 = SD[ior+1]['realmode'][ifreqS]
+                    m1 = sd[n]['realmode'][ifr]
+                    m2 = sd[nnext]['realmode'][ifreqS]
                     MAC = ModalAC(m1, m2)
                 else:
                     MAC = 0
                 if np.max(MAC) >= tol_mode:
-                    SDout[nval]['mode'].append(True)
+                    SDout[n]['mode'].append(True)
                 else:
-                    SDout[nval]['mode'].append(False)
+                    SDout[n]['mode'].append(False)
 
     return SDout
 
