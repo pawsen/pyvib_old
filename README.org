@@ -6,6 +6,7 @@ This repository contains the pyvib packages. A python library for nonlinear
 state space modeling using white-, gray- and blackbox models. See the
 [[https://pyvib.readthedocs.io][documentation]] for further info.
 
+
 ** Resources
 
 - [[https://pyvib.readthedocs.io][API documentation]] - technical details on all functions
@@ -96,7 +97,7 @@ To perform the code analysis, use:
 ** Releasing
 
 To make a new release, it is recommended to install
-[[https://pypi.python.org/pypi/bumpversion>][bumpversion]]. To make a new
+[[https://pypi.python.org/pypi/bumpversion][bumpversion]]. To make a new
 release, run:
 
 :   bumpversion <type>
