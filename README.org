@@ -1,159 +1,124 @@
-* Docs
-Some examples of numpy style docs
-https://www.numpy.org/devdocs/docs/howto_document.html#example-source
-https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_numpy.html
+.. image:: images/logo_small.svg
 
-And here's how to do sphinx
-https://lasagne.readthedocs.io/en/latest/
-https://github.com/SamStudio8/gretel/tree/master/docs
-http://www.ericholscher.com/blog/2016/jul/1/sphinx-and-rtd-for-writers/
-https://matplotlib.org/sampledoc/
+* Pyvib
 
-Create, update or convert docstrings in existing Python files, managing several
-styles.
-pyment -i "numpydoc" -o numpydoc ~/src/vib/vib/fnsi.py
-creates a patch file that can be applied with
-patch -p1 < test.py.patch
+This repository contains the pyvib packages. A python library for nonlinear
+state space modeling using white-, gray- and blackbox models. See the
+[[https://pyvib.readthedocs.io][documentation]] for further info.
 
+** Resources
 
-# add bibtex
-https://github.com/numpy/numpydoc/issues/34
-https://sphinxcontrib-bibtex.readthedocs.io/en/latest/
+- [[https://pyvib.readthedocs.io][API documentation]] - technical details on all functions
+- [[https://github.com/pawsen/pyvib/tree/master/doc/Tutorial/Getting%20Started.ipynb][Getting-started
+  guide]] - tutorial page (run with [[http://jupyter.org/][jupyter]] to get interactive
+   features)
+- [[https://github.com/pawsen/pyvib/tree/master/examples][Examples page]] -
+  stand-alone executables of different applications
 
-** Generate docs:
-Guide here: https://samnicholls.net/2016/06/15/how-to-sphinx-readthedocs/
-pip3 install --user Sphinx
-pip3 install --user sphinx_rtd_theme  # theme
-mkdir docs && cd docs
-sphinx-quickstart
-mkdir source
-sphinx-apidoc --separate -f -o modules ../pyvib  # to generate API documentation stubs
-make html
+** Dependencies
 
-** references between functions
-http://www.sphinx-doc.org/en/master/usage/restructuredtext/domains.html#cross-referencing-python-objects
-fx:
-Se also :py:func:`.common.db`
+*** Required
 
-.. math::
-  W^{3\beta}_{\delta_1 \rho_1 \sigma_2} \approx U^{3\beta}_{\delta_1 \rho_1}
+This library requires numpy, scipy and python3.7. E.g. on Linux:
 
-Or inline
-The value of :math:`\omega` is larger than 5.
+#+BEGIN_SRC sh
+  pip install numpy
+  pip install scipy
+  pip install cython
+#+END_SRC
 
-* Projects to learn from
-https://github.com/sunpy/sunpy
-https://github.com/arvoelke/nengolib
-* pyside2 for qui.
-Choosen over pyqt due to licensing. These two are almost interchangeable. Could
-start with pyqt if docs/examples are nicer.
+*** Optional
 
-* Things that are stupid
-** HB
-- Limits for cont. are given in rad/s. Initial periodic solution is given in Hz.
-  In general consisty wrt. rad/s and Hz is very low.
-- Switching direction for BP bifurcations is not fool-proof. Not even close.
-* Things I learned
-- Nothing works. Ever.
-- In the event that things do work, you just haven’t discovered what didn’t work yet.
-- I’ll never finish everything.
-- There is no consensus on anything.
-- We like to pretend quality control isn’t a problem.
-- Backups are hard.
-- Conferences tend to remind me I am not a engineer, statistician or a computer
-  scientist but a horrible chimera of the three
-- You should have a healthy paranoia in an analysis being wrong, doubly so if it
-  is yours
-- If you say something is simple, you’ve just found this week’s most difficult task
-- Software is not obliged to adhere to any or all of a format specification
-- gzip all of your stupidly large text files
-* Timing
+To generate the documentation you will need Sphinx:
 
-import timeit
-
-s1 = """\
-z = np.exp(2j*np.pi*freq)
-"""
-s2 = """\
-zvar = np.empty(freq.shape, dtype=complex)
-zvar.real = np.zeros(freq.shape)
-zvar.imag = 2 * np.pi * freq
-zvar = np.exp(zvar)
-"""
-setup_statement = ';'.join([
-    'import numpy as np',
-    'n = int(1e5)',
-    'freq = np.array(n)',
-])
-
-t1 = timeit.Timer(s1, setup=setup_statement)
-t2 = timeit.Timer(s2, setup=setup_statement)
-print(t1.timeit(number=5))
-print(t2.timeit(number=5))
-
-setup_statement2 = ';'.join([
-    'import numpy as np',
-    'n = int(1e3)',
-    'Hmat = np.ones((n,n)) + 1j*np.ones((n,n))',
-    'Umat = np.ones((n,n)) + 1j*np.ones((n,n))',
-])
-
-s3 = """\
-Hmat = np.hstack([np.real(Hmat), np.imag(Hmat)])
-Umat = np.hstack([np.real(Umat), np.imag(Umat)])
-Z = np.vstack([Hmat, Umat])
-"""
-
-s4 = """\
-Hre = np.hstack([np.real(Hmat), np.imag(Hmat)])
-Ure = np.hstack([np.real(Umat), np.imag(Umat)])
-Z = np.vstack([Hre, Ure])
-"""
-
-s5 = """\
-Z = np.empty((2*n,2*n))
-Z[:n,:n] = Hmat.real
-Z[:n,n:] = Hmat.imag
-Z[n:,:n] = Umat.real
-Z[n:,n:] = Umat.imag
-"""
+#+BEGIN_SRC sh
+  pip install sphinx
+  pip install sphinx_rtd_theme
+#+END_SRC
 
 
-t3 = timeit.Timer(s3, setup=setup_statement2)
-t4 = timeit.Timer(s4, setup=setup_statement2)
-t5 = timeit.Timer(s5, setup=setup_statement2)
-print(t3.timeit(number=3))
-print(t4.timeit(number=3))
-print(t5.timeit(number=3))
+And to run the tests you can use your favourite test runner, for example
+pytest:
+
+:   pip install pytest pytest-benchmark
 
 
-# import numpy as np
-# n = int(1e3)
-# freq = np.array(n)
-# Emat = np.empty((n,n), dtype=complex)
-# Mmat = np.hstack([np.real(Emat), np.imag(Emat)])
+** Installing
+
+To install, use::
+
+#+BEGIN_SRC sh
+  python setup.py build_ext --inplace
+  python setup.py install
+#+END_SRC
+
+To generate a package, use:
+
+:   python setup.py sdist --dist-dir .
 
 
-import numpy as np
-A = np.random.rand(1000,3,3)
-def slow_inverse(A):
-    Ainv = np.zeros_like(A)
+** Documentation
 
-    for i in range(A.shape[0]):
-        Ainv[i] = np.linalg.inv(A[i])
-    return Ainv
+To generate the documentation, run in the =doc= folder:
 
-def fast_inverse(A):
-    identity = np.identity(A.shape[2], dtype=A.dtype)
-    Ainv = np.zeros_like(A)
+#+BEGIN_SRC sh
+  sphinx-apidoc --separate -f -o modules ../pyvib
+  make html
+#+END_SRC
 
-    for i in range(A.shape[0]):
-        Ainv[i] = np.linalg.solve(A[i], identity)
-    return Ainv
+To push generated docs online on the =gh-pages= branch, run the helper script
 
-%timeit -n 20 aI11 = slow_inverse(A)
-%timeit -n 20 aI11 = fast_inverse(A)
-* homepage
-examples
-https://ibotpeaches.github.io/Apktool/
-https://github.com/iBotPeaches/Apktool/tree/gh-pages
+:   python push_documentation.py [remote]
+
+where ~remote~ is the name of the remote to push to. If not given, it will be
+asked.
+
+** Tests
+
+To run the tests, you can use your favourite test runner. For example, with
+pytest::
+
+:   py.test pyvib test_utils --benchmark-skip
+
+** Code analysis
+
+You can use pylint3 to perform static code analysis on the module.
+This can help identify bugs and give suggestions for improvements.
+
+To install, use:
+
+:   pip3 install pylint
+
+To perform the code analysis, use:
+
+:   pylint -d C --rcfile=pylint.cfg splipy/
+
+** Releasing
+
+To make a new release, it is recommended to install
+[[https://pypi.python.org/pypi/bumpversion>][bumpversion]]. To make a new
+release, run:
+
+:   bumpversion <type>
+
+where =type= is one of =patch=, =minor= or =major=. This will up the version
+number, create a commit and a tag. To push this to github, use:
+
+:   git push --tags
+
+After that, to create the actual packages, run:
+
+#+BEGIN_SRC sh
+  rm -rf dist
+  python setup.py sdist
+  python setup.py bdist_wheel --universal
+#+END_SRC
+
+to create a source distribution and a wheel. These can then be uploaded where
+they need to be uploaded. The recommended way to do that is using
+[[https://pypi.python.org/pypi/twine][twine]]:
+
+:   twine upload dist/* -r <index>
+
+Where =index= is the name of the index in your =~/.pypirc= where you want to
+upload.
