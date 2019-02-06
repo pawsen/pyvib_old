@@ -39,13 +39,14 @@ def is_stable(A, domain='z'):
         raise ValueError(f"{domain} wrong. Use 's' or 'z'")
     return True
 
-def ss2phys(a, b, c, d=None):
+def ss2phys(A, B, C, D=None):
     """Calculate state space matrices in physical domain using a similarity
     transform T
 
     See eq. (20.10) in
     Etienne Gourc, JP Noel, et.al
     "Obtaining Nonlinear Frequency Responses from Broadband Testing"
+    https://orbi.uliege.be/bitstream/2268/190671/1/294_gou.pdf
     """
 
     # Similarity transform
@@ -91,6 +92,7 @@ def discrete2cont(ad, bd, cd, dd, dt, method='zoh', alpha=None):
 
     """
 
+    sys = (ad, bd, cd, dd)
     if dt <= 0:
         raise ValueError("dt (%s) must be positive" % (dt,))
 
@@ -102,7 +104,7 @@ def discrete2cont(ad, bd, cd, dd, dt, method='zoh', alpha=None):
             raise ValueError("alpha (%s) must be in range [0, 1]" % (alpha,))
 
         In = np.eye(n)
-        ar = linalg.solve(alpha*dt*ad.T + (1-alpha)*dt*In, ad.T - In).T
+        ar = solve(alpha*dt*ad.T + (1-alpha)*dt*In, ad.T - In).T
         M = In - alpha*dt*ar
 
         br = np.dot(M, bd) / dt
@@ -110,13 +112,13 @@ def discrete2cont(ad, bd, cd, dd, dt, method='zoh', alpha=None):
         dr = dd - alpha*np.dot(cr, bd)
 
     elif method in ('bilinear', 'tustin'):
-        return discrete2cont(sys, dt, method='gbt', alpha=0.5)
+        return discrete2cont(*sys, dt, method='gbt', alpha=0.5)
 
     elif method in ('euler', 'forward_diff'):
-        return discrete2cont(sys, dt, method='gbt', alpha=0.0)
+        return discrete2cont(*sys, dt, method='gbt', alpha=0.0)
 
     elif method == 'backward_diff':
-        return discrete2cont(sys, dt, method='gbt', alpha=1.0)
+        return discrete2cont(*sys, dt, method='gbt', alpha=1.0)
 
     elif method == 'zoh':
         # see https://en.wikipedia.org/wiki/Discretization#Discretization_of_linear_state_space_models
@@ -379,6 +381,7 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr',
 
     Wr = (z[:,None]**np.arange(r+expl)).T
     # 1.b. and 1.c. Construct Gmat and Umat
+    # The shape depends on the method, ie if Y,U or G is supplied
     Gmat = np.empty(((r+expl)*p,F*_m), dtype=complex)
     Umat = np.empty(((r+expl)*m,F*_m), dtype=complex)
     if U is None and Y is None:
@@ -425,10 +428,6 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr',
         RT22 = RT[-r*p:,-r*p:]
 
     # 1.h. CY^(-1/2)*RT22=USV', Calculate CY^(-1/2) using svd decomp.
-    # Use gesdd as driver. Matlab uses gesvd. The only reason to use dgesvd
-    # instead is for accuracy and workspace memory. The former should only be
-    # important if you care about high relative accuracy for tiny singular
-    # values. Mem: gesdd: O(min(m,n)^2) vs O(max(m,n)) gesvd
     UC, sc, _ = svd(CY, full_matrices=False)
 
     # it is faster to work on the diagonal scy, than the full matrix SCY

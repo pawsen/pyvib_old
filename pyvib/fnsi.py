@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-from scipy.linalg import (solve, norm)
+from scipy.linalg import (solve, norm, expm)
 from scipy.interpolate import interp1d
 
 from .common import meanVar
@@ -61,6 +61,21 @@ class FNSI():
         self.fmax = fmax
         self.T1 = None
         self.T2 = None
+        self.dt = 1/signal.fs
+
+    def nlterms(self):
+        self.xpowers = []
+        self.xidx = []
+        self.xdidx = []
+        for nl in self.nonlin.nls:
+            self.xpowers.extend(nl.enl)
+            if nl.is_force:
+                self.xidx.extend(nl.inl[:,0])
+            else:
+                self.xdidx.extend(nl.inl[:,0])
+        self.xpowers = np.asarray(self.xpowers)
+        self.xidx = np.asarray(self.xidx, dtype=int)
+        self.xdidx = np.asarray(self.xdidx, dtype=int)
 
     def calc_EY(self, isnoise=False):
         """Calculate FFT of the extended input vector e(t) and the measured
@@ -104,6 +119,7 @@ class FNSI():
         if isnoise is False:
             WY = None
 
+        self.nlterms()
         # In case of no nonlinearities
         if len(self.nonlin.nls) == 0:
             scaling = []
@@ -132,7 +148,7 @@ class FNSI():
     def svd_comp(self, r):
         self.ims = r
 
-    def id(self, n, bd_method='nr'):
+    def id(self, n, bd_method='explicit'):
 
         flines = self.flines
         E = self.E.T[flines]
@@ -145,7 +161,7 @@ class FNSI():
         dt = 1/self.fs
         A, B, C, D, z, isstable = \
             subspace(G, covarG, freq, n, r, E, Y, bd_method)
-        A, B, C, D = discrete2cont(A, B, C, D, dt)
+        #A, B, C, D = discrete2cont(A, B, C, D, dt)
 
         self.A = A
         self.B = B
@@ -473,16 +489,16 @@ class NL_spline():
 
         return fnl
 
-# https://github.com/scipy/scipy/blob/master/scipy/signal/ltisys.py
 def dnlsim(system, u, t=None, x0=None):
     """Simulate output of a discrete-time nonlinear system.
 
-    Calculate the output and the states of a nonlinear FNSI state-space model.
-        x(t+1) = A x(t) + B u(t) + E zeta(y(t))
-        y(t)   = C x(t) + D u(t)
-
-    where zeta is polynomials whose exponents are given in xpowers.The initial
-    state is given in x0.
+    Calculate the output and the states of a nonlinear state-space model.
+        x(t+1) = A x(t) + B u(t) + E zeta(x(t),u(t))
+        y(t)   = C x(t) + D u(t) + F eta(x(t),u(t))
+    where zeta and eta are polynomials whose exponents are given in xpowers and
+    ypowers, respectively. The maximum degree in one variable (a state or an
+    input) in zeta or eta is given in max_nx and max_ny, respectively. The
+    initial state is given in x0.
 
     """
 
@@ -499,6 +515,7 @@ def dnlsim(system, u, t=None, x0=None):
         out_samples = int(np.floor(stoptime / system.dt)) + 1
 
     # Pre-build output arrays
+    n = system.A.shape[0]
     xout = np.empty((out_samples, system.A.shape[0]))
     yout = np.empty((out_samples, system.C.shape[0]))
     tout = np.linspace(0.0, stoptime, num=out_samples)
@@ -519,18 +536,93 @@ def dnlsim(system, u, t=None, x0=None):
         u_dt_interp = interp1d(t, u.transpose(), copy=False, bounds_error=True)
         u_dt = u_dt_interp(tout).transpose()
 
+    # prepare nonlinear part
+    # repmat_x = np.ones(system.xpowers.shape[0])
+    xidx = system.xidx
+    xdidx = system.xdidx
+    idx = np.r_[xidx, n//2+xdidx]
+    # p = u.shape[1]
     # Simulate the system
+    # TODO what to do with yout time stepping?
     for i in range(0, out_samples - 1):
-        # State equation x(t+1) = A*x(t) + B*u(t) + E*zeta(y(t))
-        fnl = system.nonlin.force(yout[i, :].T, 0).T
+        # State equation x(t+1) = A*x(t) + B*u(t) + E*zeta(y(t),ẏ(t))
+        zeta_t = np.hstack((u_dt[i, :],xout[i,idx]**system.xpowers))
         xout[i+1, :] = (np.dot(system.A, xout[i, :]) +
-                        np.dot(system.B, u_dt[i, :]) +
-                        fnl)
+                        np.dot(system.B, zeta_t))
+                        #np.dot(system.B, u_dt[i, :]))  # +
+                        #np.dot(system.E, zeta_t))
         # Output equation y(t) = C*x(t) + D*u(t)
         yout[i, :] = (np.dot(system.C, xout[i, :]) +
-                      np.dot(system.D, u_dt[i, :]))
+                      np.dot(system.D, zeta_t))
 
+    # Last point
+    zeta_t = np.hstack((u_dt[-1, :],xout[-1,idx]**system.xpowers))
     yout[-1, :] = (np.dot(system.C, xout[-1, :]) +
-                   np.dot(system.D, u_dt[-1, :]))
+                   np.dot(system.D, zeta_t))
 
     return tout, yout, xout
+
+def lsim(system, U, T, X0=None, interp=True):
+    """
+    Simulate output of a continuous-time linear system.
+
+    """
+    # https://github.com/scipy/scipy/blob/master/scipy/signal/ltisys.py#L1870
+
+    n_states = system.A.shape[0]
+    n_inputs = system.B.shape[1]
+
+    n_steps = T.size
+    if X0 is None:
+        X0 = np.zeros(n_states, system.A.dtype)
+    xout = np.zeros((n_steps, n_states), system.A.dtype)
+    xout[0] = X0
+
+    # Nonzero input
+    U = np.atleast_1d(U)
+    if U.ndim == 1:
+        U = U[:, np.newaxis]
+
+    dt = T[1] - T[0]
+    if not interp:
+        # Zero-order hold
+        # Algorithm: to integrate from time 0 to time dt, we solve
+        #   xdot = A x + B u,  x(0) = x0
+        #   udot = 0,          u(0) = u0.
+        #
+        # Solution is
+        #   [ x(dt) ]       [ A*dt   B*dt ] [ x0 ]
+        #   [ u(dt) ] = exp [  0     0    ] [ u0 ]
+        M = np.vstack([np.hstack([system.A * dt, system.B * dt]),
+                       np.zeros((n_inputs, n_states + n_inputs))])
+        # transpose everything because the state and input are row vectors
+        expMT = expm(np.transpose(M))
+        Ad = expMT[:n_states, :n_states]
+        Bd = expMT[n_states:, :n_states+n_inputs]
+        for i in range(1, n_steps):
+            xout[i] = np.dot(xout[i-1], Ad) + np.dot(U[i-1], Bd)
+    else:
+        # Linear interpolation between steps
+        # Algorithm: to integrate from time 0 to time dt, with linear
+        # interpolation between inputs u(0) = u0 and u(dt) = u1, we solve
+        #   xdot = A x + B u,        x(0) = x0
+        #   udot = (u1 - u0) / dt,   u(0) = u0.
+        #
+        # Solution is
+        #   [ x(dt) ]       [ A*dt  B*dt  0 ] [  x0   ]
+        #   [ u(dt) ] = exp [  0     0    I ] [  u0   ]
+        #   [u1 - u0]       [  0     0    0 ] [u1 - u0]
+        M = np.vstack([np.hstack([system.A * dt, system.B * dt,
+                                  np.zeros((n_states, n_inputs))]),
+                       np.hstack([np.zeros((n_inputs, n_states + n_inputs)),
+                                  np.identity(n_inputs)]),
+                       np.zeros((n_inputs, n_states + 2 * n_inputs))])
+        expMT = expm(np.transpose(M))
+        Ad = expMT[:n_states, :n_states]
+        Bd1 = expMT[n_states+n_inputs:, :n_states]
+        Bd0 = expMT[n_states:n_states + n_inputs, :n_states] - Bd1
+        for i in range(1, n_steps):
+            xout[i] = (np.dot(xout[i-1], Ad) + np.dot(U[i-1], Bd0) + np.dot(U[i], Bd1))
+
+    yout = (np.squeeze(np.dot(xout, system.C.T)) + np.squeeze(np.dot(U, system.D.T)))
+    return T, np.squeeze(yout), np.squeeze(xout)

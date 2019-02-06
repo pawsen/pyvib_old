@@ -13,6 +13,10 @@ from numpy.fft import fft
 from scipy.optimize import least_squares
 from scipy.signal import dlsim
 
+
+"""The file contains routines for LTI state space models.
+"""
+
 class Signal(object):
     def __init__(self, u, y, fs=1):
         self.u = u

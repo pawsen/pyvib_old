@@ -12,13 +12,13 @@ from pyvib.signal import Signal
 from pyvib.fnsi import FNSI
 from pyvib.modal import modal_ac, frf_mkc
 from pyvib.helper.modal_plotting import (plot_knl, plot_frf, plot_svg)
-from pyvib.frf import FRF
+from pyvib.frf import periodic
 from pyvib.fnsi import NL_force, NL_polynomial, NL_spline
 
 # Parameters for 2dof model
 from parameters import par
 
-show_periodicity = True
+show_periodicity = False
 
 # conversion between Hz and rad/s
 sca = 2*np.pi
@@ -120,19 +120,25 @@ modal3 = print_modal(fnsi3)
 fnsi.plot_stab(sca=sca)
 
 ## Compare FRFs
-frf = FRF(snlin, fmin=1e-3, fmax=5/2/np.pi)
-frf_freq, frf_H = frf.periodic()
+# FRF
+m = snlin.u_per.shape[0]
+p = snlin.y_per.shape[0]
+R = 1
+u = snlin.u_per.reshape((m,snlin.nsper,R,snlin.nper),order='F').swapaxes(0,1)
+y = snlin.y_per.reshape((p,snlin.nsper,R,snlin.nper),order='F').swapaxes(0,1)
+
+frf_freq, frf_H, covG, covGn = periodic(u,y, fs=snlin.fs, fmin=1e-3, fmax=5/2/np.pi)
 
 ## MCK
 M, C, K = par['M'], par['C'], par['K']
 freq_mck, H_mck = frf_mkc(M, K, C=C, fmin=1e-3, fmax=fmax, fres=0.01)
 
 fH1, ax = plt.subplots()
-plot_frf(frf_freq, frf_H, dof, sca, ax=ax, ls='-', c='k', label='From high signal')
-plot_frf(freq_mck, H_mck[0,:], dof, sca, ax=ax, label='mck', ls=':', c='b')
-fnsi.plot_frf(dof, sca, ax=ax, label='nl high', ls='--', c='C1')
-fnsi2.plot_frf(dof, sca, ax=ax, label='lin high', ls='--', c='C2')
-fnsi3.plot_frf(dof, sca, ax=ax, label='lin low', ls='-.', c='C3')
+plot_frf(frf_freq, frf_H, p=dof, sca=sca, ax=ax, ls='-', c='k', label='From high signal')
+plot_frf(freq_mck, H_mck.T, p=dof, sca=sca, ax=ax, label='mck', ls=':', c='b')
+fnsi.plot_frf(p=dof, sca=sca, ax=ax, label='nl high', ls='--', c='C1')
+fnsi2.plot_frf(p=dof, sca=sca, ax=ax, label='lin high', ls='--', c='C2')
+fnsi3.plot_frf(p=dof, sca=sca, ax=ax, label='lin low', ls='-.', c='C3')
 ax.legend()
 #ax.legend_ = None
 ax.set_xlabel('Frequency (rad/s)')
@@ -140,10 +146,14 @@ ax.set_xlabel('Frequency (rad/s)')
 ax.set_ylabel('Amplitude (dB)')
 
 # The phase from FRF is shown as:
-frfl = FRF(slin,fmin=1e-3,fmax=5/2/np.pi)
-frfl_freq, frfl_H = frfl.periodic()
+m = slin.u_per.shape[0]
+p = slin.y_per.shape[0]
+R = 1
+u = slin.u_per.reshape((m,slin.nsper,R,slin.nper),order='F').swapaxes(0,1)
+y = slin.y_per.reshape((p,slin.nsper,R,slin.nper),order='F').swapaxes(0,1)
+frfl_freq, frfl_H, covG, covGn = periodic(u,y, fs=slin.fs, fmin=1e-3, fmax=5/2/np.pi)
 plt.figure()
-plt.plot(frf_freq*sca, np.angle(frfl_H[dof]) / np.pi * 180)
+plt.plot(frf_freq*sca, np.angle(frfl_H[:,dof]) / np.pi * 180)
 plt.xlabel('Frequency (rad/s)')
 plt.ylabel('Phase angle (deg)')
 plt.yticks(np.linspace(-180, 180, 360//90))
