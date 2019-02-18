@@ -65,20 +65,6 @@ start with pyqt if docs/examples are nicer.
 - Limits for cont. are given in rad/s. Initial periodic solution is given in Hz.
   In general consisty wrt. rad/s and Hz is very low.
 - Switching direction for BP bifurcations is not fool-proof. Not even close.
-* Things I learned
-- Nothing works. Ever.
-- In the event that things do work, you just haven’t discovered what didn’t work yet.
-- I’ll never finish everything.
-- There is no consensus on anything.
-- We like to pretend quality control isn’t a problem.
-- Backups are hard.
-- Conferences tend to remind me I am not a engineer, statistician or a computer
-  scientist but a horrible chimera of the three
-- You should have a healthy paranoia in an analysis being wrong, doubly so if it
-  is yours
-- If you say something is simple, you’ve just found this week’s most difficult task
-- Software is not obliged to adhere to any or all of a format specification
-- gzip all of your stupidly large text files
 * Timing
 
 import timeit
