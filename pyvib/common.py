@@ -307,7 +307,7 @@ def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
         s = s[:r]
         sr = s.copy()  # only saved to calculate cond. number later
         while cost >= cost_old and ninner < ninner_max:
-            s /= s**2 + lamb**2
+            s /= (s**2 + lamb**2)
             ds = -np.linalg.multi_dot((err_old, U[:,:r] * s, Vt[:r]))
             ds /= scaling
 
