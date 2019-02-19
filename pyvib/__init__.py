@@ -3,14 +3,19 @@
 
 import sys
 
-__minimum_python_version__ = "3.7"
+class UnsupportedPythonError(Exception):
+    pass
+
+
+__minimum_python_version__ = "3.6"
 if sys.version_info < tuple((int(val) for val in __minimum_python_version__.split('.'))):
-    raise UnsupportedPythonError(f"sunpy does not support Python < {__minimum_python_version__}")
+    raise UnsupportedPythonError(f"pyvib does not support Python < {__minimum_python_version__}")
 
 
 __version__ = "0.2.dev1"
 
 # this indicates whether or not we are in the package's setup.py
+# see https://github.com/astropy/astropy/blob/master/astropy/__init__.py#L63
 try:
     _PYVIB_SETUP_
 except NameError:

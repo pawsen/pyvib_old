@@ -1,4 +1,4 @@
-"""SunPy configuration file functionality"""
+"""pyvibs configuration file functionality"""
 import os
 import tempfile
 import configparser
@@ -7,6 +7,8 @@ import pyvib
 
 __all__ = ['load_config', 'print_config']
 
+# dir where config file is stored
+CONFIGDIR ='utils'
 
 def load_config():
     """
@@ -108,7 +110,7 @@ def _find_config_files():
 
     # find default configuration file
     module_dir = os.path.dirname(pyvib.__file__)
-    config_files.append(os.path.join(module_dir, 'data', 'pyvibrc'))
+    config_files.append(os.path.join(module_dir, CONFIGDIR, 'pyvibrc'))
 
     # if a user configuration file exists, add that to list of files to read
     # so that any values set there will override ones specified in the default
