@@ -23,6 +23,8 @@ See http://www.nonlinearbenchmark.org/#Silverbox
 
 # save figures to disk
 savefig = True
+savedata = True
+
 data = sio.loadmat('data/SNLS80mV.mat')
 # partitioning the data
 u = data['V1'].T
@@ -192,4 +194,10 @@ if savefig:
         fig = fig if isinstance(fig, list) else [fig]
         for i, f in enumerate(fig):
             f[0].tight_layout()
-            f[0].savefig(f"SNbenchmark_{k}{i}.pdf")
+            f[0].savefig(f"fig/SNbenchmark_{k}{i}.pdf")
+
+if savedata:
+    with open('sn_benchmark_pnlss.pkl', 'bw') as f:
+        pickler = pickle.Pickler(f)
+        pickler.dump(linmodel)
+        pickler.dump(model)

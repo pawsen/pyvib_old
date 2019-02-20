@@ -289,6 +289,10 @@ class StateSpace(object):
             self.infodict = infodict
         return models, infodict
 
+    def save(self, fname):
+        """Save statespace representation to disk"""
+        pass
+
     def plot_info(self, fig=None, ax=None):
         """Plot summary of subspace identification"""
         return plot_subspace_info(self.infodict, fig, ax)

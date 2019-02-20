@@ -925,7 +925,7 @@ def dnlsim(system, u, t=None, x0=None):
                       np.dot(system.F, eta_t))
 
     # Last point
-    eta_t = np.prod(np.outer(repmat_x, np.hstack((xout[-1], u_dt[-1])))
+    eta_t = np.prod(np.outer(repmat_y, np.hstack((xout[-1], u_dt[-1])))
                     **system.ypowers, axis=1)
     yout[-1, :] = (np.dot(system.C, xout[-1, :]) +
                    np.dot(system.D, u_dt[-1, :]) +

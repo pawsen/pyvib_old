@@ -9,69 +9,68 @@ from scipy.linalg import norm
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.io as sio
+import pickle
 
-"""PNLSS model of the silverbox.
+"""PNLSS model of the silverbox system.
 
 The Silverbox system can be seen as an electroninc implementation of the
 Duffing oscilator. It is build as a 2nd order linear time-invariant system with
 a 3rd degree polynomial static nonlinearity around it in feedback. This type of
 dynamics are, for instance, often encountered in mechanical systems.
 nonlinearity. The input-output data is synthetic.
-
 See http://www.nonlinearbenchmark.org/#Silverbox
+
+This code correspond to the article
+Grey-box state-space identification of nonlinear mechanical vibrations
+JP. Noël & J. Schoukens
+http://dx.doi.org/10.1080/00207179.2017.1308557
 """
 
-# def load(var, amp):
-#     fname = f"SNJP_{var}m_full_FNSI_{amp}.mat"
-#     data = sio.loadmat(fname)
-#     if var == 'u':
-#         return (data[k] for k in ['um', 'fs', 'flines', 'P'])
-#     else:
-#         return data['ym']
-
-def load(var, amp, k):
+def load(var, amp):
     path = 'data/'
     fname = f"{path}SNJP_{var}m_full_FNSI_{amp}.mat"
-    return sio.loadmat(fname)[k]
+    data = sio.loadmat(fname)
+    if var == 'u':
+        um, fs, flines, P = [data[k] for k in ['um', 'fs', 'flines', 'P']]
+        return um, fs.item(), flines.squeeze(), P.item()
+    else:
+        return data['ym']
 
 # save figures to disk
 savefig = True
+savedata = True
 
-P = load('u',100,'P').item()
-lines = load('u',100,'flines').squeeze() - 1
-fs = load('u',100,'fs').item()
-u = load('u',100,'um')
-y = load('y',100,'ym')
-# u -= u.mean()
-# y -= y.mean()
+# estimation data.
+# 1 realization, 30 periods of 8192 samples. 5 discarded as transient
+amp = 100
+u, fs, lines, P = load('u',amp)
+y = load('y',amp)
 
 NT, m = u.shape
 NT, p = y.shape
-npp = NT/P
+npp = NT//P
+R = 1
+Ptr = 5
 
 # odd multisine till 200 Hz, without DC.
-lines = np.arange(0,2683,2)
+# lines = np.arange(0,2683,2)
 
 # partitioning the data
+uest = u.reshape(npp,m,R,P,order='F')[...,Ptr:]
+yest = y.reshape(npp,p,R,P,order='F')[...,Ptr:]
 
-
-
-#uest = np.repeat(uest[:,None],p,axis=1)
-uest = uest.reshape(npp,m,R,P)
-yest = yest.reshape(npp,p,R,P)
-
-# Validation data.
-u = np.delete(u, np.s_[:Nz+Ntr])
-y = np.delete(y, np.s_[:Nz+Ntr])
-
-uval = u[:npp]
-yval = y[:npp]
+# TODO no validation data yet.
+# \Users\JP\Documents\Research\Data\Silverbox_VUB_June2013\SilverboxData\CubicNL\BLA'
+# um_full_100.mat
+# until then, we just use last period of estimation data
+uval = uest[...,-1].reshape(-1,m)
+yval = yest[...,-1].reshape(-1,p)
 
 # model orders and Subspace dimensioning parameter
 n = 2
 maxr = 20
 
-sig = Signal(uest,yest,fs=1)
+sig = Signal(uest,yest)
 sig.lines(lines)
 # average signal over periods. Used for training of PNLSS model
 # Even if there's only 1 period, pnlss expect this to be run first. It also
@@ -81,11 +80,12 @@ um, ym = sig.average()
 linmodel = linss()
 # estimate bla, total distortion, and noise distortion
 linmodel.bla(sig)
-models, infodict = linmodel.scan(n, maxr)
+models, infodict = linmodel.scan(n, maxr, weight=None)
+#pickle.
 
 # estimate PNLSS
-# transient: Add two periods before the start of each realization. Note that
-# this for the signal averaged over periods
+# transient: Add five periods before the start of each realization. Note that
+# this for the signal averaged over periods. Here there is only 1 realization
 Ntr = Ptr*npp
 T1 = np.r_[Ntr, 0]
 
@@ -104,13 +104,10 @@ _, ynlin, _ = model.simulate(um)
 # only one realization
 nl_errvec = model.extract_model(yval, uval, T1=Ntr)
 
-# compute model output on test data(unseen data)
+# compute model output on validation data(unseen data)
 _, ylval, _ = linmodel.simulate(uval, T1=Ntr)
 _, ynlval, _ = model.simulate(uval, T1=Ntr)
 
-# compute model output on test data(unseen data)
-_, yltest, _ = linmodel.simulate(utest, T1=0)
-_, ynltest, _ = model.simulate(utest, T1=0)
 
 ## Plots ##
 # store figure handle for saving the figures later
@@ -154,23 +151,6 @@ plt.legend(('Output','Linear error','PNLSS error'))
 plt.title('Validation results')
 figs['val_data'] = (plt.gcf(), plt.gca())
 
-# result on test data
-# resample factor, as there is 153000 points in test data
-plt.figure()
-N = len(ytest)
-resamp = 1
-freq = np.arange(N)/N*fs
-plottime = np.hstack((ytest, ytest-yltest, ytest-ynltest))
-plotfreq = np.fft.fft(plottime, axis=0)
-nfd = plotfreq.shape[0]
-plt.plot(freq[:nfd//2:resamp], db(plotfreq[:nfd//2:resamp]), '.')
-plt.xlim((0, 300))
-plt.xlabel('Frequency')
-plt.ylabel('Output (errors) (dB)')
-plt.legend(('Output','Linear error','PNLSS error'))
-plt.title('Test results')
-figs['test_data'] = (plt.gcf(), plt.gca())
-
 # subspace plots
 figs['subspace_optim'] = linmodel.plot_info()
 figs['subspace_models'] = linmodel.plot_models()
@@ -180,4 +160,10 @@ if savefig:
         fig = fig if isinstance(fig, list) else [fig]
         for i, f in enumerate(fig):
             f[0].tight_layout()
-            f[0].savefig(f"boucwen_{k}{i}.pdf")
+            f[0].savefig(f"fig/silverbox_jp_{k}{i}.pdf")
+
+if savedata:
+    with open('sn_jp_pnlss.pkl', 'bw') as f:
+        pickler = pickle.Pickler(f)
+        pickler.dump(linmodel)
+        pickler.dump(model)

@@ -8,7 +8,8 @@
 - tests
 - documentation
 - check all todo's in code
-
+- cleanup code
+  https://www.reddit.com/r/Python/comments/82hgzm/any_advantages_of_flake8_over_pylint/dvbbgv5
 * Docs
 Some examples of numpy style docs
 https://www.numpy.org/devdocs/docs/howto_document.html#example-source

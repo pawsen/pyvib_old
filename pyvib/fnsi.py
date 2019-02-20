@@ -13,47 +13,55 @@ from .spline import spline
 from .helper.modal_plotting import plot_frf, plot_stab
 
 class FNSI():
-    def __init__(self, signal, nonlin, idof, fmin, fmax, iu=[], nldof=[]):
+    def __init__(self, signal, nonlin, idof, fmin, fmax, iu=[], nldof=[],
+                 flines=None, u=None, y=None, fs=None):
         # self.signal = signal
         self.nonlin = nonlin
-
-        # nper : number of periods
-        # nsper : number of samples per period
-        # ns : total samples in periodic signal
-        fs = signal.fs
-        y = signal.y_per
-        u = signal.u_per
-        if u.ndim != 2:
-            u = u.reshape(-1,u.shape[0])
-        nper = signal.nper
-        nsper = signal.nsper
-
-        f1 = int(np.floor(fmin/fs * nsper))
-        f2 = int(np.ceil(fmax/fs*nsper))
-        flines = np.arange(f1,f2+1)
 
         # Make sure dof of force and dof of nonlin is included in idofs
         # if all arrays are int, then resulting array is also int. But if some
         # are empty, the resulting array is float
         idof = np.unique(np.hstack((idof, iu, nldof)))
         idof = idof.astype(int)
-        y = y[idof,:]
-        fdof, ns = u.shape
-        ndof, ns = y.shape
+        if u is None:
+            # nsper : number of samples per period
+            # ns : total samples in periodic signal
+            fs = signal.fs
+            y = signal.y_per
+            u = signal.u_per
+            if u.ndim != 2:
+                u = u.reshape(-1,u.shape[0])
+            nper = signal.nper
+            nsper = signal.nsper
 
-        # some parameters. Dont know what.. Maybe npp: number per period!
-        p1 = 0
-        p2 = 0
-        npp = nper - p1 - p2
+            y = y[idof,:]
+            fdof, ns = u.shape
+            ndof, ns = y.shape
 
-        # TODO could be done in Signal class
-        # TODO make C-order. Should just be swap nsper and npp
-        self.u = np.reshape(u[:,p1*nsper:(nper-p2)*nsper], (fdof, nsper, npp), order='F')
-        self.y = np.reshape(y[:,p1*nsper:(nper-p2)*nsper], (ndof, nsper, npp), order='F')
+            # npp: number of periods
+            p1 = 0
+            p2 = 0
+            npp = nper - p1 - p2
+
+            # TODO could be done in Signal class
+            # TODO make C-order. Should just be swap nsper and npp
+            self.u = np.reshape(u[:,p1*nsper:(nper-p2)*nsper], (fdof, nsper, npp), order='F')
+            self.y = np.reshape(y[:,p1*nsper:(nper-p2)*nsper], (ndof, nsper, npp), order='F')
+        else:
+            npp, m, P = u.shape
+            npp, p, P = y.shape
+            self.u = u.swapaxes(1,0)
+            self.y = y.swapaxes(1,0)
+            nsper = npp
+            npp = P
+
+        if flines is None:
+            f1 = int(np.floor(fmin/fs * nsper))
+            f2 = int(np.ceil(fmax/fs*nsper))
+            flines = np.arange(f1,f2+1)
 
         self.idof = idof
         self.npp = npp
-        self.nper = nper
         self.nsper = nsper
         self.flines = flines
         self.fs = fs
@@ -61,7 +69,7 @@ class FNSI():
         self.fmax = fmax
         self.T1 = None
         self.T2 = None
-        self.dt = 1/signal.fs
+        self.dt = 1/fs
 
     def nlterms(self):
         self.xpowers = []
@@ -159,14 +167,16 @@ class FNSI():
         covarG = None
         G = None
         dt = 1/self.fs
-        A, B, C, D, z, isstable = \
+        Ad, Bd, Cd, Dd, z, isstable = \
             subspace(G, covarG, freq, n, r, E, Y, bd_method)
-        #A, B, C, D = discrete2cont(A, B, C, D, dt)
+        Ac, Bc, Cc, Dc = discrete2cont(Ad, Bd, Cd, Dd, dt)
 
-        self.A = A
-        self.B = B
-        self.C = C
-        self.D = D
+        self.A = Ac
+        self.B = Bc
+        self.C = Cd
+        self.D = Dd
+        self.Ad = Ad
+        self.Bd = Bd
 
     def nl_coeff(self, iu, dofs):
         """Form the extended FRF (transfer function matrix) He(ω) and ectract
@@ -541,88 +551,23 @@ def dnlsim(system, u, t=None, x0=None):
     xidx = system.xidx
     xdidx = system.xdidx
     idx = np.r_[xidx, n//2+xdidx]
+    m = system.B.shape[1] - system.E.shape[1]
+
     # p = u.shape[1]
     # Simulate the system
-    # TODO what to do with yout time stepping?
     for i in range(0, out_samples - 1):
-        # State equation x(t+1) = A*x(t) + B*u(t) + E*zeta(y(t),ẏ(t))
-        zeta_t = np.hstack((u_dt[i, :],xout[i,idx]**system.xpowers))
-        xout[i+1, :] = (np.dot(system.A, xout[i, :]) +
-                        np.dot(system.B, zeta_t))
-                        #np.dot(system.B, u_dt[i, :]))  # +
-                        #np.dot(system.E, zeta_t))
         # Output equation y(t) = C*x(t) + D*u(t)
         yout[i, :] = (np.dot(system.C, xout[i, :]) +
-                      np.dot(system.D, zeta_t))
+                      np.dot(system.D[:,:m], u_dt[i, :]))
+        # State equation x(t+1) = A*x(t) + B*u(t) + E*zeta(y(t),ẏ(t))
+        zeta_t = yout[i,idx]**system.xpowers
+        xout[i+1, :] = (np.dot(system.Ad, xout[i, :]) +
+                        np.dot(system.Bd[:,:m], u_dt[i, :]) +
+                        np.dot(system.E, zeta_t))
 
     # Last point
-    zeta_t = np.hstack((u_dt[-1, :],xout[-1,idx]**system.xpowers))
+    #zeta_t = np.hstack((u_dt[-1, :],xout[-1,idx]**system.xpowers))
     yout[-1, :] = (np.dot(system.C, xout[-1, :]) +
-                   np.dot(system.D, zeta_t))
+                   np.dot(system.D[:,:m], u_dt[-1, :]))
 
     return tout, yout, xout
-
-def lsim(system, U, T, X0=None, interp=True):
-    """
-    Simulate output of a continuous-time linear system.
-
-    """
-    # https://github.com/scipy/scipy/blob/master/scipy/signal/ltisys.py#L1870
-
-    n_states = system.A.shape[0]
-    n_inputs = system.B.shape[1]
-
-    n_steps = T.size
-    if X0 is None:
-        X0 = np.zeros(n_states, system.A.dtype)
-    xout = np.zeros((n_steps, n_states), system.A.dtype)
-    xout[0] = X0
-
-    # Nonzero input
-    U = np.atleast_1d(U)
-    if U.ndim == 1:
-        U = U[:, np.newaxis]
-
-    dt = T[1] - T[0]
-    if not interp:
-        # Zero-order hold
-        # Algorithm: to integrate from time 0 to time dt, we solve
-        #   xdot = A x + B u,  x(0) = x0
-        #   udot = 0,          u(0) = u0.
-        #
-        # Solution is
-        #   [ x(dt) ]       [ A*dt   B*dt ] [ x0 ]
-        #   [ u(dt) ] = exp [  0     0    ] [ u0 ]
-        M = np.vstack([np.hstack([system.A * dt, system.B * dt]),
-                       np.zeros((n_inputs, n_states + n_inputs))])
-        # transpose everything because the state and input are row vectors
-        expMT = expm(np.transpose(M))
-        Ad = expMT[:n_states, :n_states]
-        Bd = expMT[n_states:, :n_states+n_inputs]
-        for i in range(1, n_steps):
-            xout[i] = np.dot(xout[i-1], Ad) + np.dot(U[i-1], Bd)
-    else:
-        # Linear interpolation between steps
-        # Algorithm: to integrate from time 0 to time dt, with linear
-        # interpolation between inputs u(0) = u0 and u(dt) = u1, we solve
-        #   xdot = A x + B u,        x(0) = x0
-        #   udot = (u1 - u0) / dt,   u(0) = u0.
-        #
-        # Solution is
-        #   [ x(dt) ]       [ A*dt  B*dt  0 ] [  x0   ]
-        #   [ u(dt) ] = exp [  0     0    I ] [  u0   ]
-        #   [u1 - u0]       [  0     0    0 ] [u1 - u0]
-        M = np.vstack([np.hstack([system.A * dt, system.B * dt,
-                                  np.zeros((n_states, n_inputs))]),
-                       np.hstack([np.zeros((n_inputs, n_states + n_inputs)),
-                                  np.identity(n_inputs)]),
-                       np.zeros((n_inputs, n_states + 2 * n_inputs))])
-        expMT = expm(np.transpose(M))
-        Ad = expMT[:n_states, :n_states]
-        Bd1 = expMT[n_states+n_inputs:, :n_states]
-        Bd0 = expMT[n_states:n_states + n_inputs, :n_states] - Bd1
-        for i in range(1, n_steps):
-            xout[i] = (np.dot(xout[i-1], Ad) + np.dot(U[i-1], Bd0) + np.dot(U[i], Bd1))
-
-    yout = (np.squeeze(np.dot(xout, system.C.T)) + np.squeeze(np.dot(U, system.D.T)))
-    return T, np.squeeze(yout), np.squeeze(xout)
