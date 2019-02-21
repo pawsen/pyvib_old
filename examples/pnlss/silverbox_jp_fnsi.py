@@ -56,7 +56,7 @@ def load(var, amp):
 
 # save figures to disk
 savefig = False
-savedata = True
+savedata = False
 
 # estimation data.
 # 1 realization, 30 periods of 8192 samples. 5 discarded as transient
@@ -91,29 +91,16 @@ yval = yest[...,-1].reshape(-1,p)
 # model orders and Subspace dimensioning parameter
 n = 2
 maxr = 20
-
-# inl: connection. -1 is ground. enl: exponent. knl: coefficient. Always 1.
-inl = np.array([[0,-1],
-                [0,-1]])
-enl = np.array([2,3])
-knl = np.array([1,1])
-nl_pol = NL_polynomial(inl, enl, knl)
-nl = NL_force(nl_pol)
-# idof are selected dofs.
-# iu are dofs of force
-iu = 0
-idof = [0]
-fmin = 0  # not used
-fmax = 300  # not used
-
 dof = 0
+iu = 0
 
-fnsi = FNSI(None, nl, idof, fmin, fmax, flines=lines, u=uest, y=yest, fs=fs)
+xpowers = np.array([[2],[3]])
+fnsi = FNSI(flines=lines, u=uest, y=yest, fs=fs, xpowers=xpowers)
 fnsi.calc_EY()
 fnsi.svd_comp(maxr)
 # Do estimation
 fnsi.id(n)
-fnsi.nl_coeff(iu, dofs=dof)
+#fnsi.nl_coeff(iu, dofs=dof)
 
 sca = 1
 def print_modal(fnsi):
@@ -130,19 +117,19 @@ def print_modal(fnsi):
     return modal
 
 print('## nonlinear identified at high level')
-modal = print_modal(fnsi)
+#modal = print_modal(fnsi)
 
-frf_freq, frf_H, covG, covGn = periodic(u,y, fs=fs, fmin=1e-3, fmax=150)
+# frf_freq, frf_H, covG, covGn = periodic(u,y, fs=fs, fmin=1e-3, fmax=150)
 
-plt.ion()
-fH1, ax = plt.subplots()
-plot_frf(frf_freq, frf_H, p=dof, sca=sca, ax=ax, ls='-', c='k', label='From high signal')
-fnsi.plot_frf(p=dof, sca=sca, ax=ax, label='nl high', ls='--', c='C1')
+# plt.ion()
+# fH1, ax = plt.subplots()
+# plot_frf(frf_freq, frf_H, p=dof, sca=sca, ax=ax, ls='-', c='k', label='From high signal')
+# fnsi.plot_frf(p=dof, sca=sca, ax=ax, label='nl high', ls='--', c='C1')
 
-fknl, axknl = plot_knl(fnsi, sca)
+# fknl, axknl = plot_knl(fnsi, sca)
 
 
-nnl = fnsi.nonlin.nls[0].nnl
+nnl = xpowers.shape[0]
 E = np.zeros((n, nnl))
 um = uest.mean(2)
 ym = yest.mean(2)

@@ -13,56 +13,20 @@ from .spline import spline
 from .helper.modal_plotting import plot_frf, plot_stab
 
 class FNSI():
-    def __init__(self, signal, nonlin, idof, fmin, fmax, iu=[], nldof=[],
-                 flines=None, u=None, y=None, fs=None):
-        # self.signal = signal
-        self.nonlin = nonlin
+    def __init__(self, u, y, fmin=None, fmax=None, xpowers=None, flines=None,
+                 yd=None, fs=None):
 
-        # Make sure dof of force and dof of nonlin is included in idofs
-        # if all arrays are int, then resulting array is also int. But if some
-        # are empty, the resulting array is float
-        idof = np.unique(np.hstack((idof, iu, nldof)))
-        idof = idof.astype(int)
-        if u is None:
-            # nsper : number of samples per period
-            # ns : total samples in periodic signal
-            fs = signal.fs
-            y = signal.y_per
-            u = signal.u_per
-            if u.ndim != 2:
-                u = u.reshape(-1,u.shape[0])
-            nper = signal.nper
-            nsper = signal.nsper
-
-            y = y[idof,:]
-            fdof, ns = u.shape
-            ndof, ns = y.shape
-
-            # npp: number of periods
-            p1 = 0
-            p2 = 0
-            npp = nper - p1 - p2
-
-            # TODO could be done in Signal class
-            # TODO make C-order. Should just be swap nsper and npp
-            self.u = np.reshape(u[:,p1*nsper:(nper-p2)*nsper], (fdof, nsper, npp), order='F')
-            self.y = np.reshape(y[:,p1*nsper:(nper-p2)*nsper], (ndof, nsper, npp), order='F')
-        else:
-            npp, m, P = u.shape
-            npp, p, P = y.shape
-            self.u = u.swapaxes(1,0)
-            self.y = y.swapaxes(1,0)
-            nsper = npp
-            npp = P
+        npp, m, P = u.shape
+        npp, p, P = y.shape
+        self.u = u
+        self.y = y
+        self.yd = yd
 
         if flines is None:
-            f1 = int(np.floor(fmin/fs * nsper))
-            f2 = int(np.ceil(fmax/fs*nsper))
+            f1 = int(np.floor(fmin/fs * npp))
+            f2 = int(np.ceil(fmax/fs * npp))
             flines = np.arange(f1,f2+1)
 
-        self.idof = idof
-        self.npp = npp
-        self.nsper = nsper
         self.flines = flines
         self.fs = fs
         self.fmin = fmin
@@ -70,22 +34,10 @@ class FNSI():
         self.T1 = None
         self.T2 = None
         self.dt = 1/fs
+        self.xpowers = np.atleast_2d(xpowers)
+        self.npp = npp
 
-    def nlterms(self):
-        self.xpowers = []
-        self.xidx = []
-        self.xdidx = []
-        for nl in self.nonlin.nls:
-            self.xpowers.extend(nl.enl)
-            if nl.is_force:
-                self.xidx.extend(nl.inl[:,0])
-            else:
-                self.xdidx.extend(nl.inl[:,0])
-        self.xpowers = np.asarray(self.xpowers)
-        self.xidx = np.asarray(self.xidx, dtype=int)
-        self.xdidx = np.asarray(self.xdidx, dtype=int)
-
-    def calc_EY(self, isnoise=False):
+    def calc_EY(self, isnoise=False, vel=False):
         """Calculate FFT of the extended input vector e(t) and the measured
         output y.
 
@@ -112,44 +64,61 @@ class FNSI():
 
         """
         print('E and Y comp.')
-        u = self.u
-        y = self.y
-        nsper = self.nsper
-        npp = self.npp
+        npp, p, P = self.y.shape
+        npp, m, P = self.y.shape
 
-        U = np.fft.fft(self.u,axis=1) / np.sqrt(nsper)
-        Y = np.fft.fft(self.y,axis=1) / np.sqrt(nsper)
+        U = np.fft.fft(self.u,axis=0) / np.sqrt(npp)
+        Y = np.fft.fft(self.y,axis=0) / np.sqrt(npp)
 
-        Umean, WU = meanVar(U, isnoise=False)
-        Ymean, WY = meanVar(Y, isnoise=isnoise)
+        # average over periods
+        Ymean = np.sum(Y,axis=2) / P
+        Umean = np.sum(U,axis=2) / P
 
         # Set weights to none, if the signal is not noisy
         if isnoise is False:
             WY = None
 
-        self.nlterms()
+        # calculate derivative if yd is not given
+        if self.yd is None and vel is True:
+            yd = derivative(Y)
+        else:
+            yd = self.yd
+
+        if yd is not None:
+            Yd = np.fft.fft(yd,axis=0) / np.sqrt(npp)
+            Ydmean = np.sum(Yd,axis=2) / P
+            yd = np.sum(yd, axis=2) / P
+
+        Yext = np.hstack((Ymean, Ydmean)) if yd is not None else Ymean
+
         # In case of no nonlinearities
-        if len(self.nonlin.nls) == 0:
+        if self.xpowers is None:
             scaling = []
             E = Umean
         else:
-            ynl = y
             # average displacement
-            ynl = np.sum(ynl, axis=2) / npp
-            fnl = self.nonlin.force(ynl, 0)
-            nnl = fnl.shape[0]
+            y = np.sum(self.y, axis=2) / P
+            # ynl: [npp, 2*p]
+            ynl = np.hstack((y, yd)) if yd is not None else y
+
+            nnl = self.xpowers.shape[0]
+            repmat_x = np.ones(nnl)
+
+            # einsum does np.outer(repmat_x, ynl[i]) for all i
+            fnl = np.prod(np.einsum('i,jk->jik',repmat_x, ynl)**self.xpowers,
+                          axis=2)
 
             scaling = np.zeros(nnl)
             for j in range(nnl):
-                scaling[j] = np.std(u[0,:]) / np.std(fnl[j,:])
-                fnl[j,:] *= scaling[j]
+                scaling[j] = np.std(self.u[:,0]) / np.std(fnl[:,j])
+                fnl[:,j] *= scaling[j]
 
-            FNL = np.fft.fft(fnl, axis=1) / np.sqrt(nsper)
+            FNL = np.fft.fft(fnl, axis=0) / np.sqrt(npp)
             # concatenate to form extended input spectra matrix
-            E = np.vstack((Umean, -FNL))
+            E = np.hstack((Umean, -FNL))
 
         self.E = E
-        self.Y = Ymean
+        self.Y = Yext
         self.W = WY
         self.scaling = scaling
 
@@ -159,10 +128,10 @@ class FNSI():
     def id(self, n, bd_method='explicit'):
 
         flines = self.flines
-        E = self.E.T[flines]
-        Y = self.Y.T[flines]
+        E = self.E[flines]
+        Y = self.Y[flines]
 
-        freq = self.flines / self.nsper
+        freq = self.flines / self.npp
         r = self.ims
         covarG = None
         G = None
@@ -170,6 +139,8 @@ class FNSI():
         Ad, Bd, Cd, Dd, z, isstable = \
             subspace(G, covarG, freq, n, r, E, Y, bd_method)
         Ac, Bc, Cc, Dc = discrete2cont(Ad, Bd, Cd, Dd, dt)
+
+        #import ipdb; ipdb.set_trace()
 
         self.A = Ac
         self.B = Bc
@@ -248,7 +219,7 @@ class FNSI():
 
         for k in range(F):
             # eq. 47
-            He[:-1,:,k] = C @ solve(np.eye(*A.shape,dtype=complex)*1j*2*np.pi*
+            He[:-1,:,k] = C @ solve(np.eye(*A.shape,dtype=complex)*2j*np.pi*
                                     freq[flines[k]] - A, B) + D
 
             i = 0
@@ -525,7 +496,6 @@ def dnlsim(system, u, t=None, x0=None):
         out_samples = int(np.floor(stoptime / system.dt)) + 1
 
     # Pre-build output arrays
-    n = system.A.shape[0]
     xout = np.empty((out_samples, system.A.shape[0]))
     yout = np.empty((out_samples, system.C.shape[0]))
     tout = np.linspace(0.0, stoptime, num=out_samples)
@@ -547,27 +517,38 @@ def dnlsim(system, u, t=None, x0=None):
         u_dt = u_dt_interp(tout).transpose()
 
     # prepare nonlinear part
-    # repmat_x = np.ones(system.xpowers.shape[0])
-    xidx = system.xidx
-    xdidx = system.xdidx
-    idx = np.r_[xidx, n//2+xdidx]
     m = system.B.shape[1] - system.E.shape[1]
-
-    # p = u.shape[1]
+    repmat_x = np.ones(system.xpowers.shape[0])
     # Simulate the system
     for i in range(0, out_samples - 1):
         # Output equation y(t) = C*x(t) + D*u(t)
         yout[i, :] = (np.dot(system.C, xout[i, :]) +
                       np.dot(system.D[:,:m], u_dt[i, :]))
         # State equation x(t+1) = A*x(t) + B*u(t) + E*zeta(y(t),ẏ(t))
-        zeta_t = yout[i,idx]**system.xpowers
+        zeta_t = np.prod(np.outer(repmat_x, yout[i])**system.xpowers,
+                         axis=1)
         xout[i+1, :] = (np.dot(system.Ad, xout[i, :]) +
                         np.dot(system.Bd[:,:m], u_dt[i, :]) +
                         np.dot(system.E, zeta_t))
 
     # Last point
-    #zeta_t = np.hstack((u_dt[-1, :],xout[-1,idx]**system.xpowers))
+    # zeta_t = np.hstack((u_dt[-1, :],xout[-1,idx]**system.xpowers))
     yout[-1, :] = (np.dot(system.C, xout[-1, :]) +
                    np.dot(system.D[:,:m], u_dt[-1, :]))
 
     return tout, yout, xout
+
+def derivative(Y):
+    # https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.diff.html
+    N = npp
+    if N % 2 == 0:
+        # NOTE k is sequence of ints
+        k = np.r_[np.arange(0, N//2), [0], np.arange(-N//2+1, 0)]
+    else:
+        k = np.r_[np.arange(0, (N-1)//2), [0], np.arange(-(N-1)//2, 0)]
+
+    freq = self.flines / self.npp
+    k *= 2 * np.pi / freq
+    yd = np.real(np.fft.ifft(1j*k*Y*np.sqrt(npp),axis=0))
+
+    return yd
