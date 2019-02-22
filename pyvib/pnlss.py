@@ -249,7 +249,7 @@ def combinations(n, degrees):
     --------
     A polynomial with all possible quadratic and cubic terms in the variables x
     and y contains the monomials x*x, x*y, y*y, x*x*x, x*x*y, x*y*y, and y*y*y.
-    >>> out = combinations(2,[2, 3])
+    >>> combinations(2,[2, 3])
     array([[2, 0],  #  -> x^2 * y^0 = x*x
            [1, 1],  #  -> x^1 * y^1 = x*y
            [0, 2],  #  -> x^0 * y^2 = y*y
@@ -339,10 +339,7 @@ def select_active(structure,n,m,q,nx):
     Parameters:
     -----------
     structure: str
-        string indicating which elements in the E or F matrix are active. The
-        possibilities are 'diagonal', 'inputsonly', 'statesonly',
-        'nocrossprod', 'affine', 'affinefull', 'full', 'empty', 'nolastinput',
-        or num2str(row_E).
+        string indicating which elements in the E or F matrix are active.
         'diagonal': active elements in row j of the E matrix are those
                     corresponding to pure nonlinear terms in state j (only for
                     state equation)
@@ -351,11 +348,12 @@ def select_active(structure,n,m,q,nx):
         'nocrossprod' : no cross-terms
         'affine' : only terms that are linear in one state
         'affinefull' : only terms that are linear in one state or constant in
-                     the states
+                       the states
         'full' : all terms
         'empty' : no terms
         'nolastinput' : no terms in last input
-        num2str(row_E) : only row row_E in E matrix is active (only for state equation)
+        row_E : only row given by row_E in E matrix is active (only for state
+                equation)
     n : int
         number of states
     m : int
@@ -367,143 +365,144 @@ def select_active(structure,n,m,q,nx):
     nx : int | list
         degrees of nonlinearity in E/F matrix
 
-
     Returns
     -------
-    active: linear indices of the active elements in the transpose of the E or F matrix
+    active: linear indices of the active elements in the transpose of the E or
+            F matrix
 
     Examples
     --------
+    >>> n = 2  # Number of states
+    >>> m = 1  # Number of inputs
+    >>> p = 1  # Number of outputs
+    >>> nx = 2 # Degree(s) of nonlinearity
+    Powers of all possible terms in n+m inputs of degree(s) nx
+    >>> terms = combinations(n+m,nx)
+    array([[2, 0, 0],
+           [1, 1, 0],
+           [1, 0, 1],
+           [0, 2, 0],
+           [0, 1, 1],
+           [0, 0, 2]])
 
-    		n = 2; % Number of states
-           m = 1; % Number of inputs
-           p = 1; % Number of outputs
-           nx = 2; % Degree(s) of nonlinearity
-           terms = combinations(n+m,nx)  # Powers of all possible terms in n+m inputs of degree(s) nx
-           % => terms = [2 0 0;
-           %             1 1 0;
-           %             1 0 1;
-           %             0 2 0;
-           %             0 1 1;
-           %             0 0 2];
-           % There are six quadratic terms in the two states x1 and x2, and
-           % the input u, namely x1^2, x1*x2, x1*u, x2^2, x2*u, and u^2.
-           % The matrix E is a 2 x 6 matrix that contains the polynomial
-           % coefficients in each of these 6 terms for both state updates.
-           % The active elements will be calculated as linear indices in the
-           % transpose of E, hence E can be represented as
-           % E = [e1 e2 e3 e4  e5  e6;
-           %      e7 e8 e9 e10 e11 e12];
-           % The matrix F is a 1 x 6 matrix that contains the polynomial
-           % coefficients in each of the 6 terms for the output equation.
-           % The matrix F can be represented as
-           % F = [f1 f2 f3 f4 f5 f6];
+    There are six quadratic terms in the two states x1 and x2, and the input u,
+    namely x1^2, x1*x2, x1*u, x2^2, x2*u, and u^2. The matrix E is a 2 x 6
+    matrix that contains the polynomial coefficients in each of these 6 terms
+    for both state updates. The active elements will be calculated as linear
+    indices in the transpose of E, hence E can be represented as
+    E = [e1 e2 e3 e4  e5  e6;
+         e7 e8 e9 e10 e11 e12]
+    The matrix F is a 1 x 6 matrix that contains the polynomial coefficients in
+    each of the 6 terms for the output equation. The matrix F can be
+    represented as F = [f1 f2 f3 f4 f5 f6]
 
-           % Diagonal structure
-           activeE = fSelectActive('diagonal',n,m,n,nx);
-           % => activeE = [1 10].';
-           % Only e1 and e10 are active. This corresponds to a term x1^2 in
-           % the first state equation and a term x2^2 in the second state
-           % equation.
+    **Diagonal structure**
+    >>> activeE = select_active('diagonal',n,m,n,nx)
+    array([0, 9])
+    Only e1 and e10 are active. This corresponds to a term x₁² in the first
+    state equation and a term x₂² in the second state equation.
 
-           % Inputs only structure
-           activeE = fSelectActive('inputsonly',n,m,n,nx);
-           % => activeE = [6 12].';
-           % Only e6 and e12 are active. This corresponds to a term u^2 in
-           % both state equations. In all other terms, at least one of the
-           % states (possibly raised to a certain power) is a factor.
-           activeF = fSelectActive('inputsonly',n,m,p,nx);
-           % => activeF = 6;
-           % Only f6 is active. This corresponds to a term u^2 in the output
-           % equation.
+    **Inputs only structure**
+    >>> activeE = select_active('inputsonly',n,m,n,nx)
+    array([ 5, 11])
+    Only e6 and e12 are active. This corresponds to a term u² in both state
+    equations. In all other terms, at least one of the states (possibly raised
+    to a certain power) is a factor.
 
-           % States only structure
-           activeE = fSelectActive('statesonly',n,m,n,nx);
-           % => activeE = [1 2 4 7 8 10].';
-           % Only e1, e2, e4, e7, e8, and e10 are active. This corresponds to
-           % terms x1^2, x1*x2, and x2^2 in both state equations. In all other
-           % terms, the input (possibly raised to a certain power) is a
-           % factor.
+    >>> activeF = select_active('inputsonly',n,m,p,nx)
+    array([5])
+    Only f6 is active. This corresponds to a term u² in the output equation.
 
-           % No cross products structure
-           activeE = fSelectActive('nocrossprod',n,m,n,nx);
-           % => activeE = [1 4 6 7 10 12].';
-           % Only e1, e4, e6, e7, e10, and e12 are active. This corresponds to
-           % terms x1^2, x2^2, and u^2 in both state equations. All other
-           % terms are crossterms where more than one variable is present as a
-           % factor.
+    **States only structure**
+    >>> activeE = select_active('statesonly',n,m,n,nx)
+    array([0, 1, 3, 6, 7, 9])
 
-           % State affine structure
-           activeE = fSelectActive('affine',n,m,n,nx);
-           % => activeE = [3 5 9 11].';
-           % Only e3, e5, e9, and e11 are active. This corresponds to
-           % terms x1*u and x2*u in both state equations, since in these terms
-           % only one state appears, and it appears linearly.
+    Only e1, e2, e4, e7, e8, and e10 are active. This corresponds to terms x₁²,
+    x₁*x₂, and x₂² in both state equations. In all other terms, the input
+    (possibly raised to a certain power) is a factor.
 
-           % Full state affine structure
-           activeE = fSelectActive('affinefull',n,m,n,nx);
-           % => activeE = [3 5 6 9 11 12].';
-           % Only e3, e5, e6, e9, e11, and e12 are active. This corresponds to
-           % terms x1*u, x2*u and u^2 in both state equations, since in these
-           % terms at most one state appears, and if it appears, it appears
-           % linearly.
+    **No cross products structure**
+    >>> activeE = select_active('nocrossprod',n,m,n,nx)
+    array([ 0,  3,  5,  6,  9, 11])
+    Only e1, e4, e6, e7, e10, and e12 are active. This corresponds to terms
+    x₁², x₂², and u² in both state equations. All other terms are crossterms
+    where more than one variable is present as a factor.
 
-           % Full structure
-           activeE = fSelectActive('full',n,m,n,nx);
-           % => activeE = (1:12).';
-           % All elements in the E matrix are active.
+    **State affine structure**
+    >>> activeE = select_active('affine',n,m,n,nx)
+    array([ 2,  4,  8, 10])
+    Only e3, e5, e9, and e11 are active. This corresponds to terms x₁*u and
+    x₂*u in both state equations, since in these terms only one state appears,
+    and it appears linearly.
 
-           % Empty structure
-           activeE = fSelectActive('empty',n,m,n,nx);
-           % => activeE = [];
-           % None of the elements in the E matrix are active.
+    **Full state affine structure**
+    >>> activeE = select_active('affinefull',n,m,n,nx)
+    array([ 2,  4,  5,  8, 10, 11])
+    Only e3, e5, e6, e9, e11, and e12 are active. This corresponds to terms
+    x₁*u, x₂*u and u² in both state equations, since in these terms at most one
+    state appears, and if it appears, it appears linearly.
 
-           % One row in E matrix structure
-           row_E = 2; % Select which row in E is active
-           activeE = fSelectActive('row_E',n,m,n,nx);
-           % => activeE = [7 8 9 10 11 12].';
-           % Only the elements in the second row of E are active
+    **Full structure**
+    >>> activeE = select_active('full',n,m,n,nx)
+    array([ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11])
+    All elements in the E matrix are active.
 
-           % No terms in last input structure
-           % This is useful in a polynomial nonlinear state-space (PNLSS)
-           % model when considering the initial state as a parameter. The
-           % state at time one can be estimated by adding an extra input
-           % u_art(t) that is equal to one at time zero and zero elsewhere.
-           % Like this, an extended PNLSS model is estimated, where the last
-           % column in its B matrix corresponds to the state at time one in
-           % the original PNLSS model. To ensure that the optimization is only
-           % carried out on the parameters of the original PNLSS model, only
-           % the corresponding coefficients in the E/F matrix should be
-           % selected as active.
-           terms_extended = fCombinations(n+m+1,nx); % Powers of all possible terms with one extra input
-           % => terms_extended = [2 0 0 0;
-           %                      1 1 0 0;
-           %                      1 0 1 0;
-           %                      1 0 0 1;
-           %                      0 2 0 0;
-           %                      0 1 1 0;
-           %                      0 1 0 1;
-           %                      0 0 2 0;
-           %                      0 0 1 1;
-           %                      0 0 0 2];
-           % The nonlinear terms in the extra input should not be considered
-           % for optimization.
-           activeE_extended = fSelectActive('nolastinput',n,m+1,n,nx);
-           % => activeE_extended = [1 2 3 5 6 8 11 12 13 15 16 18].';
-           % Only the terms where the last input is raised to a power zero are
-           % active. This corresponds to the elif structure == where all terms in the
-           % original PNLSS model are active.
-           % The example below illustrates how to combine a certain structure
-           % in the original model (e.g. 'nocrossprod') with the estimation of
-           % the initial state.
-           activeE_extended = fSelectActive('nolastinput',n,m+1,n,nx);
-           activeE_extended = activeE_extended(fSelectActive('nocrossprod',n,m,n,nx));
-           % => activeE_extended = [1 5 8 11 15 18].';
-           % This corresponds to the terms x1^2, x2^2, and u1^2 in both rows
-           % of the E_extended matrix, and thus to all terms in the original
-           % model, except for the crossterms.
-           % Note that an alternative approach is to include the initial state
-           % in the parameter vector (see also fLMnlssWeighted_x0u0).
+    **Empty structure**
+    >>> activeE = select_active('empty',n,m,n,nx)
+    array([], dtype=int64)
+    None of the elements in the E matrix are active.
+
+    ** One row in E matrix structure**
+    row_E = 1  # Select which row in E is active
+    >>> activeE = select_active(row_E,n,m,n,nx)
+    array([ 6,  7,  8,  9, 10, 11])
+    Only the elements in the second row of E are active
+
+    **No terms in last input structure**
+    This is useful in a PNLSS model when considering the initial state as a
+    parameter. The state at time one can be estimated by adding an extra input
+    u_art(t) that is equal to one at time zero and zero elsewhere. Like this,
+    an extended PNLSS model is estimated, where the last column in its B matrix
+    corresponds to the state at time one in the original PNLSS model. To ensure
+    that the optimization is only carried out on the parameters of the original
+    PNLSS model, only the corresponding coefficients in the E/F matrix should
+    be selected as active.
+
+    Powers of all possible terms with one extra input
+    >>> terms_extended = combinations(n+m+1,nx)
+    array([[2, 0, 0, 0],
+           [1, 1, 0, 0],
+           [1, 0, 1, 0],
+           [1, 0, 0, 1],
+           [0, 2, 0, 0],
+           [0, 1, 1, 0],
+           [0, 1, 0, 1],
+           [0, 0, 2, 0],
+           [0, 0, 1, 1],
+           [0, 0, 0, 2]])
+    The nonlinear terms in the extra input should not be considered for
+    optimization.
+    >>> activeE_extended = select_active('nolastinput',n,m+1,n,nx)
+    array([ 0,  1,  2,  4,  5,  7, 10, 11, 12, 14, 15, 17])
+
+    Only the terms where the last input is raised to a power zero are active.
+    This corresponds to the elif structure == where all terms in the original
+    PNLSS model are active.
+
+    The example below illustrates how to combine a certain structure in the
+    original model (e.g. 'nocrossprod') with the estimation of the initial
+    state.
+
+    >>> activeE_ext = select_active('nolastinput',n,m+1,n,nx)
+    >>> activeE_ext = activeE_ext[select_active('nocrossprod',n,m,n,nx)]
+    array([ 0,  4,  7, 10, 14, 17])
+
+    This corresponds to the terms x₁², x₂², and u₁² in both rows of the
+    E_extended matrix, and thus to all terms in the original model, except for
+    the cross terms.
+
+    Note that an alternative approach is to include the initial state
+    in the parameter vector (TODO see also fLMnlssWeighted_x0u0).
 
     """
     # All possible nonlinear terms of degrees nx in n+m inputs
@@ -516,7 +515,8 @@ def select_active(structure,n,m,q,nx):
         # Diagonal structure requires as many rows in E (or F) matrix as the
         # number of states
         if n != q:
-            raise ValueError('Diagonal structure can only be used in state equation, not in output equation')
+            raise ValueError('Diagonal structure can only be used in state'
+                             ' equation, not in output equation')
         # Find terms that consist of one state, say x_j, raised to a nonzero
         # power
         active = np.where((np.sum(combis[:,:n] != 0,1) == 1) &
@@ -561,7 +561,7 @@ def select_active(structure,n,m,q,nx):
             # Find terms where last input is raised to power zero
             active = np.where(combis[:,-1] == 0)[0]
         else:
-            raise ValueError('There is no input for {}'.format(structure))
+            raise ValueError(f"There is no input for {structure}")
     else:
         # Check if one row in E is selected. Remember we use 0-based rows
         if (isinstance(structure, (int, np.integer)) and
@@ -569,11 +569,12 @@ def select_active(structure,n,m,q,nx):
             row_E = int(structure)
             active = row_E*n_nl + np.arange(n_nl)
         else:
-            raise ValueError('Wrong structure {}. Should be: {}'.
-                            format(structure, stype))
+            raise ValueError(f"Wrong structure {structure}. Should be: {stype}"
+                             f" or int specifying a row within 0-{n-1}")
 
     if structure in \
-       ('inputsonly','statesonly','nocrossprod','affine','affinefull'):
+       ('inputsonly','statesonly','nocrossprod','affine','affinefull',
+        'nolastinput'):
         # Select terms for all rows in E/F matrix
         active = (np.tile(active[:,None], q) +
                   np.tile(np.linspace(0,(q-1)*n_nl,q, dtype=int),
@@ -676,17 +677,17 @@ def remove_transient_indices_nonperiodic(T2,N,p):
 def transient_indices_periodic(T1,N):
     """Computes indices for transient handling of periodic signals.
 
-	Computes the indices to be used with a vector u of length N that contains
-	(several realizations of) a periodic signal, such that u[indices] has T1[0]
-	transient samples prepended to each realization. The starting samples of
-	each realization can be specified in T1[1:]. Like this, steady-state
-	data can be obtained from a PNLSS model by using u[indices] as an input
-	signal to a PNLSS model (see fFilterNLSS) and removing the transient
-	samples afterwards (see fComputeIndicesTransientRemoval).
+    Computes the indices to be used with a vector u of length N that contains
+    (several realizations of) a periodic signal, such that u[indices] has T1[0]
+    transient samples prepended to each realization. The starting samples of
+    each realization can be specified in T1[1:]. Like this, steady-state data
+    can be obtained from a PNLSS model by using u[indices] as an input signal
+    to a PNLSS model (see :meth:`pyvib.PNLSS.simulate`) and removing the
+    transient samples afterwards (see :func:`remove_transient_indices_periodic`
 
-	Parameters
+    Parameters
     ----------
-	T1 : int | ndarray(int)
+    T1 : int | ndarray(int)
         array that indicates how the transient is handled. The first element
         T1[0] is the number of transient samples that should be prepended to
         each realization. The other elements T1[1:] indicate the starting
@@ -697,26 +698,24 @@ def transient_indices_periodic(T1,N):
 
     Returns
     -------
-	indices : ndarray(int)
+    indices : ndarray(int)
         indices of a vector u that contains (several realizations of) a
         periodic signal, such that u[indices] has a number of transient samples
         added before each realization
 
-	Examples
+    Examples
     --------
-    Npp = 1000; % Number of points per period
-    R = 2; % Number of phase realizations
-    T = 100; % Number of transient samples
-    T1 = [T 1:Npp:(R-1)*Npp+1]; % Transient handling vector
-    N = R*Npp; % Total number of samples
-    indices = fComputeIndicesTransient(T1,N);
-    % => indices = [901:1000 1:1000 1901:2000 1001:2000]
-    %            = [transient samples realization 1, ...
-    %               realization 1, ...
-    %               transient samples realization 2, ...
-    %               realization 2]
-
-    # np.r_[T, np.r_[0:(R-1)*npp+1:npp]]
+    >>> npp = 1000  # Number of points per period
+    >>> R = 2  # Number of phase realizations
+    >>> T = 100  # Number of transient samples
+    >>> T1 = np.r_[T, np.r_[0:(R-1)*npp+1:npp]]  # Transient handling vector
+    >>> N = R*npp  # Total number of samples
+    >>> indices = transient_indices_periodic(T1,N)
+    indices = np.r_[900:1000, 0:1000, 1900:2000, 1000:2000]
+            = [transient samples realization 1, ...
+               realization 1, ...
+               transient samples realization 2, ...
+               realization 2]
     """
 
     T1 = np.atleast_1d(np.asarray(T1, dtype=int))
@@ -749,17 +748,17 @@ def remove_transient_indices_periodic(T1,N,p):
     Let u be a vector of length N containing (several realizations of) a
     periodic signal. Let uTot be a vector containing the signal(s) in u with
     T1[0] transient points prepended to each realization (see
-    fComputeIndicesTransient). The starting samples of each realization can be
-    specified in T1[1:]. Let yTot be a vector/matrix containing the p outputs
-    of a PNLSS model after applying the input uTot. Then
-    fComputeIndicesTransientRemoval computes the indices to be used with the
-    vectorized form of yTot such that the transient samples are removed from
-    yTot, i.e. y = yTot[indices] contains the steady-state output(s) stacked on
-    top of each other.
+    :func:`transient_indices_periodic`). The starting samples of each
+    realization can be specified in T1[1:]. Let yTot be a vector/matrix
+    containing the p outputs of a PNLSS model after applying the input uTot.
+    Then this function computes the indices to be used with the vectorized form
+    of yTot such that the transient samples are removed from yTot, i.e. y =
+    yTot[indices] contains the steady-state output(s) stacked on top of each
+    other.
 
     Parameters
     ----------
-	T1 : ndarray(int)
+    T1 : ndarray(int)
         vector that indicates how the transient is handled. The first element
         T1[0] is the number of transient samples that were prepended to each
         realization. The other elements T1[1:] indicate the starting sample
@@ -772,57 +771,49 @@ def remove_transient_indices_periodic(T1,N,p):
 
     Returns
     -------
-	indices : ndarray(int)
+    indices : ndarray(int)
         If uTot is a vector containing (several realizations of) a periodic
         signal to which T1[0] transient points were added before each
         realization, and if yTot is the corresponding output vector (or matrix
         if more than one output), then indices is such that the transient
-        points are removed from y = yTot(indices). If p > 1, then indices is a
-        column vector and y = yTot(indices) is a column vector with the steady
-        state outputs stacked on top of each other.
+        points are removed from y = yTot.flat[indices]. If p > 1, then indices
+        is a vector and y = yTot.flat[indices] is a vector with the steady
+        state outputs stacked after each other.
 
-	Examples
+    Examples
     --------
-    Npp = 1000; % Number of points per period
-    R = 2; % Number of phase realizations
-    T = 100; % Number of transient samples
-    T1 = [T 1:Npp:(R-1)*Npp+1]; % Transient handling vector
-    N = R*Npp; % Total number of samples
-    indices_tot = fComputeIndicesTransient(T1,N);
-    % => indices_tot = [901:1000 1:1000 1901:2000 1001:2000]
-    %                = [transient samples realization 1, ...
-    %                   realization 1, ...
-    %                   transient samples realization 2, ...
-    %                   realization 2]
-    p = 1; % One output
-    indices_removal = fComputeIndicesTransientRemoval(T1,N,p);
-    % => indices_removal = [101:1100 1201:2200].'
-    % => indices_tot(indices_removal) = 1:2000
-    %                                 = [realization 1, realization 2]
-    p = 2; % More than one output
-    indices_removal = fComputeIndicesTransientRemoval(T1,N,p);
-    % => indices_removal = [101:1100 1201:2200 2301:3300 3401:4400].'
-    % Let u be a vector containing [input realization 1;
-    %                               input realization 2],
-    % then uTot = u(indices_tot) is a vector containing
-    %             [transient samples realization 1;
-    %              input realization 1;
-    %              transient samples realization 2;
-    %              input realization 2]
-    % Let y1 be a vector containing the first output and y2 be a vector
-    % containing the second output when applying uTot as an input to a
-    % PNLSS model, and let yTot = [y1 y2] be a 2200 x 2 matrix with y1
-    % and y2 in its first and second column, respectively.
-    % Note that y1 = yTot(1:2200).' and y2 = yTot(2201:4400).' (see
-    % also ind2sub and sub2ind)
-    % Then yTot(indices_removal) = [y1(101:1100);
-    %                               y1(1201:2200);
-    %                               y2(101:1100);
-    %                               y2(1201:2200)]
-    %                            = [output 1 corresponding to input realization 1;
-    %                               output 1 corresponding to input realization 2;
-    %                               output 2 corresponding to input realization 1;
-    %                               output 2 corresponding to input realization 2]
+    >>> npp = 1000  # Number of points per period
+    >>> R = 2  # Number of phase realizations
+    >>> T = 100  # Number of transient samples
+    >>> T1 = np.r_[T, np.r_[0:(R-1)*npp+1:npp]]  # Transient handling vector
+    >>> N = R*npp  # Total number of samples
+    >>> indices_tot = transient_indices_periodic(T1,N)
+    indices_tot = np.r_[900:1000, 0:1000, 1900:2000, 1000:2000]
+    >>> p = 1  # One output
+    >>> indices_removal = remove_transient_indices_periodic(T1,N,p)
+    np.r_[100:1100, 1200:2200]
+    >>> indices_tot[indices_removal]
+    np.r_[:2000]  # [realization 1, realization 2]
+    >>> p = 2  # More than one output
+    >>> indices_removal = remove_transient_indices_periodic(T1,N,p)
+    np.r_[100:1100, 1200:2200, 2300:3300, 3400:4400]
+
+    Let u be a vector containing [input realization 1, input realization 2]
+    then uTot = u[indices_tot] is a vector containing
+                [transient samples realization 1, input realization 1,
+                 transient samples realization 2, input realization 2]
+    Let y1 be a vector containing the first output and y2 be a vector
+    containing the second output when applying uTot as an input to a
+    PNLSS model, and let yTot = [y1, y2].T be a 2 x 2200 matrix with y1
+    and y2 in its first and second row, respectively.
+    Note that y1 = yTot.flat[:2200] and y2 = yTot.flat[2200:4400]
+    Then yTot.flat[indices_removal] = np.r_[y1[100:1100], y1[1200:2200],
+                                            y2[100:1100], y2[1200:2200]]
+                               = [output 1 corresponding to input realization 1,
+                                  output 1 corresponding to input realization 2,
+                                  output 2 corresponding to input realization 1,
+                                  output 2 corresponding to input realization 2]
+
     """
 
     T1 = np.atleast_1d(np.asarray(T1, dtype=int))
@@ -962,20 +953,13 @@ def multEdwdx(contrib, power, coeff, E, n):
     """Multiply a matrix E with the derivative of a polynomial w(x,u) wrt. x
 
     Multiplies a matrix E with the derivative of a polynomial w(x,u) wrt the n
-    elements in x. The samples of x and u are in a vector contrib. The
-    derivative of w(x,u) w.r.t. x is given by the exponents in x and u (given
-    in power) and the corresponding coefficients (given in coeff). The maximum
-    degree of a variable (an x or a u) in w(x,u) is given in nx.
+    elements in x. The samples of x and u are given by `contrib`. The
+    derivative of w(x,u) wrt. x, is given by the exponents in x and u (given in
+    power) and the corresponding coefficients (given in coeff).
 
-	Returns
-    -------
-	out : ndarray(n_out,n,N)
-        Product of E and the derivative of the polynomial w(x,u) w.r.t. the
-        elements in x at all samples.
-
-	Parameters
+    Parameters
     ----------
-	contrib : ndarray(n+m,N)
+    contrib : ndarray(n+m,N)
         N samples of the signals x and u
     power : ndarray(n_nx,n+m,n+m)
         The exponents of the derivatives of w(x,u) w.r.t. x and u, i.e.
@@ -986,43 +970,51 @@ def multEdwdx(contrib, power, coeff, E, n):
         coefficient of the derivative of the ith monomial in w(x,u) w.r.t.
         contrib k.
     E : ndarray(n_out,n_nx)
-    nx : int
-        maximum degree of a variable (an x or a u) in w(x,u)
     n : int
         number of x signals w.r.t. which derivatives are taken
 
-	Example:
-       % Consider w(x1,x2,u) = [x1^2    and E = [1 3 5
-       %                        x1*x2;           2 4 6]
-       %                        x2*u^2]
-       % then the derivatives of E*w w.r.t. x1 and x2 are given by
-       % E*[2*x1 0
-       %    1*x2 1*x1
-       %    0    1*u^2]
-       % and the derivative of w w.r.t. u is given by [0
-       %                                               0
-       %                                               2*x2*u]
-    E = [1 3 5; 2 4 6];
-       pow = zeros(3,3,3);
-       pow(:,:,1) = [1 0 0;
-                     0 1 0;
-                     0 0 0]; % Derivative w.r.t. x1 has terms 2*x1, 1*x2, and 0
-       pow(:,:,2) = [0 0 0;
-                     1 0 0;
-                     0 0 2]; % Derivative w.r.t. x2 has terms 0, 1*x1, and 1*u^2
-       pow(:,:,3) = [0 0 0;
-                     0 0 0;
-                     0 1 1]; % Derivative w.r.t. u has terms 0, 0, and 2*x2*u
-       coeff = [2 0 0;
-                1 1 0;
-                0 1 2];
-       nx = 2; % Maximum second degree factor in monomials of w (x1^2 in first monomial, u^2 in third monomial)
-       n = 2; % Two signals x
-       contrib = randn(3,10); % Ten random samples of signals x1, x2, and u
-       out = fEdwdx(contrib,pow,coeff,E,nx,n);
-       % => out(:,:,t) = E*[2*contrib(1,t) 0
-       %                    1*contrib(2,t) 1*contrib(1,t)
-       %                    0              1*contrib(3,t)^2]
+    Returns
+    -------
+    out : ndarray(n_out,n,N)
+        Product of E and the derivative of the polynomial w(x,u) w.r.t. the
+        elements in x at all samples.
+
+    Examples
+    --------
+    Consider w(x1,x2,u) = [x1^2    and E = [1 3 5
+                           x1*x2            2 4 6]
+                           x2*u^2]
+    then the derivatives of E*w wrt. x1 and x2 are given by
+    E*[2*x1 0
+       1*x2 1*x1
+       0    1*u^2]
+    and the derivative of w wrt. u is given by [0,0,2*x2*u]^T
+
+    >>> E = np.array([[1,3,5],[2,4,6]])
+    >>> pow = np.zeros((3,3,3))
+    Derivative wrt. x1 has terms 2*x1, 1*x2 and 0
+    >>> pow[:,:,0] = np.array([[1,0,0],
+                               [0,1,0],
+                               [0,0,0]])
+    Derivative wrt. x2 has terms 0, 1*x1 and 1*u^2
+    >>> pow[:,:,1] = np.array([[0,0,0],
+                               [1,0,0],
+                               [0,0,2]])
+    Derivative wrt. u has terms 0, 0 and 2*x2*u
+    >>> pow[:,:,2] = np.array([[0,0,0],
+                               [0,0,0],
+                               [0,1,1]])
+    >>> coeff = np.array([[2,0,0],
+                          [1,1,0],
+                          [0,1,2]])
+    >>> n = 2  # Two signals x
+    Ten random samples of signals x1, x2, and u
+    >>> contrib = np.random.randn(3,10)
+    >>> out = multEdwdx(contrib,pow,coeff,E,n)
+    >>> t = 0
+    out[:,:,t] = E @ np.array([[2*contrib[0,t],0],
+                              [1*contrib[1,t],1*contrib[0,t]],
+                              [0             ,1*contrib[2,t]**2]])
 
     """
 
@@ -1051,44 +1043,44 @@ def nl_terms(contrib,power):
     polynomial and pow contains the exponents of each term in each of the
     inputs. The maximum degree of an individual input is given in max_degree.
 
-	Parameters
+    Parameters
     ----------
-	contrib : ndarray(n+m,N)
+    contrib : ndarray(n+m,N)
         matrix with N samples of the input signals to the polynomial.
         Typically, these are the n states and the m inputs of the nonlinear
         state-space model.
-
-    power : ndarray(nterms,n+m
-        matrix with the exponents of each term in each of the inputs to the polynomial
-    max_degree : int
-        maximum degree in an individual input of the polynomial
+    power : ndarray(nterms,n+m)
+        matrix with the exponents of each term in each of the inputs to the
+        polynomial
 
     Returns
     -------
-	out : ndarray(nterms,N)
+    out : ndarray(nterms,N)
         matrix with N samples of each term
 
-	Example:
-		n = 2; % Number of states
-       m = 1; % Number of inputs
-       N = 1000; % Number of samples
-       x = randn(n,N); % States
-       u = randn(m,N); % Input
-       contrib = [x; u]; % States and input combined
-       pow = [2 0 0;
-              1 1 0;
-              1 0 1;
-              0 2 0;
-              0 1 1;
-              0 0 2]; % All possible quadratic terms in states and input: x1^2, x1*x2, x1*u, x2^2, x2*u, u^2
-       max_degree = max(max(pow)); % Maximum degree in an individual state or input
-       out = fTermNL(contrib,pow,max_degree);
-       % => out = [x(1,:).^2;
-       %           x(1,:).*x(2,:);
-       %           x(1,:).*u;
-       %           x(2,:).^2;
-       %           x(2,:).*u;
-       %           u.^2];
+    Examples
+    --------
+    >>> n = 2  # Number of states
+    >>> m = 1  # Number of inputs
+    >>> N = 1000  # Number of samples
+    >>> x = np.random.randn(N,n)  # States
+    >>> u = np.random.randn(N,m)  # Input
+    >>> contrib = np.hstack((x, u)).T  # States and input combined
+    All possible quadratic terms in states and input: x1^2, x1*x2, x1*u, x2^2,
+    x2*u, u^2
+    >>> pow = np.array([[2,0,0],
+                        [1,1,0],
+                        [1,0,1],
+                        [0,2,0],
+                        [0,1,1],
+                        [0,0,2]])
+    >>> nl_terms(contrib,pow)
+    array([x[:,0]**2,
+           x[:,0]*x[:,1],
+           x[:,0]*u.squeeze(),
+           x[:,1]**2,
+           x[:,1]*u.squeeze(),
+           u.squeeze()**2])
     """
 
     # Number of samples
@@ -1103,15 +1095,36 @@ def nl_terms(contrib,power):
     return out
 
 
-def element_jacobian(samples, Edwdx, C, Fdwdx, active):
+def element_jacobian(samples, A_Edwdx, C_Fdwdx, active):
     """Compute Jacobian of the output y wrt. A, B, and E
 
     The Jacobian is calculated by filtering an alternative state-space model
 
+    ∂x∂Aᵢⱼ(t+1) = Iᵢⱼx(t) + (A + E*∂ζ∂x)*∂x∂Aᵢⱼ(t)
+    ∂y∂Aᵢⱼ(t) = (C + F*∂η∂x)*∂x∂Aᵢⱼ(t)
+
+    where JA = ∂y∂Aᵢⱼ
+
+    Parameters
+    ----------
+    samples : ndarray
+       x, u or zeta corresponding to JA, JB, or JE
+    A_Edwdx : ndarray (n,n,NT)
+       The result of ``A + E*∂ζ∂x``
+    C_Fdwdx : ndarray (p,n,NT)
+       The result of ``C + F*∂η∂x``
+    active : ndarray
+       Array with index of active elements. For JA: np.arange(n**2), JB: n*m or
+       JE: xactive
+
+    Returns
+    -------
+    JA, JB or JE depending on the samples given as input
+
     See fJNL
 
     """
-    p, n = C.shape  # Number of outputs and number of states
+    p, n, NT = C_Fdwdx.shape  # Number of outputs and number of states
     # Number of samples and number of inputs in alternative state-space model
     N, npar = samples.shape
     nactive = len(active)  # Number of active parameters in A, B, or E
@@ -1127,19 +1140,18 @@ def element_jacobian(samples, Edwdx, C, Fdwdx, active):
         for t in range(1,N):
             # Calculate state update alternative state-space model at time t
             # Terms in alternative states at time t-1
-            J = Edwdx[:,:,t-1] @ Jprev
+            J = A_Edwdx[:,:,t-1] @ Jprev
             # Term in alternative input at time t-1
             J[i] += samples[t-1,j]
             # Calculate output alternative state-space model at time t
-            out[:,t,k] = Fdwdx[:,:,t] @ J
+            out[:,t,k] = C_Fdwdx[:,:,t] @ J
             # Update previous state alternative state-space model
             Jprev = J
 
     return out
 
 def jacobian(x0, system, weight=None):
-
-    """Compute the Jacobians in a steady state nonlinear state-space model
+    """Compute the Jacobians of a steady state nonlinear state-space model
 
     Jacobians of a nonlinear state-space model
 
@@ -1147,7 +1159,7 @@ def jacobian(x0, system, weight=None):
         y(t)   = C x(t) + D u(t) + F eta(x(t),u(t))
 
     i.e. the partial derivatives of the modeled output w.r.t. the active
-    elements in the A, B, E, F, D, and C matrices
+    elements in the A, B, E, F, D, and C matrices, fx: JA = ∂y/∂Aᵢⱼ
 
     x0 : ndarray
         flattened array of state space matrices
@@ -1177,6 +1189,8 @@ def jacobian(x0, system, weight=None):
     # F∂ₓη  (p,n,NT)
     FdwyIdx = multEdwdx(contrib,system.yd_powers,np.squeeze(system.yd_coeff),
                         F,n)
+    # Add C to F∂ₓη for all samples at once
+    FdwyIdx += system.C[...,None]
     eta = nl_terms(contrib, system.ypowers).T  # (NT,n_ny)
 
     # calculate jacobians wrt state space matrices
@@ -1189,21 +1203,17 @@ def jacobian(x0, system, weight=None):
     else:
         JF = np.array([]).reshape(p*N,0)
 
-    # Add C to F∂ₓη for all samples at once
-    FdwyIdx += system.C[...,None]
     # calculate Jacobian by filtering an alternative state-space model
-    JA = element_jacobian(x_trans, A_EdwxIdx, system.C, FdwyIdx,
-                          np.arange(n**2))
+    JA = element_jacobian(x_trans, A_EdwxIdx, FdwyIdx, np.arange(n**2))
     JA = JA.transpose((1,0,2)).reshape((p*n_trans, n**2))
     JA = JA[system.idx_remtrans]  # (p*N,n**2)
 
-    JB = element_jacobian(u_trans, A_EdwxIdx, system.C, FdwyIdx,
-                          np.arange(n*m))
+    JB = element_jacobian(u_trans, A_EdwxIdx, FdwyIdx, np.arange(n*m))
     JB = JB.transpose((1,0,2)).reshape((p*n_trans, n*m))
     JB = JB[system.idx_remtrans]  # (p*N,n*m)
 
     if system.xactive.size:
-        JE = element_jacobian(zeta, A_EdwxIdx, system.C, FdwyIdx, system.xactive)
+        JE = element_jacobian(zeta, A_EdwxIdx, FdwyIdx, system.xactive)
         JE = JE.transpose((1,0,2)).reshape((p*n_trans, len(system.xactive)))
         JE = JE[system.idx_remtrans]  # (p*N,nactiveE)
     else:

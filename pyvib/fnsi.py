@@ -552,3 +552,131 @@ def derivative(Y):
     yd = np.real(np.fft.ifft(1j*k*Y*np.sqrt(npp),axis=0))
 
     return yd
+
+def jacobian(x0, system, weight=None):
+    """Compute the Jacobians of a steady state gray-box state-space model
+
+    Jacobians of a gray-box state-space model
+
+        x(t+1) = A x(t) + B u(t) + E zeta(y(t),ẏ(t))
+        y(t)   = C x(t) + D u(t) + F eta(y(t),ẏ(t))
+
+    i.e. the partial derivatives of the modeled output w.r.t. the active
+    elements in the A, B, C, D, E and F matrices, fx: JA = ∂y/∂Aᵢⱼ
+
+    x0 : ndarray
+        flattened array of state space matrices
+
+    """
+
+    n, m, p = system.n, system.m, system.p
+    R, p, npp = system.signal.R, system.signal.p, system.signal.npp
+    nfd = npp//2
+    # total number of points
+    N = R*npp  # system.signal.um.shape[0]
+    n_trans = system.n_trans
+    without_T2 = system.without_T2
+
+    A, B, C, D, E, F = extract_ss(x0, system)
+
+    # Collect states and outputs with prepended transient sample
+    x_trans = system.x_mod[system.idx_trans]
+    u_trans = system.umt
+    contrib = np.hstack((x_trans, u_trans)).T
+
+    # E∂ₓζ + A(n,n,NT)
+    A_EdwxIdx = multEdwdx(contrib,system.xd_powers,np.squeeze(system.xd_coeff),
+                          E,n) + A[...,None]
+    zeta = nl_terms(contrib, system.xpowers).T  # (NT,n_nx)
+
+    # F∂ₓη  (p,n,NT)
+    FdwyIdx = multEdwdx(contrib,system.yd_powers,np.squeeze(system.yd_coeff),
+                        F,n)
+    # Add C to F∂ₓη for all samples at once
+    FdwyIdx += system.C[...,None]
+    eta = nl_terms(contrib, system.ypowers).T  # (NT,n_ny)
+
+    # calculate jacobians wrt state space matrices
+    JC = np.kron(np.eye(p), system.x_mod)  # (p*N,p*n)
+    JD = np.kron(np.eye(p), system.signal.um)  # (p*N, p*m)
+    if system.yactive.size:
+        JF = np.kron(np.eye(p), eta)  # Jacobian wrt all elements in F
+        JF = JF[:,system.yactive]  # all active elements in F. (p*NT,nactiveF)
+        JF = JF[system.idx_remtrans]  # (p*N,nactiveF)
+    else:
+        JF = np.array([]).reshape(p*N,0)
+
+    # calculate Jacobian by filtering an alternative state-space model
+    JA = element_jacobian(x_trans, A_EdwxIdx, FdwyIdx, np.arange(n**2))
+    JA = JA.transpose((1,0,2)).reshape((p*n_trans, n**2))
+    JA = JA[system.idx_remtrans]  # (p*N,n**2)
+
+    JB = element_jacobian(u_trans, A_EdwxIdx, FdwyIdx, np.arange(n*m))
+    JB = JB.transpose((1,0,2)).reshape((p*n_trans, n*m))
+    JB = JB[system.idx_remtrans]  # (p*N,n*m)
+
+    if system.xactive.size:
+        JE = element_jacobian(zeta, A_EdwxIdx, FdwyIdx, system.xactive)
+        JE = JE.transpose((1,0,2)).reshape((p*n_trans, len(system.xactive)))
+        JE = JE[system.idx_remtrans]  # (p*N,nactiveE)
+    else:
+        JE = np.array([]).reshape(p*N,0)
+
+    jac = np.hstack((JA, JB, JC, JD, JE, JF))[without_T2]
+    npar = jac.shape[1]
+
+
+def element_jacobian(samples, A_Edwdx, C_Fdwdx, active):
+    """Compute Jacobian of the output y wrt. A, B, and E
+
+    The Jacobian is calculated by filtering an alternative state-space model
+
+    ∂x∂Aᵢⱼ(t+1) = Iᵢⱼx(t) + (A + E*∂ζ∂x)*∂x∂Aᵢⱼ(t)
+    ∂y∂Aᵢⱼ(t) = (C + F*∂η∂x)*∂x∂Aᵢⱼ(t)
+
+    where JA = ∂y∂Aᵢⱼ
+
+    Parameters
+    ----------
+    samples : ndarray
+       x, u or zeta corresponding to JA, JB, or JE
+    A_Edwdx : ndarray (n,n,NT)
+       The result of ``A + E*∂ζ∂x``
+    C_Fdwdx : ndarray (p,n,NT)
+       The result of ``C + F*∂η∂x``
+    active : ndarray
+       Array with index of active elements. For JA: np.arange(n**2), JB: n*m or
+       JE: xactive
+
+    Returns
+    -------
+    JA, JB or JE depending on the samples given as input
+
+    See fJNL
+
+    """
+    p, n, NT = C_Fdwdx.shape  # Number of outputs and number of states
+    # Number of samples and number of inputs in alternative state-space model
+    N, npar = samples.shape
+    nactive = len(active)  # Number of active parameters in A, B, or E
+
+    out = np.zeros((p,N,nactive))
+    for k, activ in enumerate(active):
+        # Which column in A, B, or E matrix
+        j = np.mod(activ, npar)
+        # Which row in A, B, or E matrix
+        i = (activ-j)//npar
+        # partial derivative of x(0) wrt. A(i,j), B(i,j), or E(i,j)
+        Jprev = np.zeros(n)
+        for t in range(1,N):
+            # Calculate state update alternative state-space model at time t
+            # Terms in alternative states at time t-1
+            J = A_Edwdx[:,:,t-1] @ Jprev
+            # Term in alternative input at time t-1
+            J[i] += samples[t-1,j]
+            # Calculate output alternative state-space model at time t
+            out[:,t,k] = C_Fdwdx[:,:,t] @ J
+            # Update previous state alternative state-space model
+            Jprev = J
+
+    return out
