@@ -22,7 +22,8 @@ setup(name='pyvib',
       zip_safe=False,
       install_requires=[
           'numpy',
-          'scipy'],
+          'scipy',
+          'matplotlib'],
       extras_require={
           'tests': [
               #'nose',

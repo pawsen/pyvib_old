@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from .common import matrix_square_inv, mmul_weight, normalize_columns
+from .common import (matrix_square_inv, mmul_weight, normalize_columns,
+                     weightfcn)
 from .modal import modal_ac
+from .statespace import StateSpace, StateSpaceIdent
 import numpy as np
 # qr(mode='r') returns r in economic form. This is not the case for scipy
 # svd and solve allows broadcasting when imported from numpy
@@ -10,6 +12,156 @@ from numpy.linalg import qr, svd, solve
 from scipy.signal import dlsim
 from scipy.linalg import (lstsq, logm, eigvals, pinv, norm)
 from numpy import kron
+
+class Subspace(StateSpace, StateSpaceIdent):
+
+    def __init__(self, signal, *system, **kwargs):
+        self.signal = signal
+        super().__init__(*system, **kwargs)
+    # def flatten_ss(self):
+    #     """Returns the state space as flattened array"""
+    #     n, m, p = self.n, self.m, self.p
+    #     x0 = np.empty(self.npar)
+    #     x0[:n**2] = self.A.ravel()
+    #     x0[n**2 + np.r_[:n*m]] = self.B.ravel()
+    #     x0[n**2 + n*m + np.r_[:n*p]] = self.C.ravel()
+    #     x0[n**2 + n*m + n*p:] = self.D.ravel()
+    #     return x0
+
+    @property
+    def weight(self):
+        if self._weight is None:
+            self._weight = weightfcn(self.signal.covG)
+        return self._weight
+
+    def costfcn(self, x0=None, weight=False):
+        if weight is True:
+            weight = self.weight()
+        if x0 is None:
+            x0 = self.flatten()
+        return costfcn(x0, self, weight=weight)
+
+    def jacobian(self, x0, weight=False):  #**kwargs):
+        return jacobian(x0, self, weight=weight)
+
+    def estimate(self, n, r, copy=False):
+        """Subspace estimation"""
+
+        self.n = n
+        self.r = r
+        signal = self.signal
+        norm_freq = signal.freq / signal.fs
+        A, B, C, D, z, stable = \
+            subspace(signal.G, signal.covG, norm_freq, n, r)
+
+        self.A, self.B, self.C, self.D, self.z, self.stable = \
+            A, B, C, D, z, stable
+
+        self.n, self.m, self.p = self._get_shape()
+        # Number of parameters
+        n, m, p = self.n, self.m, self.p
+        self.npar = n**2 + n*m + p*n + p*m
+
+        return A, B, C, D, z, stable
+
+    def scan(self, nvec, maxr, optimize=True, method=None, weight=False,
+             info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8, gtol=1e-8):
+
+        F = self.signal.F
+        nvec = np.atleast_1d(nvec)
+        maxr = maxr
+        if weight is True:
+            weight = self.weight
+
+        infodict = {}
+        models = {}
+        if info:
+            print('Starting subspace scanning')
+            print(f"n: {nvec.min()}-{nvec.max()}. r: {maxr}")
+            print(f"{'n':3} | {'r':3}")
+        for n in nvec:
+            minr = n + 1
+
+            cost_old = np.inf
+            if isinstance(maxr, (list, np.ndarray)):
+                rvec = maxr[maxr >= minr]
+                if len(rvec) == 0:
+                    raise ValueError(f"maxr should be > {minr}. Is {maxr}")
+            else:
+                rvec = range(minr, maxr+1)
+
+            infodict[n] = {}
+            for r in rvec:
+                if info:
+                    print(f"{n:3d} | {r:3d}")
+
+                self.estimate(n, r)
+
+                # normalize with frequency lines to comply with matlab pnlss
+                cost_sub = self.cost(weight=weight)/F
+                stable_sub = self.stable
+                if optimize:
+                    self.optimize(method=method, weight=weight, info=info,
+                                  nmax=nmax, lamb=lamb, ftol=ftol, xtol=xtol,
+                                  gtol=gtol, copy=False)
+
+                cost = self.cost(weight=weight)/F
+                stable = is_stable(self.A, domain='z')
+                infodict[n][r] = {'cost_sub': cost_sub, 'stable_sub': stable_sub,
+                                  'cost': cost, 'stable': stable}
+                if cost < cost_old and stable:
+                    # TODO instead of dict of dict, maybe use __slots__ method of
+                    # class. Slots defines attributes names that are reserved for
+                    # the use as attributes for the instances of the class.
+                    cost_old = cost
+                    models[n] = {'A': self.A, 'B': self.B, 'C': self.C, 'D':
+                                 self.D, 'r':r, 'cost':cost, 'stable': stable}
+
+            self.models = models
+            self.infodict = infodict
+        return models, infodict
+
+    def save(self, fname):
+        """Save statespace representation to disk"""
+        pass
+
+    def plot_info(self, fig=None, ax=None):
+        """Plot summary of subspace identification"""
+        return plot_subspace_info(self.infodict, fig, ax)
+
+    def plot_models(self):
+        """Plot identified subspace models"""
+        return plot_subspace_model(self.models, self.G, self.covG,
+                                   self.signal.freq, self.signal.fs)
+
+    def extract_model(self, y=None, u=None, models=None, n=None, t=None, x0=None):
+        """extract the best model using validation data"""
+
+        dt = 1/self.signal.fs
+        if models is None:
+            models = self.models
+
+        if n is None:
+            if y is None or u is None:
+                raise ValueError('y and u cannot be None when several models'
+                                 ' are given')
+            model, err_vec = extract_model(models, y, u, dt, t, x0)
+        elif {'A', 'B', 'C', 'D'} <= models.keys() and n is None:
+            model = models
+        else:
+            model = models[n]
+            err_vec = []
+
+        dictget = lambda d, *k: [d[i] for i in k]
+        self.A, self.B, self.C, self.D, self.r, self.stable = \
+            dictget(model, 'A', 'B', 'C', 'D', 'r', 'stable')
+
+        self.n, self.m, self.p = self._get_shape()
+        # Number of parameters
+        n, m, p = self.n, self.m, self.p
+        self.npar = n**2 + n*m + p*n + p*m
+
+        return err_vec
 
 
 def is_stable(A, domain='z'):
@@ -38,104 +190,6 @@ def is_stable(A, domain='z'):
     else:
         raise ValueError(f"{domain} wrong. Use 's' or 'z'")
     return True
-
-def ss2phys(A, B, C, D=None):
-    """Calculate state space matrices in physical domain using a similarity
-    transform T
-
-    See eq. (20.10) in
-    Etienne Gourc, JP Noel, et.al
-    "Obtaining Nonlinear Frequency Responses from Broadband Testing"
-    https://orbi.uliege.be/bitstream/2268/190671/1/294_gou.pdf
-    """
-
-    # Similarity transform
-    T = np.vstack((C, C @ A))
-    C = solve(T.T, C.T).T        # (C = C*T^-1)
-    A = solve(T.T, (T @ A).T).T  # (A = T*A*T^-1)
-    B = T @ B
-    return A, B, C, T
-
-def discrete2cont(ad, bd, cd, dd, dt, method='zoh', alpha=None):
-    """Convert linear system from discrete to continuous time-domain.
-
-    This is the inverse of :func:`scipy.signal.cont2discrete`. This will not
-    work in general, for instance with the ZOH method when the system has
-    discrete poles at ``0``.
-
-    Parameters
-    ----------
-    A,B,C,D : :data:`linear_system_like`
-       Linear system representation.
-    dt : ``float``
-       Time-step used to *undiscretize* ``sys``.
-    method : ``string``, optional
-       Method of discretization. Defaults to zero-order hold discretization
-       (``'zoh'``), which assumes that the input signal is held constant over
-       each discrete time-step.
-    alpha : ``float`` or ``None``, optional
-       Weighting parameter for use with ``method='gbt'``.
-    Returns
-    -------
-    :class:`.LinearSystem`
-       Continuous linear system (``analog=True``).
-    See Also
-    --------
-    :func:`scipy.signal.cont2discrete`
-    Examples
-    --------
-    Converting a linear system
-    >>> from nengolib.signal import discrete2cont, cont2discrete
-    >>> from nengolib import DoubleExp
-    >>> sys = DoubleExp(0.005, 0.2)
-    >>> assert dsys == discrete2cont(cont2discrete(sys, dt=0.1), dt=0.1)
-
-    """
-
-    sys = (ad, bd, cd, dd)
-    if dt <= 0:
-        raise ValueError("dt (%s) must be positive" % (dt,))
-
-    n = ad.shape[0]
-    m = n + bd.shape[1]
-
-    if method == 'gbt':
-        if alpha is None or alpha < 0 or alpha > 1:
-            raise ValueError("alpha (%s) must be in range [0, 1]" % (alpha,))
-
-        In = np.eye(n)
-        ar = solve(alpha*dt*ad.T + (1-alpha)*dt*In, ad.T - In).T
-        M = In - alpha*dt*ar
-
-        br = np.dot(M, bd) / dt
-        cr = np.dot(cd, M)
-        dr = dd - alpha*np.dot(cr, bd)
-
-    elif method in ('bilinear', 'tustin'):
-        return discrete2cont(*sys, dt, method='gbt', alpha=0.5)
-
-    elif method in ('euler', 'forward_diff'):
-        return discrete2cont(*sys, dt, method='gbt', alpha=0.0)
-
-    elif method == 'backward_diff':
-        return discrete2cont(*sys, dt, method='gbt', alpha=1.0)
-
-    elif method == 'zoh':
-        # see https://en.wikipedia.org/wiki/Discretization#Discretization_of_linear_state_space_models
-        M = np.zeros((m, m))
-        M[:n, :n] = ad
-        M[:n, n:] = bd
-        M[n:, n:] = np.eye(bd.shape[1])
-        E = logm(M) / dt
-
-        ar = E[:n, :n]
-        br = E[:n, n:]
-        cr = cd
-        dr = dd
-    else:
-        raise ValueError("invalid method: '%s'" % (method,))
-
-    return ar, br, cr, dr
 
 def jacobian_freq(A,B,C,z):
     """Compute Jacobians of the unweighted errors wrt. model parameters.
@@ -296,6 +350,8 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr',
         Number of block rows in the extended observability matrix (r > n)
     bd_method : str {'nr', 'explicit'}, optional
         Method used for BD estimation
+    modal : bool {false}, optional
+        Return
 
     Returns
     -------
@@ -617,7 +673,7 @@ def frf_jacobian(x0,A,C,n,m,p,freq,U=None,weight=None):
         tmp[...,n*m:] = np.einsum('ij,iljk->ilk',U,JD)
 
     tmp.shape = (F,p*_m,npar)
-    if weight is not None:
+    if weight not in (None, False):
         tmp = mmul_weight(tmp, weight)
     tmp.shape = (F*p*_m,npar)
 
@@ -636,8 +692,6 @@ def output_costfcn(x0,A,C,n,m,p,freq,U,Y,weight):
     Ĝ(f) = C*inv(z(f)*I - A)*B + D and W = 1/σ_G.
     Ŷ(f) = U(f) * Ĝ(f)
     """
-
-    F = len(freq)
     B = x0[:n*m].reshape(n,m)
     D = x0[n*m:m*(n+p)].reshape(p,m)
 
@@ -646,7 +700,7 @@ def output_costfcn(x0,A,C,n,m,p,freq,U,Y,weight):
     # fast way of doing: Ymodel[f] = U[f] @ Gss[f].T
     Ymodel = np.einsum('ij,ilj->il',U,Gss)
     V = Ymodel - Y
-    if weight is None:
+    if weight not in (None, False):
         V = V.ravel(order='F')
     else:
         # TODO order='F' ?
@@ -693,7 +747,7 @@ def jacobian(x0, system, weight=None):
     tmp[...,n**2 + n*m + n*p:] = JD
     tmp.shape = (F,m*p,npar)
 
-    if weight is not None:
+    if weight not in (None, False):
         tmp = mmul_weight(tmp, weight)
     tmp.shape = (F*p*m,npar)
 
@@ -703,8 +757,8 @@ def jacobian(x0, system, weight=None):
 
     return jac
 
-def costfcn(x0, system, weight=None):
-    """Compute the vector of residuals such that the function to mimimize is
+def costfcn(x0, system, weight=False):
+    """Compute the error vector of the FRF, such that the function to mimimize is
 
     res = ∑ₖ e[k]ᴴ*e[k], where the error is given by
     e = weight*(Ĝ - G)
@@ -718,15 +772,14 @@ def costfcn(x0, system, weight=None):
 
     # frf of the state space model
     Gss = ss2frf(A,B,C,D,freq/fs)
-    err = Gss - system.G
-    if weight is not None:
+    err = Gss - system.signal.G
+    if weight not in (None, False):
         err = mmul_weight(err, weight)
     err_w = np.hstack((err.real.ravel(), err.imag.ravel()))
 
     return err_w  # err.ravel()
 
 def extract_ss(x0, system):
-
     n, m, p = system.n, system.m, system.p
     A = x0.flat[:n**2].reshape((n,n))
     B = x0.flat[n**2 + np.r_[:n*m]].reshape((n,m))

@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 
 from .common import (lm, mmul_weight, weightfcn)
-from .frf import covariance
+from .polynomial import (poly_deriv, multEdwdx, nl_terms)
+from .statespace import NonlinearStateSpace, StateSpaceIdent, StateSpace
+from .subspace import Subspace
 import numpy as np
 from numpy.fft import fft
 from scipy.special import comb
@@ -15,24 +17,13 @@ from copy import deepcopy
 PNLSS -- a collection of classes and functions for modeling nonlinear
 linear state space systems.
 """
-class PNLSS(object):
-    def __init__(self, A,B,C,D, **kwargs):
-        """Initialize the state space lti/dlti system."""
+class PNLSS(NonlinearStateSpace, StateSpaceIdent):
+    def __init__(self, *system, **kwargs):
+        if len(system) == 1 and isinstance(system[0], StateSpace):
+            #system = (system.A, system.B, system.C, system.D)
+            pass
 
-        self.A, self.B, self.C, self.D = A, B, C, D
-
-        self.n = self.A.shape[0]
-        self.m = self.B.shape[1]
-        self.p = self.C.shape[0]
-
-        self.T1 = None
-        self.T2 = None
-
-        self.dt = 0.1
-
-    def setss(self, *system):
-        if len(system) == 6:
-            self.A, self.B, self.C, self.D, self.E, self.F = system
+        super().__init__(*system, **kwargs)
 
     def nlterms(self, eq, degree, structure):
         """Set active nonlinear terms/monomials to be optimized"""
@@ -57,174 +48,11 @@ class PNLSS(object):
             self.F = np.zeros((self.p, self.n_ny))
             self.yd_powers, self.yd_coeff = poly_deriv(self.ypowers)
 
-    def transient(self, T1=None, T2=None):
-        """Transient handling. t1: periodic, t2: aperiodic
-        Get transient index. Only needed to run once
-        """
+    def output(self, u, t=None, x0=None):
+        return dnlsim(self, u, t=t, x0=x0)
 
-        self.T1 = T1
-        self.T2 = T2
-        sig = self.signal
-        ns = sig.R * sig.npp
-        # Extract the transient part of the input
-        self.idx_trans = transient_indices_periodic(T1, ns)
-        self.idx_remtrans = remove_transient_indices_periodic(T1, ns, sig.p)
-        self.umt = sig.um[self.idx_trans]
-        self.n_trans = self.umt.shape[0]
-
-        # without_T2 = remove_transient_indices_nonperiodic(system.T2,N,system.p)
-        self.without_T2 = np.s_[:ns]
-
-    def simulate(self, u, t=None, x0=None, T1=None, T2=None):
-        """Calculate the output and the states of a nonlinear state-space model with
-        transient handling.
-
-        """
-
-        # Number of samples
-        ns = u.shape[0]
-        if T1 is None:
-            T1 = self.T1
-            T2 = self.T2
-            if T1 is not None:
-                idx = self.idx_trans
-        else:
-            idx = transient_indices_periodic(T1, ns)
-
-        if T1 is not None:
-            # Prepend transient samples to the input
-            u = u[idx]
-
-        t, y, x = dnlsim(self, u, t, x0)
-
-        if T1 is not None:
-            # remove transient samples. p=1 is correct. TODO why?
-            idx = remove_transient_indices_periodic(T1, ns, p=1)
-            x = x[idx]
-            y = y[idx]
-            t = t[idx]
-
-        self.x_mod = x
-        self.y_mod = y
-        return t, y, x
-
-    def weightfcn(self):
-        try:
-            self.covY
-        except AttributeError:
-            self.covY = covariance(self.signal.y)
-        return weightfcn(self.covY)
-
-    def optimize(self, method=None, weight=True, info=True, nmax=50, lamb=None,
-                 ftol=1e-8, xtol=1e-8, gtol=1e-8, copy=False):
-        """Optimize the estimated the nonlinear state space matrices"""
-
-        if weight is True:
-            try:
-                self.weight
-            except AttributeError:
-                self.weight = self.weightfcn()
-        else:
-            self.weight = weight
-
-        self.freq_weight = True
-        if self.weight is None:
-            self.freq_weight = False
-
-        if info:
-            print('\nStarting PNLSS optimization')
-
-        x0 = self.flatten_ss()
-        if method is None:
-            res = lm(costfcn, x0, jacobian, system=self, weight=self.weight,
-                     info=info, nmax=nmax, lamb=lamb, ftol=ftol, xtol=xtol,
-                     gtol=gtol)
-        else:
-            res = least_squares(costfcn,x0,jacobian, method='lm',
-                                x_scale='jac',
-                                kwargs={'system':self,'weight':self.weight})
-
-        if copy:
-            # restore state space matrices as they are
-            self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(x0, self)
-
-            nmodel = deepcopy(self)
-            nmodel.A, nmodel.B, nmodel.C, nmodel.D, nmodel.E, nmodel.F = \
-                extract_ss(res['x'], nmodel)
-            nmodel.res = res
-            return nmodel
-
-        self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(res['x'], self)
-        self.res = res
-
-    def cost(self, weight=None):
-
-        if weight is True:
-            try:
-                weight = self.weight
-            except AttributeError:
-                weight = self.weightfcn()
-
-        x0 = self.flatten_ss()
-        err = costfcn(x0, self, weight=weight)
-        # TODO maybe divide by 2 to match scipy's implementation of minpack
-        self.cost = np.dot(err, err)
-        return self.cost
-
-    def flatten_ss(self):
-        """Returns the state space as flattened array"""
-
-        # index of active elements
-        xact = self.xactive
-        yact = self.yactive
-        ne = len(xact)
-        nf = len(yact)
-
-        # samples per period
-        n, m, p = self.n, self.m, self.p
-        n_nx, n_ny = self.n_nx, self.n_ny
-        self.npar = n**2 + n*m + p*n + p*m + n*n_nx + p*n_ny
-        self.npar = n**2 + n*m + p*n + p*m + ne + nf
-
-        # initial guess
-        x0 = np.empty(self.npar)
-        x0[:n**2] = self.A.ravel()
-        x0[n**2 + np.r_[:n*m]] = self.B.ravel()
-        x0[n**2 + n*m + np.r_[:n*p]] = self.C.ravel()
-        x0[n*(p+m+n) + np.r_[:p*m]] = self.D.ravel()
-        x0[n*(p+m+n)+p*m + np.r_[:ne]] = self.E.flat[xact]
-        x0[n*(p+m+n)+p*m+ne + np.r_[:nf]] = self.F.flat[yact]
-        #x0[n*(p+m+n)+p*m + np.r_[:n*n_nx]] = self.E.ravel()
-        #x0[n*(p+m+n+n_nx)+p*m + np.r_[:p*n_ny]] = self.F.ravel()
-        return x0
-
-    def extract_model(self, y, u, t=None, x0=None, T1=None, T2=None, copy=False):
-        """extract the best model using validation data"""
-
-        dt = 1/self.signal.fs
-        models = self.res['x_mat']
-        nmodels = models.shape[0]
-        ss0 = self.flatten_ss()
-        err_rms = np.empty(nmodels)
-        for i, ss in enumerate(models):
-            self.A, self.B, self.C, self.D, self.E, self.F = \
-                extract_ss(ss, self)
-            tout, yout, xout = self.simulate(u, t, x0, T1, T2)
-            err_rms[i] = np.sqrt(np.mean((y - yout)**2))
-
-        # best model on new data set
-        ss = models[np.argmin(err_rms)]
-        if copy:
-            # restore state space matrices to original
-            self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(ss0, self)
-
-            nmodel = deepcopy(self)
-            nmodel.A, nmodel.B, nmodel.C, nmodel.D, nmodel.E, nmodel.F = \
-                extract_ss(ss, nmodel)
-            return nmodel, err_rms
-
-        self.A, self.B, self.C, self.D, self.E, self.F = extract_ss(ss, self)
-        return err_rms
+    def jacobian(self, x0, weight=False):
+        return jacobian(x0, self, weight=weight)
 
 
 def combinations(n, degrees):
@@ -583,273 +411,6 @@ def select_active(structure,n,m,q,nx):
     # Sort the active elements
     return np.sort(active)
 
-def remove_transient_indices_nonperiodic(T2,N,p):
-    """Remove transients from arbitrary data.
-
-    Computes the indices to be used with a (N,p) matrix containing p output
-    signals of length N, such that y[indices] contains the transient-free
-    output(s) of length NT stacked on top of each other (if more than one
-    output). The transient samples to be removed are specified in T2 (T2 =
-    np.arange(T2) if T2 is scalar).
-
-    Parameters
-    ----------
-    T2 : int
-        scalar indicating how many samples from the start are removed or vector
-        indicating which samples are removed
-    N : int
-        length of the total signal
-    p : int
-        number of outputs
-
-    Returns
-    -------
-    indices : ndarray(int)
-        vector of indices, such that y(indices) contains the output(s) without
-        transients. If more than one output (p > 1), then y(indices) stacks the
-        transient-free outputs on top of each other.
-    nt : int
-        length of the signal without transients
-
-
-    Examples
-    --------
-    One output, T2 scalar
-    N = 1000 # Total number of samples
-    T2 = 200; % First 200 samples should be removed after filtering
-    p = 1; % One output
-    [indices, NT] = fComputeIndicesTransientRemovalArb(T2,N,p);
-    % => indices = (201:1000).'; % Indices of the transient-free output (in uint32 format in version 1.0)
-    % => NT = 800; % Number of samples in the transient-free output
-
-    Two outputs, T2 scalar
-    N = 1000; % Total number of samples
-    T2 = 200; % First 200 samples should be removed after filtering
-    p = 2; % Two outputs
-    [indices, NT] = fComputeIndicesTransientRemovalArb(T2,N,p);
-    % => indices = ([201:1000 1201:2000]).'; % Indices of the transient-free outputs (in uint32 format in version 1.0)
-    % => NT = 800; % Number of samples in each transient-free output
-    % If y = [y1 y2] is a 1000 x 2 matrix with the two outputs y1 and y2,
-    % then y(indices) = [y1(201:1000);
-    %                    y2(201:1000)]
-    % is a vector with the transient-free outputs stacked on top of
-    % each other
-
-   % One output, T2 is a vector
-    N1 = 1000; % Number of samples in a first data set
-    N2 = 500; % Number of samples in a second data set
-    N = N1 + N2; % Total number of samples
-    T2_1 = 1:200; % Transient samples in first data set
-    T2_2 = 1:100; % Transient samples in second data set
-    T2 = [T2_1 (N1+T2_2)]; % Transient samples
-    p = 1; % One output
-    [indices, NT] = fComputeIndicesTransientRemovalArb(T2,N,p);
-    % => indices = ([201:1000 1101:1500])
-    % => NT = 1200;
-    """
-
-    if T2 is None:
-        T2 = [0]
-
-    # TODO make it possible to give T2 as list, T2 = [200]
-    if isinstance(T2, (int, np.integer)):  #np.isscalar(T2):
-        # Remove all samples up to T2
-        T2 = np.arange(T2)
-
-    T2 = np.atleast_1d(np.asarray(T2, dtype=int))
-    # Remove transient samples from the total
-    # TODO wrong: now we remove idx 0, which is wrong
-    without_T2 = np.delete(np.arange(N), T2)
-
-    # Length of the transient-free signal(s)
-    nt = len(without_T2)
-    if p > 1:  # for multiple outputs
-        # TODO define NT
-        indices = np.zeros(p*NT, dtype=int)
-        for i in range(p):
-            # Stack indices for each output on top of each other
-            indices[i*NT:(i+1)*NT] = without_T2 + i*N
-    else:
-        indices = without_T2
-
-    return indices, nt
-
-def transient_indices_periodic(T1,N):
-    """Computes indices for transient handling of periodic signals.
-
-    Computes the indices to be used with a vector u of length N that contains
-    (several realizations of) a periodic signal, such that u[indices] has T1[0]
-    transient samples prepended to each realization. The starting samples of
-    each realization can be specified in T1[1:]. Like this, steady-state data
-    can be obtained from a PNLSS model by using u[indices] as an input signal
-    to a PNLSS model (see :meth:`pyvib.PNLSS.simulate`) and removing the
-    transient samples afterwards (see :func:`remove_transient_indices_periodic`
-
-    Parameters
-    ----------
-    T1 : int | ndarray(int)
-        array that indicates how the transient is handled. The first element
-        T1[0] is the number of transient samples that should be prepended to
-        each realization. The other elements T1[1:] indicate the starting
-        sample of each realization in the signal. If T1 has only one element,
-        T1[1] is put to zero, ie. first element.
-    N : int
-        length of the signal containing all realizations
-
-    Returns
-    -------
-    indices : ndarray(int)
-        indices of a vector u that contains (several realizations of) a
-        periodic signal, such that u[indices] has a number of transient samples
-        added before each realization
-
-    Examples
-    --------
-    >>> npp = 1000  # Number of points per period
-    >>> R = 2  # Number of phase realizations
-    >>> T = 100  # Number of transient samples
-    >>> T1 = np.r_[T, np.r_[0:(R-1)*npp+1:npp]]  # Transient handling vector
-    >>> N = R*npp  # Total number of samples
-    >>> indices = transient_indices_periodic(T1,N)
-    indices = np.r_[900:1000, 0:1000, 1900:2000, 1000:2000]
-            = [transient samples realization 1, ...
-               realization 1, ...
-               transient samples realization 2, ...
-               realization 2]
-    """
-
-    T1 = np.atleast_1d(np.asarray(T1, dtype=int))
-    ntrans = T1[0]
-
-    if ntrans != 0:
-
-        if len(T1) == 1:
-            # If starting samples of realizations not specified, then we assume
-            # the realization start at the first sample
-            T1 = np.append(T1, 0)
-        # starting index of each realization and length of signal
-        T1 = np.append(T1[1:], N)
-
-        indices = np.array([], dtype=int)
-        for i in range(len(T1)-1):
-            trans = T1[i+1] - 1 - np.mod(np.arange(ntrans)[::-1], T1[i+1]-T1[i])
-            normal = np.arange(T1[i],T1[i+1])
-            indices = np.hstack((indices, trans, normal))
-    else:
-        # No transient points => output = all indices of the signal
-        indices = np.arange(N)
-
-    return indices
-
-def remove_transient_indices_periodic(T1,N,p):
-    """Computes indices for transient handling for periodic signals after
-    filtering
-
-    Let u be a vector of length N containing (several realizations of) a
-    periodic signal. Let uTot be a vector containing the signal(s) in u with
-    T1[0] transient points prepended to each realization (see
-    :func:`transient_indices_periodic`). The starting samples of each
-    realization can be specified in T1[1:]. Let yTot be a vector/matrix
-    containing the p outputs of a PNLSS model after applying the input uTot.
-    Then this function computes the indices to be used with the vectorized form
-    of yTot such that the transient samples are removed from yTot, i.e. y =
-    yTot[indices] contains the steady-state output(s) stacked on top of each
-    other.
-
-    Parameters
-    ----------
-    T1 : ndarray(int)
-        vector that indicates how the transient is handled. The first element
-        T1[0] is the number of transient samples that were prepended to each
-        realization. The other elements T1[1:] indicate the starting sample
-        of each realization in the input signal. If T1 has only one element,
-        T1[1] is put to zero.
-    N : int
-        length of the input signal containing all realizations
-    p : int
-        number of outputs
-
-    Returns
-    -------
-    indices : ndarray(int)
-        If uTot is a vector containing (several realizations of) a periodic
-        signal to which T1[0] transient points were added before each
-        realization, and if yTot is the corresponding output vector (or matrix
-        if more than one output), then indices is such that the transient
-        points are removed from y = yTot.flat[indices]. If p > 1, then indices
-        is a vector and y = yTot.flat[indices] is a vector with the steady
-        state outputs stacked after each other.
-
-    Examples
-    --------
-    >>> npp = 1000  # Number of points per period
-    >>> R = 2  # Number of phase realizations
-    >>> T = 100  # Number of transient samples
-    >>> T1 = np.r_[T, np.r_[0:(R-1)*npp+1:npp]]  # Transient handling vector
-    >>> N = R*npp  # Total number of samples
-    >>> indices_tot = transient_indices_periodic(T1,N)
-    indices_tot = np.r_[900:1000, 0:1000, 1900:2000, 1000:2000]
-    >>> p = 1  # One output
-    >>> indices_removal = remove_transient_indices_periodic(T1,N,p)
-    np.r_[100:1100, 1200:2200]
-    >>> indices_tot[indices_removal]
-    np.r_[:2000]  # [realization 1, realization 2]
-    >>> p = 2  # More than one output
-    >>> indices_removal = remove_transient_indices_periodic(T1,N,p)
-    np.r_[100:1100, 1200:2200, 2300:3300, 3400:4400]
-
-    Let u be a vector containing [input realization 1, input realization 2]
-    then uTot = u[indices_tot] is a vector containing
-                [transient samples realization 1, input realization 1,
-                 transient samples realization 2, input realization 2]
-    Let y1 be a vector containing the first output and y2 be a vector
-    containing the second output when applying uTot as an input to a
-    PNLSS model, and let yTot = [y1, y2].T be a 2 x 2200 matrix with y1
-    and y2 in its first and second row, respectively.
-    Note that y1 = yTot.flat[:2200] and y2 = yTot.flat[2200:4400]
-    Then yTot.flat[indices_removal] = np.r_[y1[100:1100], y1[1200:2200],
-                                            y2[100:1100], y2[1200:2200]]
-                               = [output 1 corresponding to input realization 1,
-                                  output 1 corresponding to input realization 2,
-                                  output 2 corresponding to input realization 1,
-                                  output 2 corresponding to input realization 2]
-
-    """
-
-    T1 = np.atleast_1d(np.asarray(T1, dtype=int))
-    ntrans = T1[0]
-
-    if ntrans == 0:
-        return np.arange(N)
-
-    if len(T1) == 1:
-        # If starting samples of realizations not specified, then we assume
-        # the realization start at the first sample
-        T1 = np.append(T1, 0)
-
-    # starting index of each realization and length of signal
-    T1 = np.append(T1[1:], N)
-
-    indices = np.array([], dtype=int)
-    for i in range(len(T1)-1):
-        # Concatenate indices without transient samples
-        indices = np.hstack((indices,
-                             np.r_[T1[i]:T1[i+1]] + (i+1)*ntrans))
-
-    # TODO This is not correct for p>1. We still store y.shape -> (N,p)
-    if p > 1:
-        # Total number of samples per output = number of samples without + with
-        # transients
-        nt = N + ntrans*(len(T1)-1)
-
-        tmp = np.empty(p*N, dtype=int)
-        for i in range(p):
-            # Stack indices without transient samples on top of each other
-            tmp[i*N:(i+1)*N] = indices + i*nt
-        indices = tmp
-
-    return indices
-
 # https://github.com/scipy/scipy/blob/master/scipy/signal/ltisys.py
 def dnlsim(system, u, t=None, x0=None):
     """Simulate output of a discrete-time nonlinear system.
@@ -863,6 +424,11 @@ def dnlsim(system, u, t=None, x0=None):
     initial state is given in x0.
 
     """
+    if not isinstance(system, PNLSS):
+        raise ValueError(f'System must be a PNLSS object {type(system)}')
+    #     pass
+    # else:
+    #     system = NonlinearStateSpace(*system)
 
     u = np.asarray(u)
 
@@ -924,177 +490,6 @@ def dnlsim(system, u, t=None, x0=None):
 
     return tout, yout, xout
 
-
-def poly_deriv(powers):
-    """Calculate derivative of a multivariate polynomial
-
-    """
-    # Polynomial coefficients of the derivative
-    d_coeff = powers[:,None]
-    n = powers.shape[1]
-    #  Terms of the derivative
-    d_powers = np.repeat(powers[...,None],n, axis=2)
-    for i in range(n):
-        # Derivative w.r.t. variable i has one degree less in variable i than
-        # original polynomial If original polynomial is constant w.r.t.
-        # variable i, then the derivative is zero, but take abs to avoid a
-        # power -1 (zero coefficient anyway)
-        d_powers[:,i,i] = np.abs(powers[:,i]-1)
-
-        # TODO
-        # This would be more correct, but is slower
-        # d_powers(:,i,i) = powers(:,i) - 1;
-        # d_powers(powers(:,i) == 0,:,i) = 0;
-
-    return d_powers, d_coeff
-
-
-def multEdwdx(contrib, power, coeff, E, n):
-    """Multiply a matrix E with the derivative of a polynomial w(x,u) wrt. x
-
-    Multiplies a matrix E with the derivative of a polynomial w(x,u) wrt the n
-    elements in x. The samples of x and u are given by `contrib`. The
-    derivative of w(x,u) wrt. x, is given by the exponents in x and u (given in
-    power) and the corresponding coefficients (given in coeff).
-
-    Parameters
-    ----------
-    contrib : ndarray(n+m,N)
-        N samples of the signals x and u
-    power : ndarray(n_nx,n+m,n+m)
-        The exponents of the derivatives of w(x,u) w.r.t. x and u, i.e.
-        power(i,j,k) contains the exponent of contrib j in the derivative of
-        the ith monomial w.r.t. contrib k.
-    coeff : ndarray(n_nx,n+m)
-        The corresponding coefficients, i.e. coeff(i,k) contains the
-        coefficient of the derivative of the ith monomial in w(x,u) w.r.t.
-        contrib k.
-    E : ndarray(n_out,n_nx)
-    n : int
-        number of x signals w.r.t. which derivatives are taken
-
-    Returns
-    -------
-    out : ndarray(n_out,n,N)
-        Product of E and the derivative of the polynomial w(x,u) w.r.t. the
-        elements in x at all samples.
-
-    Examples
-    --------
-    Consider w(x1,x2,u) = [x1^2    and E = [1 3 5
-                           x1*x2            2 4 6]
-                           x2*u^2]
-    then the derivatives of E*w wrt. x1 and x2 are given by
-    E*[2*x1 0
-       1*x2 1*x1
-       0    1*u^2]
-    and the derivative of w wrt. u is given by [0,0,2*x2*u]^T
-
-    >>> E = np.array([[1,3,5],[2,4,6]])
-    >>> pow = np.zeros((3,3,3))
-    Derivative wrt. x1 has terms 2*x1, 1*x2 and 0
-    >>> pow[:,:,0] = np.array([[1,0,0],
-                               [0,1,0],
-                               [0,0,0]])
-    Derivative wrt. x2 has terms 0, 1*x1 and 1*u^2
-    >>> pow[:,:,1] = np.array([[0,0,0],
-                               [1,0,0],
-                               [0,0,2]])
-    Derivative wrt. u has terms 0, 0 and 2*x2*u
-    >>> pow[:,:,2] = np.array([[0,0,0],
-                               [0,0,0],
-                               [0,1,1]])
-    >>> coeff = np.array([[2,0,0],
-                          [1,1,0],
-                          [0,1,2]])
-    >>> n = 2  # Two signals x
-    Ten random samples of signals x1, x2, and u
-    >>> contrib = np.random.randn(3,10)
-    >>> out = multEdwdx(contrib,pow,coeff,E,n)
-    >>> t = 0
-    out[:,:,t] = E @ np.array([[2*contrib[0,t],0],
-                              [1*contrib[1,t],1*contrib[0,t]],
-                              [0             ,1*contrib[2,t]**2]])
-
-    """
-
-    # n_all = number of signals x and u; N = number of samples
-    n_all, N = contrib.shape
-    # n_out = number of rows in E; n_nx = number of monomials in w
-    n_out, n_nx = E.shape
-    out = np.zeros((n_out,n,N))
-    # Loop over all signals x w.r.t. which derivatives are taken
-    for k in range(n):
-        # Repeat coefficients of derivative of w w.r.t. x_k
-        A = np.outer(coeff[:,k], np.ones(N))
-        for j in range(n_all):     # Loop over all signals x and u
-            for i in range(n_nx):  # Loop over all monomials
-                # Derivative of monomial i wrt x_k
-                A[i,:] *= contrib[j,:]**power[i,j,k]
-        # E times derivative of w wrt x_k
-        out[:,k,:] = np.matmul(E,A)
-
-    return out
-
-def nl_terms(contrib,power):
-    """Construct polynomial terms.
-
-    Computes polynomial terms, where contrib contains the input signals to the
-    polynomial and pow contains the exponents of each term in each of the
-    inputs. The maximum degree of an individual input is given in max_degree.
-
-    Parameters
-    ----------
-    contrib : ndarray(n+m,N)
-        matrix with N samples of the input signals to the polynomial.
-        Typically, these are the n states and the m inputs of the nonlinear
-        state-space model.
-    power : ndarray(nterms,n+m)
-        matrix with the exponents of each term in each of the inputs to the
-        polynomial
-
-    Returns
-    -------
-    out : ndarray(nterms,N)
-        matrix with N samples of each term
-
-    Examples
-    --------
-    >>> n = 2  # Number of states
-    >>> m = 1  # Number of inputs
-    >>> N = 1000  # Number of samples
-    >>> x = np.random.randn(N,n)  # States
-    >>> u = np.random.randn(N,m)  # Input
-    >>> contrib = np.hstack((x, u)).T  # States and input combined
-    All possible quadratic terms in states and input: x1^2, x1*x2, x1*u, x2^2,
-    x2*u, u^2
-    >>> pow = np.array([[2,0,0],
-                        [1,1,0],
-                        [1,0,1],
-                        [0,2,0],
-                        [0,1,1],
-                        [0,0,2]])
-    >>> nl_terms(contrib,pow)
-    array([x[:,0]**2,
-           x[:,0]*x[:,1],
-           x[:,0]*u.squeeze(),
-           x[:,1]**2,
-           x[:,1]*u.squeeze(),
-           u.squeeze()**2])
-    """
-
-    # Number of samples
-    N = contrib.shape[1]
-    # Number of terms
-    nterms = power.shape[0]
-    out = np.empty((nterms,N))
-    for i in range(nterms):
-        # All samples of term i
-        out[i] = np.prod(contrib**power.T[:,None,i], axis=0)
-
-    return out
-
-
 def element_jacobian(samples, A_Edwdx, C_Fdwdx, active):
     """Compute Jacobian of the output y wrt. A, B, and E
 
@@ -1150,7 +545,7 @@ def element_jacobian(samples, A_Edwdx, C_Fdwdx, active):
 
     return out
 
-def jacobian(x0, system, weight=None):
+def jacobian(x0, system, weight=False):
     """Compute the Jacobians of a steady state nonlinear state-space model
 
     Jacobians of a nonlinear state-space model
@@ -1165,21 +560,20 @@ def jacobian(x0, system, weight=None):
         flattened array of state space matrices
 
     """
-
     n, m, p = system.n, system.m, system.p
     R, p, npp = system.signal.R, system.signal.p, system.signal.npp
     nfd = npp//2
     # total number of points
     N = R*npp  # system.signal.um.shape[0]
-    n_trans = system.n_trans
     without_T2 = system.without_T2
 
-    A, B, C, D, E, F = extract_ss(x0, system)
+    A, B, C, D, E, F = system.extract(x0)
 
     # Collect states and outputs with prepended transient sample
     x_trans = system.x_mod[system.idx_trans]
-    u_trans = system.umt
+    u_trans = system.signal.um[system.idx_trans]
     contrib = np.hstack((x_trans, u_trans)).T
+    n_trans = u_trans.shape[0]
 
     # E∂ₓζ + A(n,n,NT)
     A_EdwxIdx = multEdwdx(contrib,system.xd_powers,np.squeeze(system.xd_coeff),
@@ -1223,7 +617,7 @@ def jacobian(x0, system, weight=None):
     npar = jac.shape[1]
 
     # add frequency weighting
-    if weight is not None and system.freq_weight:
+    if weight not in (None, False) and system.freq_weight:
         # (p*ns, npar) -> (Npp,R,p,npar) -> (Npp,p,R,npar) -> (Npp,p,R*npar)
         jac = jac.reshape((npp,R,p,npar),
                           order='F').swapaxes(1,2).reshape((-1,p,R*npar),
@@ -1231,7 +625,7 @@ def jacobian(x0, system, weight=None):
         # select only the positive half of the spectrum
         jac = fft(jac, axis=0)[:nfd]
         # TODO should we test if weight is None or just do it in mmul_weight
-        if weight is not None:
+        if weight not in (None, False):
             jac = mmul_weight(jac, weight)
         # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
         jac = jac.reshape((-1,p,R,npar),
@@ -1240,70 +634,9 @@ def jacobian(x0, system, weight=None):
         J = np.empty((2*nfd*R*p,npar))
         J[:nfd*R*p] = jac.real
         J[nfd*R*p:] = jac.imag
-    elif weight is not None:
+    elif weight not in (None, False):
         raise ValueError('Time weighting not possible')
     else:
         return jac
 
     return J
-
-def extract_ss(x0, system):
-
-    n, m, p = system.n, system.m, system.p
-    n_nx, n_ny = system.n_nx, system.n_ny
-    # index of active elements
-    xact = system.xactive
-    yact = system.yactive
-    ne = len(xact)
-    nf = len(yact)
-
-    E = np.zeros((n, n_nx))
-    F = np.zeros((p, n_ny))
-    A = x0.flat[:n**2].reshape((n,n))
-    B = x0.flat[n**2 + np.r_[:n*m]].reshape((n,m))
-    C = x0.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
-    D = x0.flat[n*(p+m+n) + np.r_[:p*m]].reshape((p,m))
-
-    E.flat[xact] = x0.flat[n*(p+m+n)+p*m + np.r_[:ne]]
-    F.flat[yact] = x0.flat[n*(p+m+n)+p*m+ne + np.r_[:nf]]
-
-    return A, B, C, D, E, F
-
-def costfcn(x0, system, weight=None):
-    # TODO fix transient
-    T2 = system.T2
-    R, p, npp = system.signal.R, system.signal.p, system.signal.npp
-    nfd = npp//2
-    without_T2 = system.without_T2
-
-    # update the state space matrices from x0
-    # TODO find a way to avoid explicitly updating the state space model.
-    # It is not the expected behavior that calculating the cost should change
-    # the model! Right now it is done because simulating is using the systems
-    # ss matrices
-
-    # A, B, C, D, E, F = extract_ss(x0, system)
-    system.setss(*extract_ss(x0, system))
-    # Compute the (transient-free) modeled output and the corresponding states
-    t_mod, y_mod, x_mod = system.simulate(system.signal.um)
-
-    # Compute the (weighted) error signal without transient
-    err = system.y_mod[without_T2] - system.signal.ym[without_T2]
-    if weight is not None and system.freq_weight:
-        err = err.reshape((npp,R,p),order='F').swapaxes(1,2)
-        # Select only the positive half of the spectrum
-        err = fft(err, axis=0)[:nfd]
-        err = mmul_weight(err, weight)
-        #cost = np.vdot(err, err).real
-        err = err.swapaxes(1,2).ravel(order='F')
-        err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
-    elif weight is not None:
-        # TODO time domain weighting. Does not work
-        err_w = err * weight[without_T2]
-        #cost = np.dot(err,err)
-    else:
-        # no weighting
-        # TODO are we sure this is the right order?
-        return err.ravel(order='F')
-
-    return err_w

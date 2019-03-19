@@ -1,16 +1,195 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import matplotlib.pylab as plt
 import numpy as np
-# import matplotlib.pylab as plt
+from numpy.fft import fft
+from scipy.signal import decimate
 
 from .common import db, prime_factor
-from .filter import integrate, differentiate
-from scipy.signal import decimate
-# from .morletWT import morletWT
-# from collections import namedtuple
+from .filter import differentiate, integrate
+from .frf import bla_periodic
 
-class Signal(object):
+
+class Signal():
+    def __init__(self, u, y, yd=None, fs=1):
+        # in case there is only one realization, ie. (npp,m,P)
+        if len(u.shape) == 3:
+            u = u[:,:,None]
+        if len(y.shape) == 3:
+            y = y[:,:,None]
+        if yd is not None and len(yd.shape) == 3:
+            yd = yd[:,:,None]
+        self.u = u
+        self.y = y
+        self._yd = yd
+        self._ydm = None
+        self.fs = fs
+        self.npp, self.m, self.R, self.P = u.shape
+        self.npp, self.p, self.R, self.P = y.shape
+
+    @property
+    def lines(self):
+        return self._lines
+
+    @lines.setter
+    def lines(self, lines):
+        self._lines = lines
+        self.F = len(lines)
+        self.freq = lines/self.npp  # Excited frequencies (normalized)
+
+    def bla(self):
+        """Get best linear approximation"""
+        # TODO bla expects  m, R, P, F = U.shape
+        self.U = fft(self.u, axis=0)[self.lines].transpose((1,2,3,0))
+        self.Y = fft(self.y, axis=0)[self.lines].transpose((1,2,3,0))
+        self.G, self.covG, self.covGn = bla_periodic(self.U, self.Y)
+        self.G = self.G.transpose((2,0,1))
+        if self.covG is not None:
+            self.covG = self.covG.transpose((2,0,1))
+        if self.covGn is not None:
+            self.covGn = self.covGn.transpose((2,0,1))
+        return self.G, self.covG, self.covGn
+
+    def average(self, u=None, y=None):
+        """Average over periods and flatten over realizations"""
+
+        saveu = False
+        savey = False
+        if u is None:
+            u = self.u
+            saveu = True
+        if y is None:
+            y = self.y
+            savey = True
+        um = u.mean(axis=-1)  # (npp,m,R)
+        ym = y.mean(axis=-1)
+        um = um.swapaxes(1,2).reshape(-1,self.m, order='F')  # (npp*R,m)
+        ym = ym.swapaxes(1,2).reshape(-1,self.p, order='F')  # (npp*R,p)
+
+        if saveu:
+            self.um = um
+            # number of samples after average over periods
+            self.mns = um.shape[0]  # mns = npp*R
+        if savey:
+            self.ym = ym
+
+        return um, ym
+
+    @property
+    def ydm(self):
+        if self._yd is None:
+            # TODO do some numerical differentiation
+            pass
+        if self._ydm is None:
+            ydm = self._yd.mean(axis=-1)
+            self._ydm = ydm.swapaxes(1,2).reshape(-1,self.m, order='F')
+        return self._ydm  # (npp*R,m)
+
+    def periodicity(self, dof=0, R=0, P=None, sample=1, fig=None, ax=None,
+                    **kwargs):
+        """Shows the periodicity for the signal
+
+        Parameters:
+        ----------
+        R : int or list, optional
+            Realizations to plot. Default is 0
+        P : int, list or None, optional
+            Period/s to plot. Default is all(P=None)
+        dof : int, optional
+            DOF where periodicity is plotted for
+        sample : int {1}, optional
+            Only use every sample'th point. Used if there is many points
+        """
+        R =  np.atleast_1d(R)
+        # always use last period as reference
+        if P is None:
+            P = np.r_[:self.P]
+        elif isinstance(P, int):
+            P = np.r_[P, self.P-1]
+        else:
+            P = np.atleast_1d(P)
+            if len(P) < self.P:
+                P = np.append(P, self.P-1)
+        ns = len(P)*self.npp
+        t = np.arange(ns)/self.fs
+        s = sample
+
+        if fig is None:
+            fig, ax = plt.subplots()
+        ax.set_title(f'Periodicity of signal for DOF {dof}')
+
+        # alpha in decreasing value
+        alpha = np.arange(len(R)+1)[:0:-1]/len(R)
+        for r, a in zip(R, alpha):
+            peridocity = (self.y[::s,dof,r,P[:-1]].T -
+                          self.y[::s,dof,r,P[-1]]).ravel()
+            ax.plot(t[::s], (self.y[::s,dof,r,P].ravel('F')),'--', c='gray',
+                    alpha=a, **kwargs)
+            # , rasterized=True
+            ax.plot(t[:-self.npp:s], db(peridocity), **kwargs, alpha=0.7)
+        for i in range(1,len(P)):
+            x = t[self.npp * i]
+            ax.axvline(x, color='k', linestyle='--')
+
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel(r'Difference $\varepsilon$ (dB)')
+        ax.legend(['signal', 'periodicity'])
+
+        return fig, ax
+
+def downsample(y, u, n, nsper=None, keep=False):
+    """Filter and downsample signals
+
+    The displacement is decimated(low-pass filtered and downsampled) where
+    forcing is only downsampled by the sampling factor n, ie. every n'th
+    sample is kept.
+
+    Parameters
+    ----------
+    n : int
+        downsample rate, ie. keep every n'th sample
+    keep : bool, optional
+        Remove the last period to eliminate the edge effects due to the
+        low-pass filter.
+
+    """
+    # axis to operate along
+    axis = 0
+
+    # filter and downsample
+    # prime factor decomposition.
+    for k in prime_factor(n):
+        y = decimate(y, q=k, ftype='fir', axis=axis)
+
+    # index for downsampling u
+    sl = [slice(None)] * u.ndim
+    sl[axis] = slice(None, None, n)
+    u = u[sl]
+
+    # Removal of the last simulated period to eliminate the edge effects
+    # due to the low-pass filter.
+    if not keep:
+        y = y[...,:-1]
+        u = u[...,:-1]
+
+    return u, y
+
+def filt(self, lowcut, highcut, order=3):
+    from scipy import signal
+    fn = 0.5 * self.fs
+    if highcut > fn:
+        raise ValueError('Highcut frequency is higher than nyquist\
+        frequency of the signal', highcut, fn)
+    elif lowcut <= 0:
+        raise ValueError('Lowcut frequency is 0 or lower', lowcut, fn)
+
+    b, a = signal.butter(order, highcut, btype='lowpass')
+    return signal.filtfilt(b, a, self.y)
+
+
+
+class Signal2(object):
     """ Holds common properties for a signal
     """
     def __init__(self, u, fs, y=None, yd=None, ydd=None):
@@ -213,69 +392,11 @@ class Signal(object):
     #     WT = namedtuple('WT', 'f1 f2 nf f00  dof pad finst wtinst time freq y')
     #     self.wt = WT(f1, f2, nf, f00, dof, pad,finst, wtinst, time, freq, y)
 
-    def filter(self, lowcut, highcut, order=3):
-        from scipy import signal
-        fn = 0.5 * self.fs
-        if highcut > fn:
-            raise ValueError('Highcut frequency is higher than nyquist\
-            frequency of the signal', highcut, fn)
-        elif lowcut <= 0:
-            raise ValueError('Lowcut frequency is 0 or lower', lowcut, fn)
-
-        b, a = signal.butter(order, highcut, btype='lowpass')
-        return signal.filtfilt(b, a, self.y)
-
-    def downsample(self, n, nsper=None, remove=False):
-        """Filter and downsample signals
-
-        The displacement is decimated(low-pass filtered and downsampled) where
-        forcing is only downsampled by the sampling factor n, ie. every n'th
-        sample is kept.
-
-        Parameters
-        ----------
-        n: scalar
-            downsample rate, ie. keep every n'th sample
-        nsper : int
-            Number of samples per period
-        remove: bool
-            Removal of the last simulated period to eliminate the edge effects
-            due to the low-pass filter.
-
-        """
-        y = self.y
-        u = self.u
-
-        # axis to operate along
-        axis = -1
-
-        # filter and downsample
-        # prime factor decomposition.
-        for k in prime_factor(n):
-            y = decimate(y, q=k, ftype='fir', axis=-1)
-
-        # index for downsampling u
-        sl = [slice(None)] * u.ndim
-        sl[axis] = slice(None, None, n)
-        u = u[sl]
-
-        # Removal of the last simulated period to eliminate the edge effects
-        # due to the low-pass filter.
-        if remove:
-            ns = self.ns
-            nper = int(np.floor(ns/nsper))
-            y = y[:,:(nper-1)*nsper]
-            u = u[:,:(nper-1)*nsper]
-
-        return u, y
-
-
 def _set_signal(y):
     if y is not None:
         y = np.atleast_2d(y)
         return y
     return None
-
 
 def _cut(x,per,nsper,offset=0):
     """Extract periodic signal from original signal"""
@@ -288,3 +409,20 @@ def _cut(x,per,nsper,offset=0):
         x_per[:,i*nsper: (i+1)*nsper] = x[:,offset + p*nsper:
                                           offset+(p+1)*nsper]
     return x_per
+
+
+
+# def derivative(Y):
+#     # https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.diff.html
+#     N = npp
+#     if N % 2 == 0:
+#         # NOTE k is sequence of ints
+#         k = np.r_[np.arange(0, N//2), [0], np.arange(-N//2+1, 0)]
+#     else:
+#         k = np.r_[np.arange(0, (N-1)//2), [0], np.arange(-(N-1)//2, 0)]
+
+#     freq = self.flines / self.npp
+#     k *= 2 * np.pi / freq
+#     yd = np.real(np.fft.ifft(1j*k*Y*np.sqrt(npp),axis=0))
+
+#     return yd

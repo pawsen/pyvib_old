@@ -180,7 +180,6 @@ def meanVar(Y, isnoise=False):
 def weightfcn(cov):
     """Calculate weight. For subspace is the square inverse of covG. For
     pnlss it is the square inverse of covY"""
-
     F = cov.shape[0]
     covinvsq = np.empty_like(cov)
     for f in range(F):
@@ -210,7 +209,6 @@ def mmul_weight(mat, weight):
     """Add weight. Computes the Jacobian of the weighted error ``e_W(f) = W(f,:,:)*e(f)``
 
     """
-
     # np.einsum('ijk,kl',weight, mat) or
     # np.einsum('ijk,kl->ijl',weight, mat) or
     # np.einsum('ijk,jl->ilk',weight,mat)
@@ -230,8 +228,8 @@ def normalize_columns(mat):
     # mat /= scaling
     return mat/scaling, scaling
 
-def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
-       xtol=1e-8, gtol=1e-8, args=(), kwargs={}):
+def lm(fun, x0, jac, info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
+       gtol=1e-8, args=(), kwargs={}):
     """Solve a nonlinear least-squares problem using levenberg marquardt
        algorithm
 
@@ -260,12 +258,9 @@ def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
     https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html
 
     """
-
-    R, p, npp = system.signal.R, system.signal.p, system.signal.npp
-    nfd = npp//2
-
-    err_old = fun(x0, system, weight)
-    # divide by 2 to match scipy's implementation of minpack
+    # the error vector
+    err_old = fun(x0, *args, **kwargs)
+    # Maybe divide by 2 to match scipy's implementation of minpack
     cost = np.dot(err_old, err_old)
     cost_old = cost.copy()
 
@@ -276,12 +271,13 @@ def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
     x0_mat = np.empty((nmax, len(x0)))
 
     if info:
-        print(f"{'i':3} | {'inner':5} | {'cost':12} | {'cond':12}")
+        print(f"{'i':3} | {'inner':5} | {'cost':12} | {'cond':12} |"
+              f" {'lambda':6}")
 
     stop = False
     while niter < nmax and not stop:
 
-        J = jac(x0, system, weight)
+        J = jac(x0, *args, **kwargs)
         J, scaling = normalize_columns(J)
 
         U, s, Vt = svd(J, full_matrices=False)
@@ -312,7 +308,7 @@ def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
             ds /= scaling
 
             x0test = x0 + ds
-            err = fun(x0test, system=system, weight=weight)
+            err = fun(x0test, *args, **kwargs)
             cost = np.dot(err,err)
 
             if cost >= cost_old:
@@ -339,11 +335,10 @@ def lm(fun, x0, jac, system, weight, info=True, nmax=50, lamb=None, ftol=1e-8,
                 message = 'small change in cost fucntion'
                 break
 
-
         if info:
             jac_cond = sr[0]/sr[-1]
-            # {cost/2/nfd/R/p:12.3f}
-            print(f"{niter:3d} | {ninner:5d} | {cost/p:12.8g} | {jac_cond:12.3f}"
+            # {cost/2/nfd/R/p:12.3f} for freq weighting
+            print(f"{niter:3d} | {ninner:5d} | {cost:12.8g} | {jac_cond:12.3f}"
                   f" | {lamb:6.3f}")
 
         if cost < cost_old:

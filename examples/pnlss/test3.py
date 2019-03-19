@@ -2,9 +2,8 @@
 # -*- coding: utf-8 -*-
 
 
-from pyvib.statespace import Signal
+from pyvib.signal import Signal
 from pyvib.fnsi import FNSI
-from pyvib.fnsi import NL_force, NL_polynomial, NL_spline
 from pyvib.common import db
 from scipy.linalg import norm
 from pyvib.modal import modal_ac, frf_mkc
@@ -15,8 +14,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.io as sio
 import pickle
+from copy import deepcopy
 
-"""PNLSS model of the silverbox system.
+"""FNSI model of the silverbox system.
 
 The Silverbox system can be seen as an electroninc implementation of the
 Duffing oscilator. It is build as a 2nd order linear time-invariant system with
@@ -88,6 +88,10 @@ yest = y[:,:,0,:]
 uval = uest[...,-1].reshape(-1,m)
 yval = yest[...,-1].reshape(-1,p)
 
+sig = Signal(uest,yest, fs=fs)
+sig.lines(lines)
+um, ym = sig.average()
+
 # model orders and Subspace dimensioning parameter
 n = 2
 maxr = 20
@@ -95,63 +99,53 @@ dof = 0
 iu = 0
 
 xpowers = np.array([[2],[3]])
-fnsi = FNSI(flines=lines, u=uest, y=yest, fs=fs, xpowers=xpowers)
-fnsi.calc_EY()
-fnsi.svd_comp(maxr)
-# Do estimation
-fnsi.id(n)
-#fnsi.nl_coeff(iu, dofs=dof)
+
+# nonlinear
+fnsi = FNSI(sig)
+fnsi.nlterms('state',xpowers)
+fnsi.ext_input()
+fnsi.estimate(n,maxr)
+fnsi.nl_coeff(iu)
+print(np.mean(fnsi.knl,axis=1))
+
+fnsi2 = deepcopy(fnsi)
+fnsi.transient(T1=npp)
+#fnsi.optimize(weight=None, nmax=50)
+
+# linear
+fnsi3 = FNSI(sig)
+fnsi3.ext_input()
+fnsi3.estimate(n,maxr)
 
 sca = 1
-def print_modal(fnsi):
+def print_modal(model):
     # calculate modal parameters
-    modal = modal_ac(fnsi.A, fnsi.C)
+    modal = model.modal
     natfreq = modal['wn']
     dampfreq = modal['wd']
     damping = modal['zeta']
     nw = min(len(natfreq), 8)
-
     print('Undamped ω: {}'.format(natfreq[:nw]*sca))
     print('damped ω: {}'.format(dampfreq[:nw]*sca))
     print('damping: {}'.format(damping[:nw]))
-    return modal
-
-print('## nonlinear identified at high level')
 
 
-sig = Signal(uest[:,:,None],yest[:,:,None])
-sig.lines(lines)
-um, ym = sig.average()
-fnsi.transient(sig, T1=npp)
-fnsi.optimize(weight=None, nmax=50)
-
-
-#modal = print_modal(fnsi)
-
-# frf_freq, frf_H, covG, covGn = periodic(u,y, fs=fs, fmin=1e-3, fmax=150)
-
-# plt.ion()
-# fH1, ax = plt.subplots()
-# plot_frf(frf_freq, frf_H, p=dof, sca=sca, ax=ax, ls='-', c='k', label='From high signal')
-# fnsi.plot_frf(p=dof, sca=sca, ax=ax, label='nl high', ls='--', c='C1')
-
-# fknl, axknl = plot_knl(fnsi, sca)
-
-fnsi2 = FNSI(flines=lines, u=uest, y=yest, fs=fs, xpowers=xpowers)
-fnsi2.calc_EY()
-fnsi2.svd_comp(maxr)
-fnsi2.id(n)
+for model, string in zip((fnsi, fnsi2, fnsi3),
+                         ('nonlinear','nl_optim','linear')):
+    print(f'## {string} identified at high level')
+    modal = print_modal(model)
 
 
 Ptr = 1
-um = uest.mean(2)
-ym = yest.mean(2)
+
 # linear model simulation. But not really linear.
-tm, ylval, xm = fnsi2.simulate(uval, T1=Ptr*npp)
-_, ylin, _ = fnsi2.simulate(um, T1=Ptr*npp)
+tm, ylval, xm = fnsi3.simulate(uval, T1=Ptr*npp)
+_, ylin, _ = fnsi3.simulate(um, T1=Ptr*npp)
 
 tm, ynlval, xm = fnsi.simulate(uval, T1=Ptr*npp)
-_, ynlin, _ = fnsi.simulate(um, T1=Ptr*npp)
+_, ynlin, _ = fnsi2.simulate(um, T1=Ptr*npp)
+_, ynopt, _ = fnsi.simulate(um, T1=Ptr*npp)
+
 #ylval = ynlval
 #ylin = ynlin
 
@@ -161,34 +155,33 @@ covY = covariance(yest[:,:,None])
 # store figure handle for saving the figures later
 figs = {}
 
-plt.ion()
-# linear and nonlinear model error
-resamp = 1
-plt.figure()
-plt.plot(ym[::resamp])
-plt.plot(ym[::resamp]-ylin[::resamp])
-plt.plot(ym[::resamp]-ynlin[::resamp])
-plt.xlabel('Time index')
-plt.ylabel('Output (errors)')
-plt.legend(('Output', 'FNSI ini','FNSI optim'))
-plt.title('Estimation results')
-figs['estimation_error'] = (plt.gcf(), plt.gca())
+# plt.ion()
+# # linear and nonlinear model error
+# resamp = 1
+# plt.figure()
+# plottime = np.hstack((ym, ym-ylin, ym-ynlin, ym-ynopt))
+# plt.plot(plottime)
+# plt.xlabel('Time index')
+# plt.ylabel('Output (errors)')
+# plt.legend(('Output','linear', 'FNSI ini','FNSI optim'))
+# plt.title('Estimation results')
+# figs['estimation_error'] = (plt.gcf(), plt.gca())
 
-# result on validation data
-plt.figure()
-N = len(yval)
-freq = np.arange(N)/N*fs
-plottime = np.hstack((yval, yval-ylval, yval-ynlval))
-plotfreq = np.fft.fft(plottime, axis=0)
-nfd = plotfreq.shape[0]
-plt.plot(freq[lines], db(plotfreq[lines]), '.')
-plt.plot(freq[lines], db(np.sqrt((P-Ptr-1)*covY[lines].squeeze())), '.')
-plt.xlim((0, 300))
-plt.xlabel('Frequency')
-plt.ylabel('Output (errors) (dB)')
-plt.legend(('Output', 'FNSI ini','FNSI optim', 'Noise'))
-plt.title('Validation results')
-figs['val_data'] = (plt.gcf(), plt.gca())
+# # result on validation data
+# plt.figure()
+# N = len(yval)
+# freq = np.arange(N)/N*fs
+# plottime = np.hstack((yval, yval-ylval, yval-ynlval, yval-ynopt))
+# plotfreq = np.fft.fft(plottime, axis=0)
+# nfd = plotfreq.shape[0]
+# plt.plot(freq[lines], db(plotfreq[lines]), '.')
+# plt.plot(freq[lines], db(np.sqrt((P-Ptr-1)*covY[lines].squeeze())), '.')
+# plt.xlim((0, 300))
+# plt.xlabel('Frequency')
+# plt.ylabel('Output (errors) (dB)')
+# plt.legend(('Output','linear', 'FNSI ini','FNSI optim', 'Noise'))
+# plt.title('Validation results')
+# figs['val_data'] = (plt.gcf(), plt.gca())
 
 # subspace plots
 #figs['subspace_optim'] = linmodel.plot_info()
