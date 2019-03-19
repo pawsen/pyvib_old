@@ -32,11 +32,11 @@ def fig_ax_getter(fig=None, ax=None):
 
 def plot_knl(fnsi, sca=1):
 
-    fs = fnsi.fs
-    nsper = fnsi.nsper
+    fs = fnsi.signal.fs
+    npp = fnsi.signal.npp
     flines = fnsi.flines
 
-    freq = np.arange(0,nsper)*fs/nsper * sca
+    freq = np.arange(npp)*fs/npp * sca
     freq_plot = freq[flines]
 
     if sca == 1:
@@ -46,61 +46,53 @@ def plot_knl(fnsi, sca=1):
 
     figs = []
     axs = []
-    for nl in fnsi.nonlin.nls:
-        knl = nl.knl
-        try:
-            enl = nl.enl
-        except:
-            enl = np.ones(knl.shape)
+    for i, knl in enumerate(fnsi.knl):
+        mu = knl
 
-        for i in range(knl.shape[0]):
-            mu = knl[i]
+        mu_mean = np.zeros(2)
+        mu_mean[0] = np.mean(np.real(mu))
+        mu_mean[1] = np.mean(np.imag(mu))
+        # ratio of 1, is a factor of 10. 2 is a factor of 100, etc
+        ratio = np.log10(np.abs(mu_mean[0]/mu_mean[1]))
+        exponent = 'x'.join(str(x) for x in fnsi.xpowers[i])
+        print('exp: {:s}\n ℝ(mu) {:e}\n 𝕀(mu)  {:e}'.format(exponent, *mu_mean))
+        print(f' Ratio log₁₀(ℝ(mu)/𝕀(mu))= {ratio:0.2f}')
 
-            mu_mean = np.zeros(2)
-            mu_mean[0] = np.mean(np.real(mu))
-            mu_mean[1] = np.mean(np.imag(mu))
-            # ratio of 1, is a factor of 10. 2 is a factor of 100, etc
-            ratio = np.log10(np.abs(mu_mean[0]/mu_mean[1]))
-            exponent = enl[i]
-            print('exp: {:d}\n ℝ(mu) {:e}\n 𝕀(mu)  {:e}'.format(exponent,
-                                                                *mu_mean))
-            print(' Ratio log₁₀(ℝ(mu)/𝕀(mu)) {:0.2f}'.format(ratio))
+        fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1)
+        ax1.set_title(f'Exponent: {exponent}. Estimated: {mu_mean[0]:0.3e}')
+        ax1.plot(freq_plot, np.real(mu),label='fnsi')
+        ax1.axhline(mu_mean[0], c='k', ls='--', label='mean')
+        ax1.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+        ax1.set_xlabel('Frequency ' + xstr)
+        ax1.legend()
 
-            fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1)
-            ax1.set_title('Exponent: {:d}. Estimated: {:0.3e}'.
-                          format(exponent, mu_mean[0]))
-            ax1.plot(freq_plot, np.real(mu),label='fnsi')
-            ax1.axhline(mu_mean[0], c='k', ls='--', label='mean')
-            ax1.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
-            ax1.set_xlabel('Frequency ' + xstr)
-            ax1.legend()
+        str1 = ''
+        ymin = np.min(np.real(mu))
+        ymax = np.max(np.real(mu))
+        if np.abs(ymax - ymin) <= 1e-6:
+            ymin = 0.9 * mu_mean[0]
+            ymax = 1.1 * mu_mean[0]
+            ax1.set_ylim([ymin, ymax])
+            str1 = ' 1%'
+        ax1.set_ylabel(rf'Real($\mu$) $(N/m^{{{exponent}}})${str1}')
 
-            str1 = ''
-            ymin = np.min(np.real(mu))
-            ymax = np.max(np.real(mu))
-            if np.abs(ymax - ymin) <= 1e-6:
-                ymin = 0.9 * mu_mean[0]
-                ymax = 1.1 * mu_mean[0]
-                ax1.set_ylim([ymin, ymax])
-                str1 = ' 1%'
-            ax1.set_ylabel(r'Real($\mu$) $(N/m^{:d})${:s}'.format(exponent, str1))
-
-            ax2.plot(freq_plot, np.imag(mu))
-            ax2.axhline(mu_mean[1], c='k', ls='--', label='mean')
-            ax2.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
-            ax2.set_xlabel('Frequency ' + xstr)
-            str1 = ''
-            ymin = np.min(np.imag(mu))
-            ymax = np.max(np.imag(mu))
-            if np.abs(ymax - ymin) <= 1e-6:
-                ymin = 0.9 * mu_mean[1]
-                ymax = 1.1 * mu_mean[1]
-                ax2.set_ylim([ymin, ymax])
-                str1 = ' 1%'
-            ax2.set_ylabel(r'Imag($\mu$) $(N/m^{:d})$'.format(exponent))
-            fig.tight_layout()
-            figs.append(fig)
-            axs.append([ax1, ax2])
+        ax2.plot(freq_plot, np.imag(mu))
+        ax2.set_title(f'Ratio log₁₀(ℝ(mu)/𝕀(mu))= {ratio:0.2f}')
+        ax2.axhline(mu_mean[1], c='k', ls='--', label='mean')
+        ax2.ticklabel_format(axis='y', style='sci', scilimits=(-2,2))
+        ax2.set_xlabel('Frequency ' + xstr)
+        str1 = ''
+        ymin = np.min(np.imag(mu))
+        ymax = np.max(np.imag(mu))
+        if np.abs(ymax - ymin) <= 1e-6:
+            ymin = 0.9 * mu_mean[1]
+            ymax = 1.1 * mu_mean[1]
+            ax2.set_ylim([ymin, ymax])
+            str1 = ' 1%'
+        ax2.set_ylabel(rf'Imag($\mu$) $(N/m^{{{exponent}}})${str1}')
+        fig.tight_layout()
+        figs.append(fig)
+        axs.append([ax1, ax2])
 
     return figs, axs
 

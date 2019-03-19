@@ -6,11 +6,88 @@ import numpy as np
 
 from .common import db, prime_factor
 from .filter import integrate, differentiate
+from .frf import bla_periodic
 from scipy.signal import decimate
+from numpy.fft import fft
+
 # from .morletWT import morletWT
 # from collections import namedtuple
 
+
 class Signal(object):
+    def __init__(self, u, y, yd=None, fs=1):
+        # in case there is only one realization, ie. (npp,m,P)
+        if len(u.shape) == 3:
+            u = u[:,:,None]
+        if len(y.shape) == 3:
+            y = y[:,:,None]
+        if yd is not None and len(yd.shape) == 3:
+            yd = yd[:,:,None]
+        self.u = u
+        self.y = y
+        self._yd = yd
+        self._ydm = None
+        self.fs = fs
+        self.npp, self.m, self.R, self.P = u.shape
+        self.npp, self.p, self.R, self.P = y.shape
+
+    def lines(self, lines):
+        self.lines = lines
+        self.F = len(lines)
+        self.freq = lines/self.npp  # Excited frequencies (normalized)
+
+    def bla(self):
+        """Get best linear approximation"""
+        # TODO bla expects  m, R, P, F = U.shape
+        self.U = fft(self.u, axis=0)[self.lines].transpose((1,2,3,0))
+        self.Y = fft(self.y, axis=0)[self.lines].transpose((1,2,3,0))
+        self.G, self.covG, self.covGn = bla_periodic(self.U, self.Y)
+        self.G = self.G.transpose((2,0,1))
+        if self.covG is not None:
+            self.covG = self.covG.transpose((2,0,1))
+        if self.covGn is not None:
+            self.covGn = self.covGn.transpose((2,0,1))
+        return self.G, self.covG, self.covGn
+
+    def average(self, u=None, y=None):
+        """Average over periods and flatten over realizations"""
+
+        saveu = False
+        savey = False
+        if u is None:
+            u = self.u
+            saveu = True
+        if y is None:
+            y = self.y
+            savey = True
+        um = u.mean(axis=-1)  # (npp,m,R)
+        ym = y.mean(axis=-1)
+        um = um.swapaxes(1,2).reshape(-1,self.m, order='F')  # (npp*R,m)
+        ym = ym.swapaxes(1,2).reshape(-1,self.p, order='F')  # (npp*R,p)
+
+        if saveu:
+            self.um = um
+            # number of samples after average over periods
+            self.mns = um.shape[0]  # mns = npp*R
+        if savey:
+            self.ym = ym
+
+        return um, ym
+
+    @property
+    def ydm(self):
+        if self._yd is None:
+            # TODO do some numerical differentiation
+            pass
+        if self._ydm is None:
+            ydm = self._yd.mean(axis=-1)
+            self._ydm = ydm.swapaxes(1,2).reshape(-1,self.m, order='F')  # (npp*R,m)
+        return self._ydm
+
+
+
+
+class Signal2(object):
     """ Holds common properties for a signal
     """
     def __init__(self, u, fs, y=None, yd=None, ydd=None):
@@ -288,3 +365,20 @@ def _cut(x,per,nsper,offset=0):
         x_per[:,i*nsper: (i+1)*nsper] = x[:,offset + p*nsper:
                                           offset+(p+1)*nsper]
     return x_per
+
+
+
+# def derivative(Y):
+#     # https://docs.scipy.org/doc/scipy/reference/generated/scipy.fftpack.diff.html
+#     N = npp
+#     if N % 2 == 0:
+#         # NOTE k is sequence of ints
+#         k = np.r_[np.arange(0, N//2), [0], np.arange(-N//2+1, 0)]
+#     else:
+#         k = np.r_[np.arange(0, (N-1)//2), [0], np.arange(-(N-1)//2, 0)]
+
+#     freq = self.flines / self.npp
+#     k *= 2 * np.pi / freq
+#     yd = np.real(np.fft.ifft(1j*k*Y*np.sqrt(npp),axis=0))
+
+#     return yd
