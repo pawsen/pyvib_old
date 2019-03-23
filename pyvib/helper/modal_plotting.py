@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from ..common import db
-from ..subspace import ss2frf
+from ..lti_conversion import ss2frf
 
 class scaler():
     def __init__(self, scale):

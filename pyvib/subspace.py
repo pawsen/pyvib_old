@@ -4,6 +4,7 @@
 from .common import (matrix_square_inv, mmul_weight, normalize_columns,
                      weightfcn)
 from .helper.modal_plotting import plot_subspace_info, plot_subspace_model
+from .lti_conversion import ss2frf
 from .modal import modal_ac
 from .statespace import StateSpace, StateSpaceIdent
 import numpy as np
@@ -691,30 +692,6 @@ def output_costfcn(x0,A,C,n,m,p,freq,U,Y,weight):
         V = mmul_weight(V, weight).ravel()
 
     return np.hstack((V.real, V.imag))
-
-def ss2frf(A,B,C,D,freq):
-    """Compute frequency response function from state-space parameters
-    (discrete-time)
-
-    Computes the frequency response function (FRF) or matrix (FRM) Ĝ at the
-    normalized frequencies `freq` from the state-space matrices `A`, `B`, `C`,
-    and `D`. ```̂G(f) = C*inv(exp(2j*pi*f)*I - A)*B + D```
-
-    Returns
-    -------
-    Gss : ndarray(F,p,m)
-        frequency response matrix
-
-    """
-
-    # Z-transform variable
-    z = np.exp(2j*np.pi*freq)
-    In = np.eye(*A.shape)
-    # Use broadcasting. Much faster than for loop.
-    Gss = C @ solve((z*In[...,None] - A[...,None]).transpose((2,0,1)), B[None]) + D
-
-    return Gss
-
 
 def jacobian(x0, system, weight=None):
 

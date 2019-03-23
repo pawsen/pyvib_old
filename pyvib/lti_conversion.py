@@ -22,6 +22,27 @@ def ss2phys(A, B, C, D=None):
     B = T @ B
     return A, B, C, T
 
+def ss2frf(A, B, C, D, freq):
+    """Compute frequency response function from state-space parameters
+    (discrete-time)
+
+    Computes the frequency response function (FRF) or matrix (FRM) Ĝ at the
+    normalized frequencies `freq` from the state-space matrices `A`, `B`, `C`,
+    and `D`. ```̂G(f) = C*inv(exp(2j*pi*f)*I - A)*B + D```
+
+    Returns
+    -------
+    Gss : ndarray(F,p,m)
+        frequency response matrix
+
+    """
+    # Z-transform variable
+    z = np.exp(2j*np.pi*freq)
+    In = np.eye(*A.shape)
+    # Use broadcasting. Much faster than for loop.
+    Gss = C @ solve((z*In[...,None] - A[...,None]).transpose((2,0,1)), B[None]) + D
+    return Gss
+
 def discrete2cont(ad, bd, cd, dd, dt, method='zoh', alpha=None):
     """Convert linear system from discrete to continuous time-domain.
 
