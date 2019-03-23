@@ -6,8 +6,70 @@ import matplotlib.animation as animation
 import numpy as np
 from scipy.linalg import eigvals
 from ..hb.hbcommon import hb_signal
+from ..common import db
+from .modal_plotting import fig_ax_getter
 from copy import deepcopy
 
+
+def periodicity(y, fs, dof=0, R=0, P=None, n=1, fig=None, ax=None,
+                **kwargs):
+    """Plot the periodicity of a signal.
+
+    If there are many points, use a resampling factor `n` or pass
+    `rasterized=True` in `kwargs`.
+
+    Parameters:
+    ----------
+    R : int or list, optional
+        Realizations to plot. Default is 0
+    P : int, list or None, optional
+        Period/s to plot. Default is all(P=None)
+    dof : int, optional
+        DOF where periodicity is plotted for
+    n : int, optional
+        Only use every sample'th point. Used if there is many points
+    """
+    R = np.atleast_1d(R)
+    # assume the missing dimension is because there's only on realization
+    if len(y.shape) == 3:
+        y = y[:,:,None]
+    npp, _, _R, _P = y.shape
+    # always use last period as reference
+    if P is None:
+        P = np.r_[:_P]
+    elif isinstance(P, int):
+        P = np.r_[P, _P-1]
+    else:
+        P = np.atleast_1d(P)
+        if len(P) < _P:
+            P = np.append(P, _P-1)
+    ns = len(P)*npp
+    t = np.arange(ns)/fs
+    s = n
+
+    fig, ax = fig_ax_getter(fig, ax)
+    ax.set_title(f'Periodicity of signal for DOF {dof}')
+    # The signal can have its own scale. But it looks stupid.
+    # ax2 = ax.twinx()
+    # ax.set_zorder(ax2.get_zorder()+1)  # put ax in front of ax2
+    # ax.patch.set_visible(False)  # hide the 'canvas'
+    # alpha in decreasing value
+    alpha = np.arange(len(R)+1)[:0:-1]/len(R)
+    for r, a in zip(R, alpha):
+        peridocity = (y[::s,dof,r,P[:-1]].T -
+                      y[::s,dof,r,P[-1]]).ravel()
+        ax.plot(t[::s], (y[::s,dof,r,P].ravel('F')),'--', c='gray',
+                alpha=a, **kwargs)
+        ax.plot(t[:-npp:s], db(peridocity), **kwargs, alpha=0.75)
+    for i in range(1,len(P)):
+        x = t[npp * i]
+        ax.axvline(x, color='k', linestyle='--')
+
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel(r'$\varepsilon$: $y - y_{ref}$ (dB)')
+    ax.legend(['signal', 'periodicity'])
+
+    return fig, ax
 
 def phase(y, yd, dof=0, fig=None, ax=None, *args, **kwargs):
     if fig is None:

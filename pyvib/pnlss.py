@@ -19,9 +19,11 @@ linear state space systems.
 """
 class PNLSS(NonlinearStateSpace, StateSpaceIdent):
     def __init__(self, *system, **kwargs):
-        if len(system) == 1 and isinstance(system[0], StateSpace):
-            #system = (system.A, system.B, system.C, system.D)
-            pass
+        self.signal = system[0].signal
+        kwargs['dt'] = 1/self.signal.fs
+        # if len(system) == 1 and isinstance(system[0], StateSpace):
+        #     system = (system.A, system.B, system.C, system.D)
+        #     pass
 
         super().__init__(*system, **kwargs)
 
@@ -51,7 +53,7 @@ class PNLSS(NonlinearStateSpace, StateSpaceIdent):
     def output(self, u, t=None, x0=None):
         return dnlsim(self, u, t=t, x0=x0)
 
-    def jacobian(self, x0, weight=False):
+    def jacobian(self, x0, weight=None):
         return jacobian(x0, self, weight=weight)
 
 
@@ -424,8 +426,8 @@ def dnlsim(system, u, t=None, x0=None):
     initial state is given in x0.
 
     """
-    if not isinstance(system, PNLSS):
-        raise ValueError(f'System must be a PNLSS object {type(system)}')
+    # if not isinstance(system, PNLSS):
+    #     raise ValueError(f'System must be a PNLSS object {type(system)}')
     #     pass
     # else:
     #     system = NonlinearStateSpace(*system)
@@ -545,7 +547,7 @@ def element_jacobian(samples, A_Edwdx, C_Fdwdx, active):
 
     return out
 
-def jacobian(x0, system, weight=False):
+def jacobian(x0, system, weight=None):
     """Compute the Jacobians of a steady state nonlinear state-space model
 
     Jacobians of a nonlinear state-space model
@@ -617,7 +619,7 @@ def jacobian(x0, system, weight=False):
     npar = jac.shape[1]
 
     # add frequency weighting
-    if weight not in (None, False) and system.freq_weight:
+    if weight is not None and system.freq_weight:
         # (p*ns, npar) -> (Npp,R,p,npar) -> (Npp,p,R,npar) -> (Npp,p,R*npar)
         jac = jac.reshape((npp,R,p,npar),
                           order='F').swapaxes(1,2).reshape((-1,p,R*npar),
@@ -625,7 +627,7 @@ def jacobian(x0, system, weight=False):
         # select only the positive half of the spectrum
         jac = fft(jac, axis=0)[:nfd]
         # TODO should we test if weight is None or just do it in mmul_weight
-        if weight not in (None, False):
+        if weight is not None:
             jac = mmul_weight(jac, weight)
         # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
         jac = jac.reshape((-1,p,R,npar),
@@ -634,7 +636,7 @@ def jacobian(x0, system, weight=False):
         J = np.empty((2*nfd*R*p,npar))
         J[:nfd*R*p] = jac.real
         J[nfd*R*p:] = jac.imag
-    elif weight not in (None, False):
+    elif weight is not None:
         raise ValueError('Time weighting not possible')
     else:
         return jac

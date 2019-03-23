@@ -6,6 +6,18 @@ import math
 import itertools
 from scipy.linalg import svd, norm
 
+
+# general messages for LM/etc optimization
+TERMINATION_MESSAGES = {
+    None: "Status returned `None`. Error.",
+    -1: "Improper input parameters status returned from `leastsq`",
+    0: "The maximum number of iterations is exceeded.",
+    1: "`gtol` termination condition is satisfied. (small change in Jacobian)",
+    2: "`ftol` termination condition is satisfied. (small change in cost)",
+    3: "`xtol` termination condition is satisfied. (small step)",
+    4: "Both `ftol`(cost) and `xtol`(step) termination conditions are satisfied."
+}
+
 class color:
     PURPLE = '\033[95m'
     CYAN = '\033[96m'
@@ -228,10 +240,10 @@ def normalize_columns(mat):
     # mat /= scaling
     return mat/scaling, scaling
 
-def lm(fun, x0, jac, info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
+def lm(fun, x0, jac, info=2, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
        gtol=1e-8, args=(), kwargs={}):
     """Solve a nonlinear least-squares problem using levenberg marquardt
-       algorithm
+       algorithm. See also :scipy-optimize:func:`scipy.optimize.least_squares`
 
     Parameters
     ----------
@@ -253,9 +265,11 @@ def lm(fun, x0, jac, info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
         Default is 1e-8.
     gtol : float, optional
         Tolerance for termination by the norm of the gradient. Default is 1e-8.
-    Notes
-    -----
-    https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html
+    info : {0, 1, 2}, optional
+        Level of algorithm's verbosity:
+            * 0 (default) : work silently.
+            * 1 : display a termination report.
+            * 2 : display progress during iterations
 
     """
     # the error vector
@@ -267,10 +281,13 @@ def lm(fun, x0, jac, info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
     # Initialization of the Levenberg-Marquardt loop
     niter = 0
     ninner_max = 10
+    nfev = 1
+    status = None
+    message = ''
     cost_vec = np.empty(nmax)
     x0_mat = np.empty((nmax, len(x0)))
 
-    if info:
+    if info == 2:
         print(f"{'i':3} | {'inner':5} | {'cost':12} | {'cond':12} |"
               f" {'lambda':6}")
 
@@ -279,13 +296,11 @@ def lm(fun, x0, jac, info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
 
         J = jac(x0, *args, **kwargs)
         J, scaling = normalize_columns(J)
-
         U, s, Vt = svd(J, full_matrices=False)
 
-        if norm(J) < gtol:
+        if norm(J) < gtol:  # small jacobian
             stop = True
-            message = 'small jacobian'
-            break
+            status = 1
 
         if lamb is None:
             # Initialize lambda as largest sing. value of initial jacobian.
@@ -302,7 +317,7 @@ def lm(fun, x0, jac, info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
         # step with direction from err
         s = s[:r]
         sr = s.copy()  # only saved to calculate cond. number later
-        while cost >= cost_old and ninner < ninner_max:
+        while cost >= cost_old and ninner < ninner_max and not stop:
             s /= (s**2 + lamb**2)
             ds = -np.linalg.multi_dot((err_old, U[:,:r] * s, Vt[:r]))
             ds /= scaling
@@ -326,16 +341,14 @@ def lm(fun, x0, jac, info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
                 lamb /= 2
             ninner += 1
 
-            if norm(ds) < xtol:
+            if norm(ds) < xtol:  # small step
                 stop = True
-                message = 'small step'
-                break
-            if np.abs((cost-cost_old)/cost) < ftol:
+                status = 3
+            if np.abs((cost-cost_old)/cost) < ftol:  # small change in costfcn
                 stop = True
-                message = 'small change in cost fucntion'
-                break
+                status = 2 if status is None else 4
 
-        if info:
+        if info == 2:
             jac_cond = sr[0]/sr[-1]
             # {cost/2/nfd/R/p:12.3f} for freq weighting
             print(f"{niter:3d} | {ninner:5d} | {cost:12.8g} | {jac_cond:12.3f}"
@@ -350,12 +363,17 @@ def lm(fun, x0, jac, info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
             cost_vec[niter] = cost.copy()
 
         niter += 1
+        nfev += ninner
 
     if niter == nmax:
-        message = 'max iter reached'
-    if info:
+        status = 0
+    message = TERMINATION_MESSAGES[status]
+    if info > 0:
         print(f"Terminated: {message:s}")
+        print(f"Function evaluations {nfev}, initial cost {cost_vec[0]:.4e}, "
+              f"final cost {cost:.4e}")
 
-    res = {'x':x0, 'cost': cost, 'err':err, 'niter': niter, 'x_mat': x0_mat,
-           'cost_vec':cost_vec, 'message':message}
+    res = {'x':x0, 'cost': cost, 'fun':err, 'niter': niter, 'x_mat': x0_mat,
+           'cost_vec':cost_vec, 'message':message, 'success':status > 0,
+           'nfev':nfev, 'njev':niter, 'status':status}
     return res

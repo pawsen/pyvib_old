@@ -39,15 +39,14 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
     def output(self, u, t=None, x0=None):
         return dnlsim(self, u, t=t, x0=x0)
 
-    def jacobian(self, x0, weight=False):
+    def jacobian(self, x0, weight=None):
         return jacobian(x0, self, weight=weight)
 
-    def ext_input(self, fmin=None, fmax=None, weight=False, vel=False):
+    def ext_input(self, fmin=None, fmax=None, vel=False):
         """Form the extended input and output
 
         The concatenated extended input vector e(t), is e=[u(t), g(t)].T, see
-        eq (5). (E is called the Extended input spectral matrix and used for
-        forming Ei, eq. (12)). Notice that the stacking order is reversed here.
+        eq (5). Notice that the stacking order is reversed here.
         u(t) is the input force and g(y(t),ẏ(t)) is the functional nonlinear
         force calculated from the specified polynomial nonlinearity, see eq.(2)
 
@@ -67,8 +66,6 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         Equation numbers refers to this article
 
         """
-        # note that p might be different for the system matrices, depending
-        # on what is included in the output equation
         sig = self.signal
         npp = sig.npp
 
@@ -114,11 +111,15 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
             # concatenate to form extended input spectra matrix
             E = np.hstack((Umean, -FNL))
 
-        self.U = (E/np.sqrt(npp))[self.flines]
-        self.Y = (Yext/np.sqrt(npp))[self.flines]
+        self.U = E[self.flines]/np.sqrt(npp)
+        self.Y = Yext[self.flines]/np.sqrt(npp)
         self.scaling = scaling
 
-    def estimate(self, n, r, bd_method='explicit'):
+    def estimate(self, n, r, bd_method='explicit', fmin=None, fmax=None,
+                 vel=False):
+        # form the extended input
+        self.ext_input(fmin=fmin, fmax=fmax, vel=vel)
+
         self.r = r
         self.n = n
 
@@ -174,19 +175,19 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         p, m, n_nx = self.p, self.m, self.n_nx
         if self.Ac is None:
             self.to_cont()
-        A = self.Ac
+        Ac = self.Ac
         C = self.C
         # subtract E and F as they are extracted as negative part of B and D
         Bext = np.hstack((self.Bc, -self.Ec))
         Dext = np.hstack((self.D, -self.F))
 
-        freq = np.arange(0,sig.npp)*sig.fs/sig.npp
+        freq = np.arange(sig.npp)*sig.fs/sig.npp
         F = len(flines)
 
         nnl = n_nx
         # just return in case of no nonlinearities
         if nnl == 0:
-            knl = 0
+            knl = np.empty(shape=(0,0))
         else:
             knl = np.empty((nnl,F),dtype=complex)
 
@@ -197,10 +198,10 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         He = np.empty((p+1, m+nnl, F), dtype=complex)
         He[-1,:,:] = 0
 
-        In = np.eye(*A.shape,dtype=complex)
+        In = np.eye(*Ac.shape,dtype=complex)
         for k in range(F):
             # eq. 47
-            He[:-1,:,k] = C @ solve(In*2j*np.pi*freq[flines[k]] - A, Bext) + Dext
+            He[:-1,:,k] = C @ solve(In*2j*np.pi*freq[flines[k]] - Ac, Bext) + Dext
 
             for nl in range(n_nx):
                 # number of nonlin connections for the given nl type
@@ -214,6 +215,19 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         self.knl = knl
         return G, knl
 
+    @property
+    def knl_str(self):
+        for i, knl in enumerate(self.knl):
+            mu_mean = np.zeros(2)
+            mu_mean[0] = np.mean(np.real(knl))
+            mu_mean[1] = np.mean(np.imag(knl))
+            # ratio of 1, is a factor of 10. 2 is a factor of 100, etc
+            ratio = np.log10(np.abs(mu_mean[0]/mu_mean[1]))
+            exponent = 'x'.join(str(x) for x in self.xpowers[i])
+            print('exp: {:s}\t ℝ(mu) {:.4e}\t 𝕀(mu)  {:.4e}'.
+                  format(exponent, *mu_mean))
+            print(f' Ratio log₁₀(ℝ(mu)/𝕀(mu))= {ratio:0.2f}')
+
 
 def dnlsim(system, u, t=None, x0=None):
     """Simulate output of a discrete-time nonlinear system.
@@ -225,8 +239,8 @@ def dnlsim(system, u, t=None, x0=None):
     The initial state is given in x0.
 
     """
-    if not isinstance(system, FNSI):
-        raise ValueError(f'System must be a FNSI object {type(system)}')
+    #if not isinstance(system, FNSI):
+    #    raise ValueError(f'System must be a FNSI object {type(system)}')
 
     u = np.asarray(u)
 
@@ -349,7 +363,7 @@ def jacobian(x0, system, weight=None):
     npar = jac.shape[1]
 
     # add frequency weighting
-    if weight not in (None, False) and system.freq_weight:
+    if weight is not None and system.freq_weight:
         # (p*ns, npar) -> (Npp,R,p,npar) -> (Npp,p,R,npar) -> (Npp,p,R*npar)
         jac = jac.reshape((npp,R,p,npar),
                           order='F').swapaxes(1,2).reshape((-1,p,R*npar),
@@ -357,7 +371,7 @@ def jacobian(x0, system, weight=None):
         # select only the positive half of the spectrum
         jac = fft(jac, axis=0)[:nfd]
         # TODO should we test if weight is None or just do it in mmul_weight
-        if weight not in (None, False):
+        if weight is not None:
             jac = mmul_weight(jac, weight)
         # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
         jac = jac.reshape((-1,p,R,npar),
@@ -366,7 +380,7 @@ def jacobian(x0, system, weight=None):
         J = np.empty((2*nfd*R*p,npar))
         J[:nfd*R*p] = jac.real
         J[nfd*R*p:] = jac.imag
-    elif weight not in (None, False):
+    elif weight is not None:
         raise ValueError('Time weighting not possible')
     else:
         return jac

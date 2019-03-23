@@ -96,6 +96,11 @@ class StateSpace():
         self._D = _atleast_2d_or_none(D)
 
     @property
+    def npar(self):
+        n, m, p = self.n, self.m, self.p
+        return n**2 + n*m + p*n + p*m
+
+    @property
     def dt(self):
         """Return the sampling time of the system."""
         return self._dt
@@ -160,9 +165,14 @@ class StateSpace():
         self.T2 = T2
         sig = self.signal
         ns = sig.R * sig.npp
-        # Extract the transient part of the input
-        self.idx_trans = transient_indices_periodic(T1, ns)
-        self.idx_remtrans = remove_transient_indices_periodic(T1, ns, self.p)
+        if T1 is not None:
+            # Extract the transient part of the input
+            self.idx_trans = transient_indices_periodic(T1, ns)
+            self.idx_remtrans = remove_transient_indices_periodic(T1, ns,
+                                                                  self.p)
+        else:
+            self.idx_trans = np.s_[:ns]
+            self.idx_remtrans = np.s_[:ns]
 
         # without_T2 = remove_transient_indices_nonperiodic(system.T2,N,system.p)
         self.without_T2 = np.s_[:ns]
@@ -272,6 +282,15 @@ class NonlinearStateSpace(StateSpace):
     def F(self, F):
         self._F = _atleast_2d_or_none(F)
 
+    @property
+    def npar(self):
+        xact = self.xactive
+        yact = self.yactive
+        ne = len(xact)
+        nf = len(yact)
+        n, m, p = self.n, self.m, self.p
+        return n**2 + n*m + p*n + p*m + ne + nf
+
     def _get_system(self):
         return (self.A, self.B, self.C, self.D, self.E, self.F, self.dt)
 
@@ -313,15 +332,19 @@ class NonlinearStateSpace(StateSpace):
     def extract(self, x0):
         """Extract state space from from flattened array"""
         n, m, p = self.n, self.m, self.p
-        n_nx, n_ny = self.n_nx, self.n_ny
+        # n_nx, n_ny = self.n_nx, self.n_ny
         # index of active elements
         xact = self.xactive
         yact = self.yactive
         ne = len(xact)
         nf = len(yact)
 
-        E = np.zeros((n, n_nx))
-        F = np.zeros((p, n_ny))
+        # if E and F are initialized as zero, then non-zero non-active elements
+        # unintentional get set to zero
+        # E = np.zeros((n, n_nx))
+        # F = np.zeros((p, n_ny))
+        E = self.E
+        F = self.F
         A = x0.flat[:n**2].reshape((n,n))
         B = x0.flat[n**2 + np.r_[:n*m]].reshape((n,m))
         C = x0.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
@@ -364,7 +387,7 @@ class StateSpaceIdent():
         # TODO maybe divide by 2 to match scipy's implementation of minpack
         return np.dot(err, err)
 
-    def optimize(self, method=None, weight=True, info=True, nmax=50, lamb=None,
+    def optimize(self, method=None, weight=True, info=2, nmax=50, lamb=None,
                  ftol=1e-8, xtol=1e-8, gtol=1e-8, copy=False):
         """Optimize the estimated the nonlinear state space matrices"""
         if weight is True:
@@ -399,19 +422,26 @@ class StateSpaceIdent():
         self._copy(*self.extract(res['x']))
         self.res = res
 
-    def extract_model(self, y, u, t=None, x0=None, T1=None, T2=None, copy=False):
+    def extract_model(self, y, u, t=None, x0=None, T1=None, T2=None,
+                      info=2, copy=False):
         """extract the best model using validation data"""
 
         models = self.res['x_mat']
         nmodels = models.shape[0]
         ss0 = self.flatten()
         err_rms = np.empty(nmodels)
+        if info:
+            print(f"{'model':5} | {'rms':12} |")
         for i, ss in enumerate(models):
-            self.copy(self.extract(ss))
+            self._copy(*self.extract(ss))
             tout, yout, xout = self.simulate(u, t=t, x0=x0, T1=T1, T2=T2)
             err_rms[i] = np.sqrt(np.mean((y - yout)**2))
-
+            if info:
+                print(f"{i:5d} | {err_rms[i]:12.8g}")
         # best model on new data set
+        i = np.argmin(err_rms)
+        if info:
+            print(f"best model is {i} with RMS {err_rms[i]:12.8g}")
         ss = models[np.argmin(err_rms)]
         if copy:
             # restore state space matrices to original
@@ -423,7 +453,7 @@ class StateSpaceIdent():
         self._copy(*self.extract(ss))
         return err_rms
 
-def costfcn_time(x0, system, weight=False):
+def costfcn_time(x0, system, weight=None):
     """Compute the vector of residuals such that the function to mimimize is
 
     res = ∑ₖ e[k]ᴴ*e[k], where the error is given by
@@ -433,7 +463,7 @@ def costfcn_time(x0, system, weight=False):
 
     # TODO fix transient
     T2 = system.T2
-    # p is the actual number of output
+    # p is the actual number of output in the signal, not the system output
     R, p, npp = system.signal.R, system.signal.p, system.signal.npp
     nfd = npp//2
     without_T2 = system.without_T2
@@ -443,14 +473,13 @@ def costfcn_time(x0, system, weight=False):
     # It is not the expected behavior that calculating the cost should change
     # the model! Right now it is done because simulating is using the systems
     # ss matrices
-
     system._copy(*system.extract(x0))
     # Compute the (transient-free) modeled output and the corresponding states
     t_mod, y_mod, x_mod = system.simulate(system.signal.um)
 
     # Compute the (weighted) error signal without transient
     err = y_mod[without_T2, :p] - system.signal.ym[without_T2]
-    if weight not in (None, False) and system.freq_weight:
+    if weight is not None and system.freq_weight:
         err = err.reshape((npp,R,p),order='F').swapaxes(1,2)
         # Select only the positive half of the spectrum
         err = fft(err, axis=0)[:nfd]
@@ -458,7 +487,7 @@ def costfcn_time(x0, system, weight=False):
         #cost = np.vdot(err, err).real
         err = err.swapaxes(1,2).ravel(order='F')
         err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
-    elif weight not in (None, False):
+    elif weight is not None:
         # TODO time domain weighting. Does not work
         err_w = err * weight[without_T2]
         #cost = np.dot(err,err)
@@ -612,7 +641,6 @@ def remove_transient_indices_periodic(T1,N,p):
          output 2 corresponding to input realization 2]
 
     """
-
     T1 = np.atleast_1d(np.asarray(T1, dtype=int))
     ntrans = T1[0]
 

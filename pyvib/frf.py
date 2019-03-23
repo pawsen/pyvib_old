@@ -188,13 +188,13 @@ def covariance(y):
     ----------
     y : ndarray(npp,p,R,P)
         signal where npp is the number of points per period, p is the number of
-        outputs, R is the number of  realizations, and P is the number of
+        dofs, R is the number of  realizations, and P is the number of
         periods
 
     Returns
     -------
     covY : ndarray(nfd,p,p)
-        covariance matrix of the output(s).
+        covariance matrix of the dof(s).
     """
 
     # Number of samples, outputs, realizations, and periods

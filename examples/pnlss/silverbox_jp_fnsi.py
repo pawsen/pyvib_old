@@ -2,9 +2,8 @@
 # -*- coding: utf-8 -*-
 
 
-from pyvib.statespace import Signal
+from pyvib.signal import Signal
 from pyvib.fnsi import FNSI
-from pyvib.fnsi import NL_force, NL_polynomial, NL_spline
 from pyvib.common import db
 from scipy.linalg import norm
 from pyvib.modal import modal_ac, frf_mkc
@@ -15,8 +14,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.io as sio
 import pickle
+from copy import deepcopy
 
-"""PNLSS model of the silverbox system.
+"""FNSI model of the silverbox system.
 
 The Silverbox system can be seen as an electroninc implementation of the
 Duffing oscilator. It is build as a 2nd order linear time-invariant system with
@@ -43,9 +43,10 @@ Identified at low level (5V)
 |         68.58 |              4.68 |
 """
 
-def load(var, amp):
+def load(var, amp, fnsi=True):
+    fnsi = 'FNSI_' if fnsi else ''
     path = 'data/'
-    fname = f"{path}SNJP_{var}m_full_FNSI_{amp}.mat"
+    fname = f"{path}SNJP_{var}m_full_{fnsi}{amp}.mat"
     data = sio.loadmat(fname)
     if var == 'u':
         um, fs, flines, P = [data[k] for k in ['um', 'fs', 'flines', 'P']]
@@ -53,108 +54,116 @@ def load(var, amp):
     else:
         return data['ym']
 
-
 # save figures to disk
-savefig = False
-savedata = False
+savefig = True
+savedata = True
 
 # estimation data.
-# 1 realization, 30 periods of 8192 samples. 5 discarded as transient
+# 1 realization, 30 periods of 8192 samples. 5 discarded as transient (Ptr)
 amp = 100
 u, fs, lines, P = load('u',amp)
-#lines = lines[1:]
+lines = lines[1:]
 y = load('y',amp)
 
-NT, m = u.shape
-NT, p = y.shape
+NT, R = u.shape
+NT, R = y.shape
 npp = NT//P
-R = 1
-Ptr = 5
-
+Ptr = 0
+m = 1
+p = 1
 # odd multisine till 200 Hz, without DC.
 # lines = np.arange(0,2683,2)
 
 # partitioning the data
-u = u.reshape(npp,m,R,P,order='F')[...,Ptr:]
-y = y.reshape(npp,p,R,P,order='F')[...,Ptr:]
+u = u.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:-1]
+y = y.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:-1]
 # FNSI can only use one realization
 uest = u[:,:,0,:]
 yest = y[:,:,0,:]
+Pest = uest.shape[-1]
 
-# TODO no validation data yet.
-# \Users\JP\Documents\Research\Data\Silverbox_VUB_June2013\SilverboxData\CubicNL\BLA'
-# um_full_100.mat
-# until then, we just use last period of estimation data
-uval = uest[...,-1].reshape(-1,m)
-yval = yest[...,-1].reshape(-1,p)
+# Validation data. 50 different realizations of 3 periods. Use the last
+# realization and last period
+uval_raw, _, _, Puval = load('u', 100, fnsi=False)
+yval_raw = load('y', 100, fnsi=False)
+uval_raw = uval_raw.reshape(npp,Puval,50,order='F').swapaxes(1,2)[:,None]
+yval_raw = yval_raw.reshape(npp,Puval,50,order='F').swapaxes(1,2)[:,None]
+uval = uval_raw[:,:,-1,-1]
+yval = yval_raw[:,:,-1,-1]
+utest = uval_raw[:,:,1,-1]
+ytest = yval_raw[:,:,1,-1]
+
+sig = Signal(uest,yest, fs=fs)
+sig.lines = lines
+um, ym = sig.average()
+# sig.periodicity()
 
 # model orders and Subspace dimensioning parameter
 n = 2
 maxr = 20
 dof = 0
 iu = 0
-
 xpowers = np.array([[2],[3]])
-fnsi = FNSI(flines=lines, u=uest, y=yest, fs=fs, xpowers=xpowers)
-fnsi.calc_EY()
-fnsi.svd_comp(maxr)
-# Do estimation
-fnsi.id(n)
-#fnsi.nl_coeff(iu, dofs=dof)
 
+# Linear model
+fnsi1 = FNSI(sig)
+fnsi1.estimate(n,maxr)
+fnsi1.nl_coeff(iu)  # not necessary
+
+# initial nonlinear model
+fnsi2 = FNSI(sig)
+fnsi2.nlterms('state',xpowers)
+fnsi2.estimate(n,maxr)
+fnsi2.nl_coeff(iu)
+
+# optimized model
+fnsi3 = deepcopy(fnsi2)
+fnsi3.transient(T1=npp)
+fnsi3.optimize(weight=None, nmax=50, xtol=1e-16, ftol=1e-16, gtol=1e-16)
+fnsi3.nl_coeff(iu)
+
+# optimized freq. weighted model
+fnsi4 = deepcopy(fnsi2)
+fnsi4.transient(T1=npp)
+fnsi4.optimize(weight=True, nmax=50, xtol=1e-16, ftol=1e-16, gtol=1e-16)
+fnsi4.nl_coeff(iu)
+
+models = [fnsi1, fnsi2, fnsi3, fnsi4]
+descrip = ('linear','fnsi init','fnsi optim', 'fnsi weight')
 sca = 1
-def print_modal(fnsi):
+def print_modal(model):
     # calculate modal parameters
-    modal = modal_ac(fnsi.A, fnsi.C)
+    modal = model.modal
     natfreq = modal['wn']
     dampfreq = modal['wd']
     damping = modal['zeta']
     nw = min(len(natfreq), 8)
-
     print('Undamped ω: {}'.format(natfreq[:nw]*sca))
     print('damped ω: {}'.format(dampfreq[:nw]*sca))
     print('damping: {}'.format(damping[:nw]))
-    return modal
 
-print('## nonlinear identified at high level')
+for model, string in zip(models, descrip):
+    print(f'### {string} identified at high level ###')
+    modal = print_modal(model)
+    print('# Nonlinear coefficients #')
+    print(model.knl_str)
 
+# add one transient period
+Ptr2 = 1
+# simulation error
+val = np.empty((len(models),len(uval)))
+est = np.empty((len(models),len(um)))
+for i, model in enumerate(models):
+    val[i] = model.simulate(uval, T1=Ptr2*npp)[1].T
+    est[i] = model.simulate(um, T1=Ptr2*npp)[1].T
 
-sig = Signal(uest[:,:,None],yest[:,:,None])
-sig.lines(lines)
-um, ym = sig.average()
-fnsi.transient(sig, T1=npp)
-fnsi.optimize(weight=None, nmax=50)
+rms = lambda y: np.sqrt(np.mean(y**2, axis=0))
+est_err = np.hstack((ym, (ym.T - est).T))
+val_err = np.hstack((yval, (yval.T - val).T))
+print(f'rms error est:\n    {rms(est_err)}\ndb: {db(rms(est_err))}')
+print(f'rms error val:\n    {rms(val_err)}\ndb: {db(rms(val_err))}')
 
-
-#modal = print_modal(fnsi)
-
-# frf_freq, frf_H, covG, covGn = periodic(u,y, fs=fs, fmin=1e-3, fmax=150)
-
-# plt.ion()
-# fH1, ax = plt.subplots()
-# plot_frf(frf_freq, frf_H, p=dof, sca=sca, ax=ax, ls='-', c='k', label='From high signal')
-# fnsi.plot_frf(p=dof, sca=sca, ax=ax, label='nl high', ls='--', c='C1')
-
-# fknl, axknl = plot_knl(fnsi, sca)
-
-fnsi2 = FNSI(flines=lines, u=uest, y=yest, fs=fs, xpowers=xpowers)
-fnsi2.calc_EY()
-fnsi2.svd_comp(maxr)
-fnsi2.id(n)
-
-
-Ptr = 1
-um = uest.mean(2)
-ym = yest.mean(2)
-# linear model simulation. But not really linear.
-tm, ylval, xm = fnsi2.simulate(uval, T1=Ptr*npp)
-_, ylin, _ = fnsi2.simulate(um, T1=Ptr*npp)
-
-tm, ynlval, xm = fnsi.simulate(uval, T1=Ptr*npp)
-_, ynlin, _ = fnsi.simulate(um, T1=Ptr*npp)
-#ylval = ynlval
-#ylin = ynlin
-
+# noise estimate over 25 periods
 covY = covariance(yest[:,:,None])
 
 ## Plots ##
@@ -162,15 +171,13 @@ covY = covariance(yest[:,:,None])
 figs = {}
 
 plt.ion()
-# linear and nonlinear model error
+# result on estimation data
 resamp = 1
 plt.figure()
-plt.plot(ym[::resamp])
-plt.plot(ym[::resamp]-ylin[::resamp])
-plt.plot(ym[::resamp]-ynlin[::resamp])
+plt.plot(est_err)
 plt.xlabel('Time index')
 plt.ylabel('Output (errors)')
-plt.legend(('Output', 'FNSI ini','FNSI optim'))
+plt.legend(('Output',) + descrip)
 plt.title('Estimation results')
 figs['estimation_error'] = (plt.gcf(), plt.gca())
 
@@ -178,15 +185,19 @@ figs['estimation_error'] = (plt.gcf(), plt.gca())
 plt.figure()
 N = len(yval)
 freq = np.arange(N)/N*fs
-plottime = np.hstack((yval, yval-ylval, yval-ynlval))
-plotfreq = np.fft.fft(plottime, axis=0)
+plottime = val_err
+plotfreq = np.fft.fft(plottime, axis=0)/np.sqrt(N)
 nfd = plotfreq.shape[0]
-plt.plot(freq[lines], db(plotfreq[lines]), '.')
-plt.plot(freq[lines], db(np.sqrt((P-Ptr-1)*covY[lines].squeeze())), '.')
-plt.xlim((0, 300))
+plt.plot(freq[lines+1], db(plotfreq[lines+1]), '.')
+plt.plot(freq[lines+1], db(np.sqrt(Pest*covY[lines+1].squeeze() / N)), '.')
+#plt.plot(freq[lines], db(covY[lines].squeeze()), '.')
+#plt.plot(freq[lines], db(covY[lines].squeeze()/np.sqrt(25)), '.')
+#plt.plot(freq[lines], db(np.sqrt((25-1)*covY[lines].squeeze()))),
+#plt.xlim((0, 300))
+#plt.ylim([-60,45])
 plt.xlabel('Frequency')
 plt.ylabel('Output (errors) (dB)')
-plt.legend(('Output', 'FNSI ini','FNSI optim', 'Noise'))
+plt.legend(('Output',) + descrip + ('Noise',))
 plt.title('Validation results')
 figs['val_data'] = (plt.gcf(), plt.gca())
 
@@ -195,6 +206,7 @@ figs['val_data'] = (plt.gcf(), plt.gca())
 #figs['subspace_models'] = linmodel.plot_models()
 
 if savefig:
+    figs['periodicity'] = sig.periodicity()
     for k, fig in figs.items():
         fig = fig if isinstance(fig, list) else [fig]
         for i, f in enumerate(fig):
@@ -202,4 +214,4 @@ if savefig:
             f[0].savefig(f"fig/silverbox_jp_fnsi_{k}{i}.pdf")
 
 if savedata:
-    pickle.dump(fnsi,open('sn_jp_fnsi.pkl', 'bw'))
+    pickle.dump(models,open('sn_jp_fnsi.pkl', 'bw'))

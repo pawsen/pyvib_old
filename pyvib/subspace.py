@@ -3,6 +3,7 @@
 
 from .common import (matrix_square_inv, mmul_weight, normalize_columns,
                      weightfcn)
+from .helper.modal_plotting import plot_subspace_info, plot_subspace_model
 from .modal import modal_ac
 from .statespace import StateSpace, StateSpaceIdent
 import numpy as np
@@ -13,20 +14,15 @@ from scipy.signal import dlsim
 from scipy.linalg import (lstsq, logm, eigvals, pinv, norm)
 from numpy import kron
 
+# TODO extract_model should be refactored so the method from SS can be used
+# right now it is not clear if it should be used at all
+
 class Subspace(StateSpace, StateSpaceIdent):
 
     def __init__(self, signal, *system, **kwargs):
         self.signal = signal
+        kwargs['dt'] = 1/signal.fs
         super().__init__(*system, **kwargs)
-    # def flatten_ss(self):
-    #     """Returns the state space as flattened array"""
-    #     n, m, p = self.n, self.m, self.p
-    #     x0 = np.empty(self.npar)
-    #     x0[:n**2] = self.A.ravel()
-    #     x0[n**2 + np.r_[:n*m]] = self.B.ravel()
-    #     x0[n**2 + n*m + np.r_[:n*p]] = self.C.ravel()
-    #     x0[n**2 + n*m + n*p:] = self.D.ravel()
-    #     return x0
 
     @property
     def weight(self):
@@ -34,14 +30,14 @@ class Subspace(StateSpace, StateSpaceIdent):
             self._weight = weightfcn(self.signal.covG)
         return self._weight
 
-    def costfcn(self, x0=None, weight=False):
+    def costfcn(self, x0=None, weight=None):
         if weight is True:
             weight = self.weight()
         if x0 is None:
             x0 = self.flatten()
         return costfcn(x0, self, weight=weight)
 
-    def jacobian(self, x0, weight=False):  #**kwargs):
+    def jacobian(self, x0, weight=None):
         return jacobian(x0, self, weight=weight)
 
     def estimate(self, n, r, copy=False):
@@ -57,15 +53,10 @@ class Subspace(StateSpace, StateSpaceIdent):
         self.A, self.B, self.C, self.D, self.z, self.stable = \
             A, B, C, D, z, stable
 
-        self.n, self.m, self.p = self._get_shape()
-        # Number of parameters
-        n, m, p = self.n, self.m, self.p
-        self.npar = n**2 + n*m + p*n + p*m
-
         return A, B, C, D, z, stable
 
-    def scan(self, nvec, maxr, optimize=True, method=None, weight=False,
-             info=True, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8, gtol=1e-8):
+    def scan(self, nvec, maxr, optimize=True, method=None, weight=None,
+             info=2, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8, gtol=1e-8):
 
         F = self.signal.F
         nvec = np.atleast_1d(nvec)
@@ -107,12 +98,13 @@ class Subspace(StateSpace, StateSpaceIdent):
 
                 cost = self.cost(weight=weight)/F
                 stable = is_stable(self.A, domain='z')
-                infodict[n][r] = {'cost_sub': cost_sub, 'stable_sub': stable_sub,
+                infodict[n][r] = {'cost_sub':cost_sub, 'stable_sub':stable_sub,
                                   'cost': cost, 'stable': stable}
                 if cost < cost_old and stable:
-                    # TODO instead of dict of dict, maybe use __slots__ method of
-                    # class. Slots defines attributes names that are reserved for
-                    # the use as attributes for the instances of the class.
+                    # TODO instead of dict of dict, maybe use __slots__ method
+                    # of class. Slots defines attributes names that are
+                    # reserved for the use as attributes for the instances of
+                    # the class.
                     cost_old = cost
                     models[n] = {'A': self.A, 'B': self.B, 'C': self.C, 'D':
                                  self.D, 'r':r, 'cost':cost, 'stable': stable}
@@ -121,18 +113,15 @@ class Subspace(StateSpace, StateSpaceIdent):
             self.infodict = infodict
         return models, infodict
 
-    def save(self, fname):
-        """Save statespace representation to disk"""
-        pass
-
     def plot_info(self, fig=None, ax=None):
         """Plot summary of subspace identification"""
         return plot_subspace_info(self.infodict, fig, ax)
 
     def plot_models(self):
         """Plot identified subspace models"""
-        return plot_subspace_model(self.models, self.G, self.covG,
-                                   self.signal.freq, self.signal.fs)
+        return plot_subspace_model(self.models, self.signal.G,
+                                   self.signal.covG, self.signal.freq,
+                                   self.signal.fs)
 
     def extract_model(self, y=None, u=None, models=None, n=None, t=None, x0=None):
         """extract the best model using validation data"""
@@ -155,11 +144,6 @@ class Subspace(StateSpace, StateSpaceIdent):
         dictget = lambda d, *k: [d[i] for i in k]
         self.A, self.B, self.C, self.D, self.r, self.stable = \
             dictget(model, 'A', 'B', 'C', 'D', 'r', 'stable')
-
-        self.n, self.m, self.p = self._get_shape()
-        # Number of parameters
-        n, m, p = self.n, self.m, self.p
-        self.npar = n**2 + n*m + p*n + p*m
 
         return err_vec
 
@@ -673,7 +657,7 @@ def frf_jacobian(x0,A,C,n,m,p,freq,U=None,weight=None):
         tmp[...,n*m:] = np.einsum('ij,iljk->ilk',U,JD)
 
     tmp.shape = (F,p*_m,npar)
-    if weight not in (None, False):
+    if weight is not None:
         tmp = mmul_weight(tmp, weight)
     tmp.shape = (F*p*_m,npar)
 
@@ -700,7 +684,7 @@ def output_costfcn(x0,A,C,n,m,p,freq,U,Y,weight):
     # fast way of doing: Ymodel[f] = U[f] @ Gss[f].T
     Ymodel = np.einsum('ij,ilj->il',U,Gss)
     V = Ymodel - Y
-    if weight not in (None, False):
+    if weight is not None:
         V = V.ravel(order='F')
     else:
         # TODO order='F' ?
@@ -737,7 +721,7 @@ def jacobian(x0, system, weight=None):
     n, m, p, npar = system.n, system.m, system.p, system.npar
     F = len(system.z)
 
-    A, B, C, D = extract_ss(x0, system)
+    A, B, C, D = system.extract(x0)
     JA, JB, JC, JD = jacobian_freq(A,B,C,system.z)
 
     tmp = np.empty((F,p,m,npar),dtype=complex)
@@ -757,7 +741,7 @@ def jacobian(x0, system, weight=None):
 
     return jac
 
-def costfcn(x0, system, weight=False):
+def costfcn(x0, system, weight=None):
     """Compute the error vector of the FRF, such that the function to mimimize is
 
     res = ∑ₖ e[k]ᴴ*e[k], where the error is given by
@@ -768,25 +752,16 @@ def costfcn(x0, system, weight=False):
     """
 
     freq, fs = system.signal.freq, system.signal.fs
-    A, B, C, D = extract_ss(x0, system)
+    A, B, C, D = system.extract(x0)
 
     # frf of the state space model
     Gss = ss2frf(A,B,C,D,freq/fs)
     err = Gss - system.signal.G
-    if weight not in (None, False):
+    if weight is not None:
         err = mmul_weight(err, weight)
     err_w = np.hstack((err.real.ravel(), err.imag.ravel()))
 
     return err_w  # err.ravel()
-
-def extract_ss(x0, system):
-    n, m, p = system.n, system.m, system.p
-    A = x0.flat[:n**2].reshape((n,n))
-    B = x0.flat[n**2 + np.r_[:n*m]].reshape((n,m))
-    C = x0.flat[n**2+n*m + np.r_[:p*n]].reshape((p,n))
-    D = x0.flat[n*(p+m+n):].reshape((p,m))
-
-    return A, B, C, D
 
 def extract_model(models, y, u, dt, t=None, x0=None):
     """extract the best model using validation data"""

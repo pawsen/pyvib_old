@@ -8,8 +8,8 @@ from scipy.signal import decimate
 
 from .common import db, prime_factor
 from .filter import differentiate, integrate
-from .frf import bla_periodic
-
+from .frf import bla_periodic, covariance
+from .helper.plotting import periodicity
 
 class Signal():
     def __init__(self, u, y, yd=None, fs=1):
@@ -27,6 +27,8 @@ class Signal():
         self.fs = fs
         self.npp, self.m, self.R, self.P = u.shape
         self.npp, self.p, self.R, self.P = y.shape
+        self._lines = None
+        self._covY = None
 
     @property
     def lines(self):
@@ -50,6 +52,12 @@ class Signal():
         if self.covGn is not None:
             self.covGn = self.covGn.transpose((2,0,1))
         return self.G, self.covG, self.covGn
+
+    @property
+    def covY(self):
+        if self._covY is None:
+            self._covY = covariance(self.y)
+        return self._covY
 
     def average(self, u=None, y=None):
         """Average over periods and flatten over realizations"""
@@ -86,57 +94,11 @@ class Signal():
             self._ydm = ydm.swapaxes(1,2).reshape(-1,self.m, order='F')
         return self._ydm  # (npp*R,m)
 
-    def periodicity(self, dof=0, R=0, P=None, sample=1, fig=None, ax=None,
-                    **kwargs):
-        """Shows the periodicity for the signal
+    def periodicity(self, dof=0, R=0, P=None, n=1, fig=None, ax=None, **kwargs):
+        """Shows the periodicity for the signal"""
 
-        Parameters:
-        ----------
-        R : int or list, optional
-            Realizations to plot. Default is 0
-        P : int, list or None, optional
-            Period/s to plot. Default is all(P=None)
-        dof : int, optional
-            DOF where periodicity is plotted for
-        sample : int {1}, optional
-            Only use every sample'th point. Used if there is many points
-        """
-        R =  np.atleast_1d(R)
-        # always use last period as reference
-        if P is None:
-            P = np.r_[:self.P]
-        elif isinstance(P, int):
-            P = np.r_[P, self.P-1]
-        else:
-            P = np.atleast_1d(P)
-            if len(P) < self.P:
-                P = np.append(P, self.P-1)
-        ns = len(P)*self.npp
-        t = np.arange(ns)/self.fs
-        s = sample
-
-        if fig is None:
-            fig, ax = plt.subplots()
-        ax.set_title(f'Periodicity of signal for DOF {dof}')
-
-        # alpha in decreasing value
-        alpha = np.arange(len(R)+1)[:0:-1]/len(R)
-        for r, a in zip(R, alpha):
-            peridocity = (self.y[::s,dof,r,P[:-1]].T -
-                          self.y[::s,dof,r,P[-1]]).ravel()
-            ax.plot(t[::s], (self.y[::s,dof,r,P].ravel('F')),'--', c='gray',
-                    alpha=a, **kwargs)
-            # , rasterized=True
-            ax.plot(t[:-self.npp:s], db(peridocity), **kwargs, alpha=0.7)
-        for i in range(1,len(P)):
-            x = t[self.npp * i]
-            ax.axvline(x, color='k', linestyle='--')
-
-        ax.set_xlabel('Time (s)')
-        ax.set_ylabel(r'Difference $\varepsilon$ (dB)')
-        ax.legend(['signal', 'periodicity'])
-
-        return fig, ax
+        return periodicity(y=self.y, fs=self.fs, dof=dof, R=R, P=P, n=n,
+                           fig=fig, ax=ax, **kwargs)
 
 def downsample(y, u, n, nsper=None, keep=False):
     """Filter and downsample signals

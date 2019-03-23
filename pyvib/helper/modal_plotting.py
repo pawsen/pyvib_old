@@ -31,7 +31,6 @@ def fig_ax_getter(fig=None, ax=None):
     return fig, ax
 
 def plot_knl(fnsi, sca=1):
-
     fs = fnsi.signal.fs
     npp = fnsi.signal.npp
     flines = fnsi.flines
@@ -155,20 +154,20 @@ def plot_subspace_info(infodict, fig=None, ax=None, *args, **kwargs):
     fig, ax = fig_ax_getter(fig, ax)
     for k,v in infodict.items():
         r = np.fromiter(v.keys(), dtype=int)
-        cost_sub = np.asarray([ x['cost_sub'] for x in v.values() ])
-        stable_sub = np.asarray([ x['stable_sub'] for x in v.values() ])
-        cost = np.asarray([ x['cost'] for x in v.values() ])
-        stable = np.asarray([ x['stable'] for x in v.values() ])
+        cost_sub = np.asarray([x['cost_sub'] for x in v.values()])
+        stable_sub = np.asarray([x['stable_sub'] for x in v.values()])
+        cost = np.asarray([x['cost'] for x in v.values()])
+        stable = np.asarray([x['stable'] for x in v.values()])
 
         color = next(ax._get_lines.prop_cycler)['color']
         ax.plot(r, cost_sub, '.', color=color, label=f"n: {k}")
-        ax.plot(r[~stable_sub], cost[~stable_sub], 'o', mfc='none', color='gray')
+        ax.plot(r[~stable_sub], cost[~stable_sub], 'o', mfc='none', color='k')
         ax.plot(r, cost, '*', mfc='none', color=color)
-        ax.plot(r[~stable], cost[~stable], 'o', mfc='none', color='gray')
+        ax.plot(r[~stable], cost[~stable], 'o', mfc='none', color='k')
 
     ax.set_title('Cost functions of\n'
-                 'subspace models (dots, stablilized models encircled in gray)\n'
-                 'LM-optimized models (stars, unstable models encircled in gray)')
+                 'subspace models (dots, stabilized models encircled in black)\n'
+                 'LM-optimized models (stars, unstable models encircled in black)')
     ax.set_xlabel('r')
     ax.set_ylabel(r'$V_{WLS}$')
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
@@ -223,7 +222,6 @@ def plot_svg(Sn, fig=None, ax=None, **kwargs):
     ax.set_xlabel('Model order')
     ax.set_ylabel('Normalized magnitude')
     return fig, ax
-
 
 def plot_stab(sd,fmin=None, fmax=None, sca=1, fig=None, ax=None):
     fig, ax = fig_ax_getter(fig, ax)
@@ -299,5 +297,3 @@ def plot_stab(sd,fmin=None, fmax=None, sca=1, fig=None, ax=None):
     ax.legend(loc='lower right')
 
     return fig, ax
-    #plt.show()
-

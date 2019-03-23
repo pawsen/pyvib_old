@@ -126,6 +126,15 @@ html_static_path = ['_static']
 # Output file base name for HTML help builder.
 htmlhelp_basename = 'pyvibdoc'
 
+# https://stackoverflow.com/a/42513684/1121523
+# https://gist.github.com/bskinn/0e164963428d4b51017cebdb6cda5209
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3.5', None),
+    'sphinx': ('http://www.sphinx-doc.org/en/stable/', None),
+    'numpy': ('http://docs.scipy.org/doc/numpy/', None),
+    'scipy': ('http://docs.scipy.org/doc/scipy/reference/', None),
+    'matplotlib': ('http://matplotlib.sourceforge.net/', None)
+}
 
 # -----------------------------------------------------------------------------
 # Source code links
