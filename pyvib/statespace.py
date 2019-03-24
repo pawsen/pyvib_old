@@ -324,7 +324,7 @@ class NonlinearStateSpace(StateSpace):
 
     def costfcn(self, x0=None, weight=False):
         if weight is True:
-            weight = self.weight()
+            weight = self.weight
         if x0 is None:
             x0 = self.flatten()
         return costfcn_time(x0, self, weight=weight)

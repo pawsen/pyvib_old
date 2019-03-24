@@ -3,7 +3,35 @@
 
 import numpy as np
 from numpy.linalg import solve
-from scipy.linalg import logm, norm
+from scipy.linalg import eigvals, logm, norm
+
+
+def is_stable(A, domain='z'):
+    """Determines if a linear state-space model is stable from eigenvalues of `A`
+
+    Parameters
+    ----------
+    A : ndarray(n,n)
+        state matrix
+    domain : str, optional {'z', 's'}
+        'z' for discrete-time, 's' for continuous-time state-space models
+
+    returns
+    -------
+    bool
+    """
+
+    if domain == 'z':  # discrete-time
+        # Unstable if at least one pole outside unit circle
+        if any(abs(eigvals(A)) > 1):
+            return False
+    elif domain == 's':  # continuous-time
+        # Unstable if at least one pole in right-half plane
+        if any(np.real(eigvals(A)) > 0):
+            return False
+    else:
+        raise ValueError(f"{domain} wrong. Use 's' or 'z'")
+    return True
 
 def ss2phys(A, B, C, D=None):
     """Calculate state space matrices in physical domain using a similarity

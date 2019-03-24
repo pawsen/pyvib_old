@@ -2,19 +2,21 @@
 # -*- coding: utf-8 -*-
 
 
-from pyvib.signal import Signal
-from pyvib.fnsi import FNSI
-from pyvib.common import db
-from scipy.linalg import norm
-from pyvib.modal import modal_ac, frf_mkc
-from pyvib.helper.modal_plotting import (plot_knl, plot_frf, plot_svg)
-from pyvib.frf import periodic, covariance
-
-import numpy as np
-import matplotlib.pyplot as plt
-import scipy.io as sio
 import pickle
 from copy import deepcopy
+
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.io as sio
+from scipy.linalg import norm
+
+from pyvib.common import db
+from pyvib.fnsi import FNSI
+from pyvib.frf import covariance, periodic
+from pyvib.helper.modal_plotting import plot_frf, plot_knl, plot_svg
+from pyvib.modal import frf_mkc, modal_ac
+from pyvib.signal import Signal
+
 
 """FNSI model of the silverbox system.
 
@@ -144,7 +146,7 @@ def print_modal(model):
 
 for model, string in zip(models, descrip):
     print(f'### {string} identified at high level ###')
-    modal = print_modal(model)
+    print_modal(model)
     print('# Nonlinear coefficients #')
     print(model.knl_str)
 
@@ -160,6 +162,7 @@ for i, model in enumerate(models):
 rms = lambda y: np.sqrt(np.mean(y**2, axis=0))
 est_err = np.hstack((ym, (ym.T - est).T))
 val_err = np.hstack((yval, (yval.T - val).T))
+print(descrip)
 print(f'rms error est:\n    {rms(est_err)}\ndb: {db(rms(est_err))}')
 print(f'rms error val:\n    {rms(val_err)}\ndb: {db(rms(val_err))}')
 

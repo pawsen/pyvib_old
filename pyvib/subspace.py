@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import numpy as np
+from numpy import kron
+# qr(mode='r') returns r in economic form. This is not the case for scipy
+# svd and solve allows broadcasting when imported from numpy
+from numpy.linalg import qr, solve, svd
+from scipy.linalg import logm, lstsq, norm, pinv
+from scipy.signal import dlsim
+
 from .common import (matrix_square_inv, mmul_weight, normalize_columns,
                      weightfcn)
 from .helper.modal_plotting import plot_subspace_info, plot_subspace_model
-from .lti_conversion import ss2frf
+from .lti_conversion import is_stable, ss2frf
 from .modal import modal_ac
 from .statespace import StateSpace, StateSpaceIdent
-import numpy as np
-# qr(mode='r') returns r in economic form. This is not the case for scipy
-# svd and solve allows broadcasting when imported from numpy
-from numpy.linalg import qr, svd, solve
-from scipy.signal import dlsim
-from scipy.linalg import (lstsq, logm, eigvals, pinv, norm)
-from numpy import kron
 
 # TODO extract_model should be refactored so the method from SS can be used
 # right now it is not clear if it should be used at all
@@ -33,7 +34,7 @@ class Subspace(StateSpace, StateSpaceIdent):
 
     def costfcn(self, x0=None, weight=None):
         if weight is True:
-            weight = self.weight()
+            weight = self.weight
         if x0 is None:
             x0 = self.flatten()
         return costfcn(x0, self, weight=weight)
@@ -148,33 +149,6 @@ class Subspace(StateSpace, StateSpaceIdent):
 
         return err_vec
 
-
-def is_stable(A, domain='z'):
-    """Determines if a linear state-space model is stable from eigenvalues of `A`
-
-    Parameters
-    ----------
-    A : ndarray(n,n)
-        state matrix
-    domain : str, optional {'z', 's'}
-        'z' for discrete-time, 's' for continuous-time state-space models
-
-    returns
-    -------
-    bool
-    """
-
-    if domain == 'z':  # discrete-time
-        # Unstable if at least one pole outside unit circle
-        if any(abs(eigvals(A)) > 1):
-            return False
-    elif domain == 's':  # continuous-time
-        # Unstable if at least one pole in right-half plane
-        if any(np.real(eigvals(A)) > 0):
-            return False
-    else:
-        raise ValueError(f"{domain} wrong. Use 's' or 'z'")
-    return True
 
 def jacobian_freq(A,B,C,z):
     """Compute Jacobians of the unweighted errors wrt. model parameters.

@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from .common import (lm, mmul_weight, weightfcn)
-from .polynomial import (poly_deriv, multEdwdx, nl_terms)
-from .statespace import NonlinearStateSpace, StateSpaceIdent, StateSpace
-from .subspace import Subspace
 import numpy as np
 from numpy.fft import fft
-from scipy.special import comb
 from scipy.interpolate import interp1d
+from scipy.special import comb
 
-#only for class PNLSS
-from copy import deepcopy
+from .common import mmul_weight
+from .polynomial import multEdwdx, nl_terms, poly_deriv
+from .statespace import NonlinearStateSpace, StateSpaceIdent
+
 
 """
 PNLSS -- a collection of classes and functions for modeling nonlinear
@@ -19,11 +17,9 @@ linear state space systems.
 """
 class PNLSS(NonlinearStateSpace, StateSpaceIdent):
     def __init__(self, *system, **kwargs):
-        self.signal = system[0].signal
-        kwargs['dt'] = 1/self.signal.fs
-        # if len(system) == 1 and isinstance(system[0], StateSpace):
-        #     system = (system.A, system.B, system.C, system.D)
-        #     pass
+        if len(system) == 1:  # and isinstance(system[0], StateSpace):
+            self.signal = system[0].signal
+            kwargs['dt'] = 1/self.signal.fs
 
         super().__init__(*system, **kwargs)
 

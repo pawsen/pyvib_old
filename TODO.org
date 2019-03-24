@@ -1,3 +1,14 @@
+* Other sysid packages
+this one seems good. Also check out the interface for Slicot.
+https://github.com/python-control/
+There is a book describing the control module
+http://robertobucher.dti.supsi.ch/2016/01/07/python-for-control-purposes/
+
+https://github.com/ilayn/harold
+# minor
+https://github.com/mattjj/py4sid
+https://github.com/alchemyst/Skogestad-Python
+
 * TODO
 - weighting in time domain
 - What to do if unstable models are encountered during subspace optimization

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from pyvib.subspace import Subspace
-from pyvib.signal import Signal
-from pyvib.pnlss import PNLSS
-from pyvib.common import db
-from pyvib.frf import covariance
-from scipy.linalg import norm
-import numpy as np
-import matplotlib.pyplot as plt
-import scipy.io as sio
 import pickle
 from copy import deepcopy
+
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.io as sio
+from scipy.linalg import norm
+
+from pyvib.common import db
+from pyvib.frf import covariance
+from pyvib.pnlss import PNLSS
+from pyvib.signal import Signal
+from pyvib.subspace import Subspace
+
 
 """PNLSS model of the silverbox system.
 
@@ -103,9 +106,11 @@ iu = 0
 
 # subspace model
 linmodel = Subspace(sig)
-models, infodict = linmodel.scan(n, maxr, weight=None)
+# models, infodict = linmodel.scan(n, maxr, weight=None)
 # ensure we use same dimension as for the fnsi model
 linmodel.estimate(n,maxr)
+linmodel2 = deepcopy(linmodel)
+linmodel2.optimize(weight=None)
 
 pnlss1 = PNLSS(linmodel)
 pnlss1.nlterms('x', [2,3], 'statesonly')
@@ -120,8 +125,8 @@ pnlss2.optimize(weight=True, nmax=200)
 errvec1 = pnlss1.extract_model(yval, uval, T1=npp)
 errvec2 = pnlss1.extract_model(yval, uval, T1=npp)
 
-models = [linmodel, pnlss1, pnlss2]
-descrip = ('Subspace','pnlss', 'pnlss weight')
+models = [linmodel, linmodel2, pnlss1, pnlss2]
+descrip = ('Subspace','Subspace opt','pnlss', 'pnlss weight')
 sca = 1
 def print_modal(model):
     # calculate modal parameters
@@ -208,8 +213,11 @@ figs['val_data'] = (plt.gcf(), plt.gca())
 
 if savefig:
     # subspace plots
-    figs['subspace_optim'] = linmodel.plot_info()
-    figs['subspace_models'] = linmodel.plot_models()
+    try:
+        figs['subspace_optim'] = linmodel.plot_info()
+        figs['subspace_models'] = linmodel.plot_models()
+    except:
+        pass
 
     for k, fig in figs.items():
         fig = fig if isinstance(fig, list) else [fig]
