@@ -42,15 +42,16 @@ class Subspace(StateSpace, StateSpaceIdent):
     def jacobian(self, x0, weight=None):
         return jacobian(x0, self, weight=weight)
 
-    def estimate(self, n, r, copy=False):
+    def estimate(self, n, r, weight=None, copy=False):
         """Subspace estimation"""
 
         self.n = n
         self.r = r
         signal = self.signal
-        norm_freq = signal.freq / signal.fs
+        if weight is True:
+            weight = signal.covG
         A, B, C, D, z, stable = \
-            subspace(signal.G, signal.covG, norm_freq, n, r)
+            subspace(signal.G, weight, signal.norm_freq, n, r)
 
         self.A, self.B, self.C, self.D, self.z, self.stable = \
             A, B, C, D, z, stable
@@ -71,7 +72,6 @@ class Subspace(StateSpace, StateSpaceIdent):
         if info:
             print('Starting subspace scanning')
             print(f"n: {nvec.min()}-{nvec.max()}. r: {maxr}")
-            print(f"{'n':3} | {'r':3}")
         for n in nvec:
             minr = n + 1
 
@@ -86,13 +86,13 @@ class Subspace(StateSpace, StateSpaceIdent):
             infodict[n] = {}
             for r in rvec:
                 if info:
-                    print(f"{n:3d} | {r:3d}")
+                    print(f"n:{n:3d} | r:{r:3d}")
 
                 self.estimate(n, r)
-
                 # normalize with frequency lines to comply with matlab pnlss
                 cost_sub = self.cost(weight=weight)/F
                 stable_sub = self.stable
+
                 if optimize:
                     self.optimize(method=method, weight=weight, info=info,
                                   nmax=nmax, lamb=lamb, ftol=ftol, xtol=xtol,
@@ -107,6 +107,7 @@ class Subspace(StateSpace, StateSpaceIdent):
                     # of class. Slots defines attributes names that are
                     # reserved for the use as attributes for the instances of
                     # the class.
+                    print(f"New best r: {r}")
                     cost_old = cost
                     models[n] = {'A': self.A, 'B': self.B, 'C': self.C, 'D':
                                  self.D, 'r':r, 'cost':cost, 'stable': stable}
@@ -122,7 +123,7 @@ class Subspace(StateSpace, StateSpaceIdent):
     def plot_models(self):
         """Plot identified subspace models"""
         return plot_subspace_model(self.models, self.signal.G,
-                                   self.signal.covG, self.signal.freq,
+                                   self.signal.covG, self.signal.norm_freq,
                                    self.signal.fs)
 
     def extract_model(self, y=None, u=None, models=None, n=None, t=None, x0=None):
@@ -682,7 +683,7 @@ def jacobian(x0, system, weight=None):
     tmp[...,n**2 + n*m + n*p:] = JD
     tmp.shape = (F,m*p,npar)
 
-    if weight not in (None, False):
+    if weight is not None:
         tmp = mmul_weight(tmp, weight)
     tmp.shape = (F*p*m,npar)
 
@@ -701,12 +702,10 @@ def costfcn(x0, system, weight=None):
     weight = \sqrt(σ_G⁻¹) Ĝ⁻¹
 
     """
-
-    freq, fs = system.signal.freq, system.signal.fs
     A, B, C, D = system.extract(x0)
 
     # frf of the state space model
-    Gss = ss2frf(A,B,C,D,freq/fs)
+    Gss = ss2frf(A,B,C,D,system.signal.norm_freq)
     err = Gss - system.signal.G
     if weight is not None:
         err = mmul_weight(err, weight)

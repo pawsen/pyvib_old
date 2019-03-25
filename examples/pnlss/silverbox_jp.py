@@ -68,18 +68,16 @@ y = load('y',amp)
 NT, R = u.shape
 NT, R = y.shape
 npp = NT//P
-Ptr = 0
+Ptr = 5
 m = 1
 p = 1
-# odd multisine till 200 Hz, without DC.
-# lines = np.arange(0,2683,2)
 
 # partitioning the data
 u = u.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:-1]
 y = y.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:-1]
-Pest = u.shape[-1]
 uest = u
 yest = y
+Pest = yest.shape[-1]
 
 # Validation data. 50 different realizations of 3 periods. Use the last
 # realization and last period
@@ -101,8 +99,6 @@ um, ym = sig.average()
 # model orders and Subspace dimension parameter
 n = 2
 maxr = 20
-dof = 0
-iu = 0
 
 # subspace model
 linmodel = Subspace(sig)
@@ -146,20 +142,25 @@ for model, string in zip(models, descrip):
 # add one transient period
 Ptr2 = 1
 # simulation error
-val = np.empty((len(models),len(uval)))
 est = np.empty((len(models),len(um)))
+val = np.empty((len(models),len(uval)))
+test = np.empty((len(models),len(utest)))
 for i, model in enumerate(models):
-    val[i] = model.simulate(uval, T1=Ptr2*npp)[1].T
     est[i] = model.simulate(um, T1=Ptr2*npp)[1].T
+    val[i] = model.simulate(uval, T1=Ptr2*npp)[1].T
+    test[i] = model.simulate(utest, T1=Ptr2*npp)[1].T
 
 rms = lambda y: np.sqrt(np.mean(y**2, axis=0))
 est_err = np.hstack((ym, (ym.T - est).T))
 val_err = np.hstack((yval, (yval.T - val).T))
-print(f'rms error est:\n    {rms(est_err)}\ndb: {db(rms(est_err))}')
-print(f'rms error val:\n    {rms(val_err)}\ndb: {db(rms(val_err))}')
+test_err = np.hstack((ytest, (ytest.T - test).T))
+print(descrip)
+print(f'rms error est:\n    {rms(est_err[:,1:])}\ndb: {db(rms(est_err[:,1:]))}')
+print(f'rms error val:\n    {rms(val_err[:,1:])}\ndb: {db(rms(val_err[:,1:]))}')
+print(f'rms error test:\n    {rms(test_err[:,1:])}\ndb: {db(rms(test_err[:,1:]))}')
 
-# noise estimate over 25 periods
-covY = covariance(yest[:,:,None])
+# noise estimate over estimation periods
+covY = covariance(yest)
 
 ## Plots ##
 # store figure handle for saving the figures later
@@ -203,8 +204,9 @@ freq = np.arange(N)/N*fs
 plottime = val_err
 plotfreq = np.fft.fft(plottime, axis=0)/np.sqrt(N)
 nfd = plotfreq.shape[0]
-plt.plot(freq[lines+1], db(plotfreq[lines+1]), '.')
-plt.plot(freq[lines+1], db(np.sqrt(Pest*covY[lines+1].squeeze() / N)), '.')
+plt.plot(freq[lines], db(plotfreq[lines]), '.')
+plt.plot(freq[lines], db(np.sqrt(Pest*covY[lines].squeeze() / N)), '.')
+plt.ylim([-110,10])
 plt.xlabel('Frequency')
 plt.ylabel('Output (errors) (dB)')
 plt.legend(('Output',) + descrip + ('Noise',))

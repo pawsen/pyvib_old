@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from pyvib.statespace import StateSpace as linss
-from pyvib.statespace import Signal
-from pyvib.pnlss import PNLSS
-from pyvib.common import db
-from scipy.linalg import norm
-import numpy as np
+import pickle
+from copy import deepcopy
+
 import matplotlib.pyplot as plt
+import numpy as np
 import scipy.io as sio
+from scipy.linalg import norm
+
+from pyvib.common import db
+from pyvib.frf import covariance
+from pyvib.pnlss import PNLSS
+from pyvib.signal import Signal
+from pyvib.subspace import Subspace
 
 """PNLSS model of the silverbox.
 
@@ -49,7 +54,7 @@ lines = np.arange(1,2683,2)
 
 # partitioning the data
 # Test data: only 86 zero samples in the initial arrow-like input.
-utest = u[Nini     + np.r_[:Ntr+Ntest]]
+utest = u[Nini     + np.r_[:Ntest+Ntr]]
 ytest = y[Nini+Ntr + np.r_[:Ntest]]
 
 # Estimation data.
@@ -71,6 +76,7 @@ for r in range(R):
 #uest = np.repeat(uest[:,None],p,axis=1)
 uest = uest.reshape(npp,m,R,P)
 yest = yest.reshape(npp,p,R,P)
+Pest = yest.shape[-1]
 
 # Validation data.
 u = np.delete(u, np.s_[:Nz+Ntr])
@@ -83,107 +89,130 @@ yval = y[:npp, None]
 n = 2
 maxr = 20
 
-sig = Signal(uest,yest,fs=1)
-sig.lines(lines)
+sig = Signal(uest,yest,fs=fs)
+sig.lines = lines
+# estimate bla, total distortion, and noise distortion
+sig.bla()
 # average signal over periods. Used for training of PNLSS model
 # Even if there's only 1 period, pnlss expect this to be run first. It also
 # reshapes the signal, so um: (npp*m*R)
 um, ym = sig.average()
 
-linmodel = linss()
+linmodel = Subspace(sig)
 # estimate bla, total distortion, and noise distortion
-linmodel.bla(sig)
-models, infodict = linmodel.scan(n, maxr, weight=None)
+linmodel.estimate(n,maxr)
+linmodel2 = deepcopy(linmodel)
+linmodel2.optimize(weight=True)
 
 # estimate PNLSS
 # transient: Add two periods before the start of each realization. Note that
 # this for the signal averaged over periods
 T1 = np.r_[2*npp, np.r_[0:(R-1)*npp+1:npp]]
 
-model = PNLSS(linmodel.A, linmodel.B, linmodel.C, linmodel.D)
-model.signal = sig
-model.nlterms('x', [2,3], 'full')
-model.nlterms('y', [2,3], 'empty')
-model.transient(T1)
-model.optimize(weight=None, nmax=20)
+pnlss1 = PNLSS(linmodel2)
+pnlss1.nlterms('x', [2,3], 'full')
+pnlss1.nlterms('y', [2,3], 'empty')
+pnlss1.transient(T1)
 
-# compute linear and nonlinear model output on training data
-tlin, ylin, xlin = linmodel.simulate(um, T1=T1)
-_, ynlin, _ = model.simulate(um)
+pnlss2= deepcopy(pnlss1)
+pnlss1.optimize(weight=None, nmax=100)
+pnlss2.optimize(weight=True, nmax=100)
 
-# get best model on validation data. Change Transient settings, as there is
-# only one realization
-nl_errvec = model.extract_model(yval, uval, T1=2*npp)
+# add two transient period
+Ptr2 = 2
+errvec1 = pnlss1.extract_model(yval, uval, T1=Ptr2*npp)
+errvec2 = pnlss2.extract_model(yval, uval, T1=Ptr2*npp)
 
-# compute model output on test data(unseen data)
-_, ylval, _ = linmodel.simulate(uval, T1=2*npp)
-_, ynlval, _ = model.simulate(uval, T1=2*npp)
+models = [linmodel, linmodel2, pnlss1, pnlss2]
+descrip = ('Subspace','Subspace opt','pnlss','pnlss weight')
 
-# compute model output on test data(unseen data)
-_, yltest, _ = linmodel.simulate(utest, T1=0)
-_, ynltest, _ = model.simulate(utest, T1=0)
-yltest = np.delete(yltest,np.s_[:Ntr])[:,None]
-ynltest = np.delete(ynltest,np.s_[:Ntr])[:,None]
+# simulation error
+est = np.empty((len(models),len(um)))
+val = np.empty((len(models),len(uval)))
+test = np.empty((len(models),len(utest)))
+for i, model in enumerate(models):
+    est[i] = model.simulate(um, T1=Ptr2*npp)[1].T
+    val[i] = model.simulate(uval, T1=Ptr2*npp)[1].T
+    test[i] = model.simulate(utest, T1=0)[1].T
+
+# delete transient data from test
+test = np.delete(test, np.s_[:Ntr], axis=1)
+
+rms = lambda y: np.sqrt(np.mean(y**2, axis=0))
+est_err = np.hstack((ym, (ym.T - est).T))
+val_err = np.hstack((yval, (yval.T - val).T))
+test_err = np.hstack((ytest, (ytest.T - test).T))
+
+print(descrip)
+print(f'rms error est:\n    {rms(est_err[:,1:])}\ndb: {db(rms(est_err[:,1:]))}')
+print(f'rms error val:\n    {rms(val_err[:,1:])}\ndb: {db(rms(val_err[:,1:]))}')
+print(f'rms error test:\n    {rms(test_err[:,1:])}\ndb: {db(rms(test_err[:,1:]))}')
+
+# noise estimate over estimation periods
+covY = covariance(yest)
 
 ## Plots ##
 # store figure handle for saving the figures later
 figs = {}
 
-plt.ion()
-# linear and nonlinear model error
+#plt.ion()
+# result on estimation data
 resamp = 20
 plt.figure()
-plt.plot(ym[::resamp])
-plt.plot(ym[::resamp]-ylin[::resamp])
-plt.plot(ym[::resamp]-ynlin[::resamp])
+plt.plot(est_err[::resamp])
 plt.xlabel('Time index')
 plt.ylabel('Output (errors)')
-plt.legend(('output','linear error','PNLSS error'))
+plt.legend(('Output',) + descrip)
 plt.title('Estimation results')
 figs['estimation_error'] = (plt.gcf(), plt.gca())
 
-# optimization path for PNLSS
-plt.figure()
-plt.plot(db(nl_errvec))
-imin = np.argmin(nl_errvec)
-plt.scatter(imin, db(nl_errvec[imin]))
-plt.xlabel('Successful iteration number')
-plt.ylabel('Validation error [dB]')
-plt.title('Selection of the best model on a separate data set')
-figs['pnlss_path'] = (plt.gcf(), plt.gca())
-
 # result on validation data
-plt.figure()
-N = len(yval)
 resamp = 2
+plt.figure()
+plottime = val_err
+N = plottime.shape[0]
 freq = np.arange(N)/N*fs
-plottime = np.hstack((yval, yval-ylval, yval-ynlval))
-plotfreq = np.fft.fft(plottime, axis=0)
+plotfreq = np.fft.fft(plottime, axis=0)/np.sqrt(N)
 nfd = plotfreq.shape[0]
 plt.plot(freq[1:nfd//2:resamp], db(plotfreq[1:nfd//2:resamp]), '.')
+plt.plot(freq[1:nfd//2:resamp], db(np.sqrt(Pest*covY[1:nfd//2:resamp].squeeze() / N)), '.')
+#plt.ylim([-110,10])
 plt.xlim((0, 300))
 plt.xlabel('Frequency')
 plt.ylabel('Output (errors) (dB)')
-plt.legend(('Output','Linear error','PNLSS error'))
+plt.legend(('Output',) + descrip + ('Noise',))
 plt.title('Validation results')
 figs['val_data'] = (plt.gcf(), plt.gca())
 
 # result on test data
-# resample factor, as there is 153000 points in test data
+resamp = 2
 plt.figure()
-N = len(ytest)
-resamp = 10
+plottime = test_err
+N = plottime.shape[0]
 freq = np.arange(N)/N*fs
-plottime = np.hstack((ytest, ytest-yltest, ytest-ynltest))
-plotfreq = np.fft.fft(plottime, axis=0)
+plotfreq = np.fft.fft(plottime, axis=0)/np.sqrt(N)
 nfd = plotfreq.shape[0]
 plt.plot(freq[1:nfd//2:resamp], db(plotfreq[1:nfd//2:resamp]), '.')
+plt.plot(freq[1:nfd//2:resamp], db(np.sqrt(Pest*covY[1:nfd//2:resamp].squeeze() / N)), '.')
+#plt.ylim([-110,10])
 plt.xlim((0, 300))
 plt.xlabel('Frequency')
 plt.ylabel('Output (errors) (dB)')
-plt.legend(('Output','Linear error','PNLSS error'))
+plt.legend(('Output',) + descrip + ('Noise',))
 plt.title('Test results')
 figs['test_data'] = (plt.gcf(), plt.gca())
+
+# optimization path for PNLSS
+plt.figure()
+for err in [errvec1, errvec2]:
+    plt.plot(db(err))
+    imin = np.argmin(err)
+    plt.scatter(imin, db(err[imin]))
+plt.xlabel('Successful iteration number')
+plt.ylabel('Validation error [dB]')
+plt.legend(descrip[2:])
+plt.title('Selection of the best model on a separate data set')
+figs['fnsi_path'] = (plt.gcf(), plt.gca())
 
 # subspace plots
 figs['subspace_optim'] = linmodel.plot_info()
@@ -199,5 +228,4 @@ if savefig:
 if savedata:
     with open('sn_benchmark_pnlss.pkl', 'bw') as f:
         pickler = pickle.Pickler(f)
-        pickler.dump(linmodel)
-        pickler.dump(model)
+        pickler.dump(models)

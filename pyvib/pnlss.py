@@ -33,7 +33,8 @@ class PNLSS(NonlinearStateSpace, StateSpaceIdent):
             self.n_nx = self.xpowers.shape[0]
             self.xactive = \
                 select_active(self.xstructure,self.n,self.m,self.n,self.xdegree)
-            self.E = np.zeros((self.n, self.n_nx))
+            if self.E is None:
+                self.E = np.zeros((self.n, self.n_nx))
             # Compute the derivatives of the polynomials zeta and e
             self.xd_powers, self.xd_coeff = poly_deriv(self.xpowers)
         elif eq in ('output', 'y'):
@@ -43,7 +44,8 @@ class PNLSS(NonlinearStateSpace, StateSpaceIdent):
             self.n_ny = self.ypowers.shape[0]
             self.yactive = \
                 select_active(self.ystructure,self.n,self.m,self.p,self.ydegree)
-            self.F = np.zeros((self.p, self.n_ny))
+            if self.F is None:
+                self.F = np.zeros((self.p, self.n_ny))
             self.yd_powers, self.yd_coeff = poly_deriv(self.ypowers)
 
     def output(self, u, t=None, x0=None):

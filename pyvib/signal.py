@@ -38,7 +38,7 @@ class Signal():
     def lines(self, lines):
         self._lines = lines
         self.F = len(lines)
-        self.freq = lines/self.npp  # Excited frequencies (normalized)
+        self.norm_freq = lines/self.npp  # Excited frequencies (normalized)
 
     def bla(self):
         """Get best linear approximation"""

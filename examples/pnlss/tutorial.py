@@ -3,7 +3,6 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.io as sio
 from scipy.linalg import norm
 
 from pyvib.common import db
@@ -31,10 +30,11 @@ http://homepages.vub.ac.be/~ktiels/pnlss.html
 
 # save figures to disk
 savefig = True
-add_noise = False
+add_noise = True
+weight = None
 
 ## Generate data from true model ##
-# generate model to estimate
+# Construct model to estimate
 A = np.array([[0.73915535, -0.62433133],[0.6247377, 0.7364469]])
 B = np.array([[0.79287245], [-0.34515159]])
 C = np.array([[0.71165154, 0.34917771]])
@@ -67,30 +67,21 @@ R = 4         # Number of phase realizations (one for validation and one for
               # testing)
 P = 3         # Number of periods
 kind = 'Odd'  # 'Full','Odd','SpecialOdd', or 'RandomOdd': kind of multisine
-f1 = 0        # first excited line
-f2 = round(0.9*npp/2)  # Last excited line
-fs = npp
 m = 1         # number of inputs
 p = 1         # number of outputs
+fs = 1        # normalized sampling rate
 
 # get predictable random numbers. https://dilbert.com/strip/2001-10-25
 np.random.seed(10)
 # shape of u from multisine: (R,P*npp)
-u, t, lines, freq = multisine(f1,f2, fs, npp, P, R, lines=kind, rms=RMSu)
-lines = lines[:-1]
+u, lines, freq = multisine(N=npp, P=P, R=R, lines=kind, rms=RMSu)
 # if multiple input is required, this will copy u m times
-# u = np.repeat(u.ravel()[:,None], m, axis=1)  # (R*P*npp,m)
-
-data2 = sio.loadmat('data/data2.mat')
-u_output = data2['u_output']
-y_output = data2['y_output']
-u = u_output.transpose((2,1,0))
 
 # Transient: Add one period before the start of each realization. To generate
 # steady state data.
 T1 = np.r_[npp, np.r_[0:(R-1)*P*npp+1:P*npp]]
 _, y, _ = true_model.simulate(u.ravel(), T1=T1)
-u = u.reshape((R,P,npp)).transpose((2,0,1))[:,None]  # (npp,R,P)
+u = u.reshape((R,P,npp)).transpose((2,0,1))[:,None]  # (npp,m,R,P)
 y = y.reshape((R,P,npp)).transpose((2,0,1))[:,None]
 
 # Add colored noise to the output. randn generate white noise
@@ -116,21 +107,24 @@ yest = y[...,:-2,:]
 sig = Signal(uest,yest,fs=fs)
 sig.lines = lines
 # plot periodicity for one realization to verify data is steady state
-sig.periodicity()
+# sig.periodicity()
 # Calculate BLA, total- and noise distortion. Used for subspace identification
 sig.bla()
 # average signal over periods. Used for training of PNLSS model
 um, ym = sig.average()
 
 # model orders and Subspace dimensioning parameter
-nvec = 2#[2,3]
-maxr = 5#5
+nvec = [2,3]
+maxr = 5
 
 linmodel = Subspace(sig)
 # get best model on validation data
-#models, infodict = linmodel.scan(nvec, maxr)
-#l_errvec = linmodel.extract_model(yval, uval)
-linmodel.estimate(nvec, maxr)
+models, infodict = linmodel.scan(nvec, maxr, weight=weight)
+l_errvec = linmodel.extract_model(yval, uval)
+# or estimate the subspace model directly
+linmodel.estimate(2, 5, weight=weight)  # best model, when noise weighting is used
+linmodel.optimize(weight=weight)
+print(f"Best subspace model, n, r: {linmodel.n}, {linmodel.r}")
 
 # estimate PNLSS
 # transient: Add one period before the start of each realization. Note that
@@ -142,11 +136,7 @@ model = PNLSS(linmodel)
 model.nlterms('x', [2,3], 'full')
 model.nlterms('y', [2,3], 'full')
 model.transient(T1)
-model.optimize(lamb=100, weight=True, nmax=60)
-
-# compute linear and nonlinear model output on training data
-tlin, ylin, xlin = linmodel.simulate(um, T1=T1)
-_, ynlin, _ = model.simulate(um)
+model.optimize(lamb=100, weight=weight, nmax=100)
 
 # get best model on validation data. Change Transient settings, as there is
 # only one realization
@@ -167,13 +157,14 @@ rms = lambda y: np.sqrt(np.mean(y**2, axis=0))
 est_err = np.hstack((ym, (ym.T - est).T))
 val_err = np.hstack((yval, (yval.T - val).T))
 test_err = np.hstack((ytest, (ytest.T - test).T))
-print(descrip)
-print(f'rms error est:\n    {rms(est_err)}\ndb: {db(rms(est_err))}')
-print(f'rms error val:\n    {rms(val_err)}\ndb: {db(rms(val_err))}')
-print(f'rms error test:\n    {rms(test_err)}\ndb: {db(rms(test_err))}')
+print(f"err for models {descrip}")
+print(f'rms error est:\n    {rms(est_err[:,1:])}\ndb: {db(rms(est_err[:,1:]))}')
+print(f'rms error val:\n    {rms(val_err[:,1:])}\ndb: {db(rms(val_err[:,1:]))}')
+print(f'rms error test:\n    {rms(test_err[:,1:])}\ndb: {db(rms(test_err[:,1:]))}')
 
 
-# noise estimate over periods
+# noise estimate over periods. This sets the performace limit for the estimated
+# model
 covY = covariance(yest)
 Pest = yest.shape[-1]
 
@@ -239,6 +230,6 @@ if savefig:
         fig = fig if isinstance(fig, list) else [fig]
         for i, f in enumerate(fig):
             f[0].tight_layout()
-            f[0].savefig(f"tutorial_{k}{i}.pdf")
+            f[0].savefig(f"fig/tutorial_{k}{i}.pdf")
 
 plt.show()

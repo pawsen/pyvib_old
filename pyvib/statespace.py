@@ -388,7 +388,7 @@ class StateSpaceIdent():
         return np.dot(err, err)
 
     def optimize(self, method=None, weight=True, info=2, nmax=50, lamb=None,
-                 ftol=1e-8, xtol=1e-8, gtol=1e-8, copy=False):
+                 ftol=1e-12, xtol=1e-12, gtol=1e-12, copy=False):
         """Optimize the estimated the nonlinear state space matrices"""
         if weight is True:
             weight = self.weight
@@ -439,10 +439,10 @@ class StateSpaceIdent():
             if info:
                 print(f"{i:5d} | {err_rms[i]:12.8g}")
         # best model on new data set
-        i = np.argmin(err_rms)
+        i = np.nanargmin(err_rms)
         if info:
             print(f"best model is {i} with RMS {err_rms[i]:12.8g}")
-        ss = models[np.argmin(err_rms)]
+        ss = models[i]
         if copy:
             # restore state space matrices to original
             self._copy(*self.extract(ss0))

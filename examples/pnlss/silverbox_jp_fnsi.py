@@ -43,6 +43,13 @@ Identified at low level (5V)
 | Nat freq (Hz) | Damping ratio (%) |
 |---------------+-------------------|
 |         68.58 |              4.68 |
+
+RMS of validation data
+| Unit |   Output |  Lin err | fnsi init | fnsi opt |
+|------+----------+----------+-----------+----------|
+| V    |     0.16 |     0.09 |     0.002 |    0.001 |
+| db   | -15.9176 | -20.9151 |  -53.9794 |     -60. |
+
 """
 
 def load(var, amp, fnsi=True):
@@ -64,17 +71,15 @@ savedata = True
 # 1 realization, 30 periods of 8192 samples. 5 discarded as transient (Ptr)
 amp = 100
 u, fs, lines, P = load('u',amp)
-lines = lines[1:]
+lines = lines[1:] - 1
 y = load('y',amp)
 
 NT, R = u.shape
 NT, R = y.shape
 npp = NT//P
-Ptr = 0
+Ptr = 5
 m = 1
 p = 1
-# odd multisine till 200 Hz, without DC.
-# lines = np.arange(0,2683,2)
 
 # partitioning the data
 u = u.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:-1]
@@ -82,7 +87,7 @@ y = y.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:-1]
 # FNSI can only use one realization
 uest = u[:,:,0,:]
 yest = y[:,:,0,:]
-Pest = uest.shape[-1]
+Pest = yest.shape[-1]
 
 # Validation data. 50 different realizations of 3 periods. Use the last
 # realization and last period
@@ -110,7 +115,7 @@ xpowers = np.array([[2],[3]])
 # Linear model
 fnsi1 = FNSI(sig)
 fnsi1.estimate(n,maxr)
-fnsi1.nl_coeff(iu)  # not necessary
+fnsi1.nl_coeff(iu)
 
 # initial nonlinear model
 fnsi2 = FNSI(sig)
@@ -118,17 +123,18 @@ fnsi2.nlterms('state',xpowers)
 fnsi2.estimate(n,maxr)
 fnsi2.nl_coeff(iu)
 
-# optimized model
+# optimized models
 fnsi3 = deepcopy(fnsi2)
-fnsi3.transient(T1=npp)
-fnsi3.optimize(weight=None, nmax=50, xtol=1e-16, ftol=1e-16, gtol=1e-16)
-fnsi3.nl_coeff(iu)
+fnsi4 = deepcopy(fnsi2)  # freq. weighted model
+weights = (None, True)
+for w, model in zip(weights,[fnsi3, fnsi4]):
+    model.transient(T1=npp)
+    model.optimize(weight=w, nmax=50, xtol=1e-16, ftol=1e-16, gtol=1e-16)
+    model.nl_coeff(iu)
 
-# optimized freq. weighted model
-fnsi4 = deepcopy(fnsi2)
-fnsi4.transient(T1=npp)
-fnsi4.optimize(weight=True, nmax=50, xtol=1e-16, ftol=1e-16, gtol=1e-16)
-fnsi4.nl_coeff(iu)
+# select best model on validation data
+errvec3 = fnsi3.extract_model(yval, uval, T1=npp)
+errvec4 = fnsi4.extract_model(yval, uval, T1=npp)
 
 models = [fnsi1, fnsi2, fnsi3, fnsi4]
 descrip = ('linear','fnsi init','fnsi optim', 'fnsi weight')
@@ -163,10 +169,10 @@ rms = lambda y: np.sqrt(np.mean(y**2, axis=0))
 est_err = np.hstack((ym, (ym.T - est).T))
 val_err = np.hstack((yval, (yval.T - val).T))
 print(descrip)
-print(f'rms error est:\n    {rms(est_err)}\ndb: {db(rms(est_err))}')
-print(f'rms error val:\n    {rms(val_err)}\ndb: {db(rms(val_err))}')
+print(f'rms error est:\n    {rms(est_err[:,1:])}\ndb: {db(rms(est_err[:,1:]))}')
+print(f'rms error val:\n    {rms(val_err[:,1:])}\ndb: {db(rms(val_err[:,1:]))}')
 
-# noise estimate over 25 periods
+# noise estimate over Pest periods
 covY = covariance(yest[:,:,None])
 
 ## Plots ##
@@ -191,18 +197,27 @@ freq = np.arange(N)/N*fs
 plottime = val_err
 plotfreq = np.fft.fft(plottime, axis=0)/np.sqrt(N)
 nfd = plotfreq.shape[0]
-plt.plot(freq[lines+1], db(plotfreq[lines+1]), '.')
-plt.plot(freq[lines+1], db(np.sqrt(Pest*covY[lines+1].squeeze() / N)), '.')
-#plt.plot(freq[lines], db(covY[lines].squeeze()), '.')
-#plt.plot(freq[lines], db(covY[lines].squeeze()/np.sqrt(25)), '.')
-#plt.plot(freq[lines], db(np.sqrt((25-1)*covY[lines].squeeze()))),
+plt.plot(freq[lines], db(plotfreq[lines]), '.')
+plt.plot(freq[lines], db(np.sqrt(Pest*covY[lines].squeeze() / N)), '.')
 #plt.xlim((0, 300))
-#plt.ylim([-60,45])
+plt.ylim([-110,10])
 plt.xlabel('Frequency')
 plt.ylabel('Output (errors) (dB)')
 plt.legend(('Output',) + descrip + ('Noise',))
 plt.title('Validation results')
 figs['val_data'] = (plt.gcf(), plt.gca())
+
+# optimization path
+plt.figure()
+for err in [errvec3, errvec4]:
+    plt.plot(db(err))
+    imin = np.argmin(err)
+    plt.scatter(imin, db(err[imin]))
+plt.xlabel('Successful iteration number')
+plt.ylabel('Validation error [dB]')
+plt.title('Selection of the best model on a separate data set')
+figs['fnsi_path'] = (plt.gcf(), plt.gca())
+plt.legend(descrip[2:])
 
 # subspace plots
 #figs['subspace_optim'] = linmodel.plot_info()

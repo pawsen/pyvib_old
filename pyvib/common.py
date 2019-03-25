@@ -88,14 +88,12 @@ def db(x, r=1):
     -----
     https://en.wikipedia.org/wiki/Decibel#Field_quantities_and_root-power_quantities
     """
-    if math.isclose(r, 1, rel_tol=1e-6):
-        x = x**2
-    else:
-        x = x**2/r
+    if not math.isclose(r, 1, rel_tol=1e-6):
+        x = x/r
 
     # dont nag if x=0
     with np.errstate(divide='ignore', invalid='ignore'):
-        return 10*np.log10(np.abs(x))
+        return 20*np.log10(np.abs(x))
 
 
 def import_npz(npz_file, namespace=globals()):
@@ -373,7 +371,7 @@ def lm(fun, x0, jac, info=2, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
         print(f"Function evaluations {nfev}, initial cost {cost_vec[0]:.4e}, "
               f"final cost {cost:.4e}")
 
-    res = {'x':x0, 'cost': cost, 'fun':err, 'niter': niter, 'x_mat': x0_mat,
-           'cost_vec':cost_vec, 'message':message, 'success':status > 0,
-           'nfev':nfev, 'njev':niter, 'status':status}
+    res = {'x':x0, 'cost': cost, 'fun':err, 'niter': niter, 'x_mat':
+           x0_mat[:niter-1], 'cost_vec':cost_vec[niter-1], 'message':message,
+           'success':status > 0, 'nfev':nfev, 'njev':niter, 'status':status}
     return res
