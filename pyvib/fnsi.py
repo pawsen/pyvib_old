@@ -19,10 +19,10 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         kwargs['dt'] = 1/signal.fs
         super().__init__(*system, **kwargs)
 
-        self.xpowers = np.empty(shape=(0,0))
-        self.ypowers = np.empty(shape=(0,0))
-        self.xactive = []
-        self.yactive = []
+        self.xpowers = np.empty(shape=(0,self.m+self.n))
+        self.ypowers = np.empty(shape=(0,self.m+self.n))
+        self.xactive = np.array([],dtype=int)
+        self.yactive = np.array([],dtype=int)
         self.n_nx = len(self.xactive)
         self.n_ny = len(self.yactive)
 
@@ -31,10 +31,14 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
             self.xpowers = np.atleast_2d(powers)
             self.xd_powers, self.xd_coeff = poly_deriv(self.xpowers)
             self.n_nx = self.xpowers.shape[0]
+            if self.E.size == 0:  # E and F is reinitialized when estimated
+                self.E = np.zeros((self.n, self.n_nx))
         elif eq in ('output', 'y'):
             self.ypowers = np.atleast_2d(powers)
             self.yd_powers, self.yd_coeff = poly_deriv(self.ypowers)
             self.n_ny = self.ypowers.shape[0]
+            if self.F.size == 0:
+                self.F = np.zeros((self.p, self.n_ny))
 
     def output(self, u, t=None, x0=None):
         return dnlsim(self, u, t=t, x0=x0)
@@ -326,7 +330,7 @@ def jacobian(x0, system, weight=None):
     # (n_var, nt)
     # contrib = np.atleast_2d(np.hstack((y_trans)).T)
     contrib = y_trans.T
-    n_trans = u_trans.shape[0]
+    n_trans = u_trans.shape[0]  # NT
 
     # E∂ₓζ
     ny = contrib.shape[0]
@@ -370,9 +374,7 @@ def jacobian(x0, system, weight=None):
                                                            order='F')
         # select only the positive half of the spectrum
         jac = fft(jac, axis=0)[:nfd]
-        # TODO should we test if weight is None or just do it in mmul_weight
-        if weight is not None:
-            jac = mmul_weight(jac, weight)
+        jac = mmul_weight(jac, weight)
         # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
         jac = jac.reshape((-1,p,R,npar),
                           order='F').swapaxes(1,2).reshape((-1,npar), order='F')

@@ -29,7 +29,7 @@ class StateSpace():
         self.outputs = None
         self._dt = None
         self.T1, self.T2 = [None]*2
-        self.n, self.m, self.p = [None]*3
+        self.n, self.m, self.p = [0]*3
 
         sys = system
         dt = kwargs.pop('dt', True)
@@ -246,7 +246,8 @@ class NonlinearStateSpace(StateSpace):
         """Initialize the state space lti/dlti system."""
 
         sys = system
-        E, F = [None]*2
+        E = np.array([])
+        F = np.array([])
         if len(system) == 6:
             E, F = system[4:6]
             sys = system[0:4]
@@ -322,7 +323,7 @@ class NonlinearStateSpace(StateSpace):
             self._weight = weightfcn(self.signal.covY)
         return self._weight
 
-    def costfcn(self, x0=None, weight=False):
+    def costfcn(self, x0=None, weight=None):
         if weight is True:
             weight = self.weight
         if x0 is None:
@@ -378,7 +379,7 @@ class StateSpaceIdent():
     def __init__(self):
         self._weight = None
 
-    def cost(self, x0=None, weight=False):
+    def cost(self, x0=None, weight=None):
         if weight is True:
             weight = self.weight
         if x0 is None:

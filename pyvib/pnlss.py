@@ -22,6 +22,22 @@ class PNLSS(NonlinearStateSpace, StateSpaceIdent):
             kwargs['dt'] = 1/self.signal.fs
 
         super().__init__(*system, **kwargs)
+        self.xpowers = np.empty(shape=(0,self.m+self.n))
+        self.ypowers = np.empty(shape=(0,self.m+self.n))
+        self.xactive = np.array([], dtype=int)
+        self.yactive = np.array([], dtype=int)
+        self.n_nx = len(self.xactive)
+        self.n_ny = len(self.yactive)
+        self.xdegree, self.ydegree = [None]*2
+        self.xstructure, self.ystructure = [None]*2
+
+    def __repr__(self):
+        rep = super().__repr__()
+        return (rep + ',\n' +
+                f'x: {repr(self.xdegree)},\n'
+                f'xtype: {repr(self.xstructure)},\n'
+                f'y: {repr(self.ydegree)},\n'
+                f'ytype: {repr(self.ystructure)}')
 
     def nlterms(self, eq, degree, structure):
         """Set active nonlinear terms/monomials to be optimized"""
@@ -33,7 +49,7 @@ class PNLSS(NonlinearStateSpace, StateSpaceIdent):
             self.n_nx = self.xpowers.shape[0]
             self.xactive = \
                 select_active(self.xstructure,self.n,self.m,self.n,self.xdegree)
-            if self.E is None:
+            if self.E.size == 0:
                 self.E = np.zeros((self.n, self.n_nx))
             # Compute the derivatives of the polynomials zeta and e
             self.xd_powers, self.xd_coeff = poly_deriv(self.xpowers)
@@ -44,7 +60,7 @@ class PNLSS(NonlinearStateSpace, StateSpaceIdent):
             self.n_ny = self.ypowers.shape[0]
             self.yactive = \
                 select_active(self.ystructure,self.n,self.m,self.p,self.ydegree)
-            if self.F is None:
+            if self.F.size == 0:
                 self.F = np.zeros((self.p, self.n_ny))
             self.yd_powers, self.yd_coeff = poly_deriv(self.ypowers)
 
@@ -91,7 +107,6 @@ def combinations(n, degrees):
     monomial is equal to x^2*y^1 = x*x*y.
 
     """
-
     degrees = np.asarray(degrees)
     if not np.issubdtype(degrees.dtype, np.integer):
         raise ValueError('wrong type in degrees. Should only be int. Is {}'.
@@ -573,18 +588,25 @@ def jacobian(x0, system, weight=None):
     x_trans = system.x_mod[system.idx_trans]
     u_trans = system.signal.um[system.idx_trans]
     contrib = np.hstack((x_trans, u_trans)).T
-    n_trans = u_trans.shape[0]
+    n_trans = u_trans.shape[0]  # NT
 
     # E∂ₓζ + A(n,n,NT)
-    A_EdwxIdx = multEdwdx(contrib,system.xd_powers,np.squeeze(system.xd_coeff),
-                          E,n) + A[...,None]
+    if E.size == 0:
+        FdwyIdx = np.zeros(shape=(*A.shape,n_trans))
+    else:
+        A_EdwxIdx = multEdwdx(contrib,system.xd_powers,np.squeeze(system.xd_coeff),
+                          E,n)
+    A_EdwxIdx += A[...,None]
     zeta = nl_terms(contrib, system.xpowers).T  # (NT,n_nx)
 
     # F∂ₓη  (p,n,NT)
-    FdwyIdx = multEdwdx(contrib,system.yd_powers,np.squeeze(system.yd_coeff),
-                        F,n)
+    if F.size == 0:
+        FdwyIdx = np.zeros(shape=(*C.shape,n_trans))
+    else:
+        FdwyIdx = multEdwdx(contrib,system.yd_powers,np.squeeze(system.yd_coeff),
+                  F,n)
     # Add C to F∂ₓη for all samples at once
-    FdwyIdx += system.C[...,None]
+    FdwyIdx += C[...,None]
     eta = nl_terms(contrib, system.ypowers).T  # (NT,n_ny)
 
     # calculate jacobians wrt state space matrices
@@ -624,9 +646,7 @@ def jacobian(x0, system, weight=None):
                                                            order='F')
         # select only the positive half of the spectrum
         jac = fft(jac, axis=0)[:nfd]
-        # TODO should we test if weight is None or just do it in mmul_weight
-        if weight is not None:
-            jac = mmul_weight(jac, weight)
+        jac = mmul_weight(jac, weight)
         # (nfd,p,R*npar) -> (nfd,p,R,npar) -> (nfd,R,p,npar) -> (nfd*R*p,npar)
         jac = jac.reshape((-1,p,R,npar),
                           order='F').swapaxes(1,2).reshape((-1,npar), order='F')

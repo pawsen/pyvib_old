@@ -44,8 +44,9 @@ utest = data['uval_sinesweep'].T
 ytest = data['yval_sinesweep'].T
 uest = data['u']
 yest = data['y']
-lines = data['lines'].squeeze() - 1
+lines = data['lines'].squeeze()  # [:-1]
 fs = data['fs'].item()
+nfreq = len(lines)
 npp, m, R, P = uest.shape
 
 # noise estimate over estimation periods
@@ -63,9 +64,12 @@ sig.bla()
 um, ym = sig.average()
 
 linmodel = Subspace(sig)
-models, infodict = linmodel.scan(nvec, maxr, weight=True)
+models, infodict = linmodel.scan(nvec, maxr, nmax=50, weight=True)
 # set model manual, as in matlab program
-linmodel.extract_model(n=3)
+# linmodel.extract_model()
+linmodel.estimate(n=3,r=4)
+print(f'linear model: n,r:{linmodel.n},{linmodel.r}.')
+print(f'Weighted Cost/nfreq: {linmodel.cost(weight=True)/nfreq}')
 
 # estimate PNLSS
 # transient: Add one period before the start of each realization. Note that
@@ -93,14 +97,18 @@ fnsi7.nlterms('x', [3,5,7], 'statesonly')
 models = [fnsi1, fnsi2, fnsi3, fnsi4, fnsi5, fnsi6, fnsi7]
 descrip = ('2','2-3','2-3-4','2-3-4-5','2-3-4-5-6','2-3-4-5-6-7','3-5-7')
 opt_path = []
-for model in models:
-    model.nlterms('y', [], 'empty')
-    model.optimize(lamb=100, weight=True, nmax=150)
+for desc, model in zip(descrip, models):
+    #model.nlterms('y', [], 'empty')
+    model.optimize(weight=True, nmax=100)
 
     # get best model on validation data. Change Transient settings, as there is
     # only one realization
     nl_errvec = model.extract_model(yval, uval, T1=npp)
     opt_path.append(nl_errvec)
+    with open(f'boucwen_model_{desc}.pkl', 'bw') as f:
+        pickler = pickle.Pickler(f)
+        pickler.dump(model)
+        pickler.dump(nl_errvec)
 
 
 # add one transient period
