@@ -67,7 +67,7 @@ class PNLSS(NonlinearStateSpace, StateSpaceIdent):
     def output(self, u, t=None, x0=None):
         return dnlsim(self, u, t=t, x0=x0)
 
-    def jacobian(self, x0, weight=None):
+    def jacobian(self, x0, weight=False):
         return jacobian(x0, self, weight=weight)
 
 
@@ -560,7 +560,7 @@ def element_jacobian(samples, A_Edwdx, C_Fdwdx, active):
 
     return out
 
-def jacobian(x0, system, weight=None):
+def jacobian(x0, system, weight=False):
     """Compute the Jacobians of a steady state nonlinear state-space model
 
     Jacobians of a nonlinear state-space model
@@ -639,7 +639,7 @@ def jacobian(x0, system, weight=None):
     npar = jac.shape[1]
 
     # add frequency weighting
-    if weight is not None and system.freq_weight:
+    if weight is not False and system.freq_weight:
         # (p*ns, npar) -> (Npp,R,p,npar) -> (Npp,p,R,npar) -> (Npp,p,R*npar)
         jac = jac.reshape((npp,R,p,npar),
                           order='F').swapaxes(1,2).reshape((-1,p,R*npar),
@@ -654,7 +654,7 @@ def jacobian(x0, system, weight=None):
         J = np.empty((2*nfd*R*p,npar))
         J[:nfd*R*p] = jac.real
         J[nfd*R*p:] = jac.imag
-    elif weight is not None:
+    elif weight is not False:
         raise ValueError('Time weighting not possible')
     else:
         return jac

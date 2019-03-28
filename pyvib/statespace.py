@@ -323,7 +323,7 @@ class NonlinearStateSpace(StateSpace):
             self._weight = weightfcn(self.signal.covY)
         return self._weight
 
-    def costfcn(self, x0=None, weight=None):
+    def costfcn(self, x0=None, weight=False):
         if weight is True:
             weight = self.weight
         if x0 is None:
@@ -379,7 +379,7 @@ class StateSpaceIdent():
     def __init__(self):
         self._weight = None
 
-    def cost(self, x0=None, weight=None):
+    def cost(self, x0=None, weight=False):
         if weight is True:
             weight = self.weight
         if x0 is None:
@@ -395,7 +395,7 @@ class StateSpaceIdent():
             weight = self.weight
 
         self.freq_weight = True
-        if weight is None:
+        if weight is False:
             self.freq_weight = False
 
         if info:
@@ -454,7 +454,7 @@ class StateSpaceIdent():
         self._copy(*self.extract(ss))
         return err_rms
 
-def costfcn_time(x0, system, weight=None):
+def costfcn_time(x0, system, weight=False):
     """Compute the vector of residuals such that the function to mimimize is
 
     res = ∑ₖ e[k]ᴴ*e[k], where the error is given by
@@ -480,7 +480,7 @@ def costfcn_time(x0, system, weight=None):
 
     # Compute the (weighted) error signal without transient
     err = y_mod[without_T2, :p] - system.signal.ym[without_T2]
-    if weight is not None and system.freq_weight:
+    if weight is not False and system.freq_weight:
         err = err.reshape((npp,R,p),order='F').swapaxes(1,2)
         # Select only the positive half of the spectrum
         err = fft(err, axis=0)[:nfd]
@@ -488,7 +488,7 @@ def costfcn_time(x0, system, weight=None):
         #cost = np.vdot(err, err).real
         err = err.swapaxes(1,2).ravel(order='F')
         err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
-    elif weight is not None:
+    elif weight is not False:
         # TODO time domain weighting. Does not work
         err_w = err * weight[without_T2]
         #cost = np.dot(err,err)

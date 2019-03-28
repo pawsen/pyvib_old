@@ -31,7 +31,7 @@ http://homepages.vub.ac.be/~ktiels/pnlss.html
 # save figures to disk
 savefig = True
 add_noise = True
-weight = None
+weight = True
 
 ## Generate data from true model ##
 # Construct model to estimate

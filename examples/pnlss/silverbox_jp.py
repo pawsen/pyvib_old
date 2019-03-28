@@ -102,11 +102,11 @@ maxr = 20
 
 # subspace model
 linmodel = Subspace(sig)
-# models, infodict = linmodel.scan(n, maxr, weight=None)
+# models, infodict = linmodel.scan(n, maxr, weight=False)
 # ensure we use same dimension as for the fnsi model
 linmodel.estimate(n,maxr)
 linmodel2 = deepcopy(linmodel)
-linmodel2.optimize(weight=None)
+linmodel2.optimize(weight=False)
 
 pnlss1 = PNLSS(linmodel)
 pnlss1.nlterms('x', [2,3], 'statesonly')
@@ -114,7 +114,7 @@ pnlss1.nlterms('y', [2], 'empty')
 pnlss1.transient(T1=npp)
 
 pnlss2= deepcopy(pnlss1)
-pnlss1.optimize(weight=None, nmax=200)
+pnlss1.optimize(weight=False, nmax=200)
 # optimized freq. weighted model
 pnlss2.optimize(weight=True, nmax=200)
 

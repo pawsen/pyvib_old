@@ -66,7 +66,7 @@ um, ym = sig.average()
 linmodel = linss()
 # estimate bla, total distortion, and noise distortion
 linmodel.bla(sig)
-models, infodict = linmodel.scan(n, maxr, weight=None)
+models, infodict = linmodel.scan(n, maxr, weight=False)
 
 # estimate PNLSS
 # transient: Add three periods before the start of each realization. Note that
@@ -78,7 +78,7 @@ model.signal = sig
 model.nlterms('x', [2,3], 'statesonly')
 model.nlterms('y', [2,3], 'empty')
 model.transient(T1)
-model.optimize(weight=None, nmax=20)
+model.optimize(weight=False, nmax=20)
 
 # compute linear and nonlinear model output on training data
 tlin, ylin, xlin = linmodel.simulate(um, T1=T1)

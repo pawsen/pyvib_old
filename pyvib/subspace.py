@@ -32,17 +32,17 @@ class Subspace(StateSpace, StateSpaceIdent):
             self._weight = weightfcn(self.signal.covG)
         return self._weight
 
-    def costfcn(self, x0=None, weight=None):
+    def costfcn(self, x0=None, weight=False):
         if weight is True:
             weight = self.weight
         if x0 is None:
             x0 = self.flatten()
         return costfcn(x0, self, weight=weight)
 
-    def jacobian(self, x0, weight=None):
+    def jacobian(self, x0, weight=False):
         return jacobian(x0, self, weight=weight)
 
-    def estimate(self, n, r, weight=None, copy=False):
+    def estimate(self, n, r, weight=False, copy=False):
         """Subspace estimation"""
 
         self.n = n
@@ -58,7 +58,7 @@ class Subspace(StateSpace, StateSpaceIdent):
 
         return A, B, C, D, z, stable
 
-    def scan(self, nvec, maxr, optimize=True, method=None, weight=None,
+    def scan(self, nvec, maxr, optimize=True, method=None, weight=False,
              info=2, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8, gtol=1e-8):
 
         F = self.signal.F
@@ -285,7 +285,7 @@ def modal_list(G, covG, freq, nvec, r, fs, U=None, Y=None):
 
     return md
 
-def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr',
+def subspace(G, covG, freq, n, r, U=None, Y=None, bd_method='nr',
              modal=False):
     """Estimate state-space model from Frequency Response Function (or Matrix)
 
@@ -300,8 +300,8 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr',
     ----------
     G : complex ndarray(p, m, F)
         Frequency Response Matrix (FRM)
-    covarG : ndarray(p*m, p*m, F)
-        σ²_G, Covariance tensor on G (None if no weighting required)
+    covG : ndarray(p*m, p*m, F)
+        σ²_G, Covariance tensor on G (False if no weighting required)
     freq : ndarray(F)
         Vector of normalized frequencies at which the FRM is given (0 < freq < 0.5)
     n : int
@@ -422,9 +422,9 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr',
     Z[(r+expl)*m:,F*_m:] = Gmat.imag
 
     # 1.f. Calculate CY from σ²_G
-    if covarG is None:
+    if covG is False:
         CY = np.eye(p*r)
-        #covarG = np.tile(np.eye(p*m), (F,1,1))
+        # covG = np.tile(np.eye(p*m), (F,1,1))
     else:
         CY = np.zeros((p*r,p*r))
         for f in range(F):
@@ -432,7 +432,7 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr',
             # paduart2008(5-93))
             temp = np.zeros((p,p),dtype=complex)
             for i in range(m):
-                temp += covarG[f, i*p:(i+1)*p, i*p:(i+1)*p]
+                temp += covG[f, i*p:(i+1)*p, i*p:(i+1)*p]
                 CY += np.real(kron(np.outer(Wr[:r,f], Wr[:r,f].conj()),temp))
 
     # 1.g. QR decomposition of Z.T, Z=R.T*Q.T, to eliminate U from Z.
@@ -472,11 +472,11 @@ def subspace(G, covarG, freq, n, r, U=None, Y=None, bd_method='nr',
 
     # 3. Estimate B and D given A,C and H: (W)LS estimate
     # Compute weight, W = sqrt(σ²_G^-1)
-    weight = None
-    if covarG is not None:
-        weight = np.zeros_like(covarG)  # .transpose((2,0,1))
+    weight = False
+    if covG is not False:
+        weight = np.zeros_like(covG)  # .transpose((2,0,1))
         for f in range(F):
-            weight[f] = matrix_square_inv(covarG[f])
+            weight[f] = matrix_square_inv(covG[f])
 
     if bd_method == 'explicit':
         B, D = bd_explicit(A,C,Or,n,r,m,p,RT)
@@ -553,7 +553,7 @@ def bd_explicit(A,C,Or,n,r,m,p,RT):
 
     return B, D
 
-def bd_nr(A,C,G,freq,n,r,m,p,U=None,Y=None,weight=None):
+def bd_nr(A,C,G,freq,n,r,m,p,U=None,Y=None,weight=False):
     """Estimate B, D using transfer function-based optimization
     (Newton-Raphson iterations)
 
@@ -584,7 +584,7 @@ def bd_nr(A,C,G,freq,n,r,m,p,U=None,Y=None,weight=None):
 
     return B, D
 
-def frf_costfcn(x0, G, weight=None):
+def frf_costfcn(x0, G, weight=False):
     """Compute the cost, V = -W*(0 - G), i.e. minus the weighted error(the
     residual) when considering zero initial estimates for Ĝ
 
@@ -592,14 +592,14 @@ def frf_costfcn(x0, G, weight=None):
     Ĝ(f) = C*inv(z(f)*I - A)*B + D and W = 1/σ_G.
 
     """
-    if weight is None:
+    if weight is False:
         resG = G.ravel()
     else:
         resG = mmul_weight(G, weight).ravel()
 
     return np.hstack((resG.real, resG.imag))
 
-def frf_jacobian(x0,A,C,n,m,p,freq,U=None,weight=None):
+def frf_jacobian(x0,A,C,n,m,p,freq,U=None,weight=False):
     """Compute partial derivative of the weighted error, e = W*(Ĝ - G) wrt B, D
 
     Ĝ(f) = C*inv(z(f)*I - A)*B + D and W = 1/σ_G.
@@ -633,7 +633,7 @@ def frf_jacobian(x0,A,C,n,m,p,freq,U=None,weight=None):
         tmp[...,n*m:] = np.einsum('ij,iljk->ilk',U,JD)
 
     tmp.shape = (F,p*_m,npar)
-    if weight is not None:
+    if weight is not False:
         tmp = mmul_weight(tmp, weight)
     tmp.shape = (F*p*_m,npar)
 
@@ -660,7 +660,7 @@ def output_costfcn(x0,A,C,n,m,p,freq,U,Y,weight):
     # fast way of doing: Ymodel[f] = U[f] @ Gss[f].T
     Ymodel = np.einsum('ij,ilj->il',U,Gss)
     V = Ymodel - Y
-    if weight is not None:
+    if weight is not False:
         V = V.ravel(order='F')
     else:
         # TODO order='F' ?
@@ -668,7 +668,7 @@ def output_costfcn(x0,A,C,n,m,p,freq,U,Y,weight):
 
     return np.hstack((V.real, V.imag))
 
-def jacobian(x0, system, weight=None):
+def jacobian(x0, system, weight=False):
 
     n, m, p, npar = system.n, system.m, system.p, system.npar
     F = len(system.z)
@@ -683,7 +683,7 @@ def jacobian(x0, system, weight=None):
     tmp[...,n**2 + n*m + n*p:] = JD
     tmp.shape = (F,m*p,npar)
 
-    if weight is not None:
+    if weight is not False:
         tmp = mmul_weight(tmp, weight)
     tmp.shape = (F*p*m,npar)
 
@@ -693,7 +693,7 @@ def jacobian(x0, system, weight=None):
 
     return jac
 
-def costfcn(x0, system, weight=None):
+def costfcn(x0, system, weight=False):
     """Compute the error vector of the FRF, such that the function to mimimize is
 
     res = ∑ₖ e[k]ᴴ*e[k], where the error is given by
@@ -707,7 +707,7 @@ def costfcn(x0, system, weight=None):
     # frf of the state space model
     Gss = ss2frf(A,B,C,D,system.signal.norm_freq)
     err = Gss - system.signal.G
-    if weight is not None:
+    if weight is not False:
         err = mmul_weight(err, weight)
     err_w = np.hstack((err.real.ravel(), err.imag.ravel()))
 

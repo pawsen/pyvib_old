@@ -115,7 +115,7 @@ pnlss1.nlterms('y', [2,3], 'empty')
 pnlss1.transient(T1)
 
 pnlss2= deepcopy(pnlss1)
-pnlss1.optimize(weight=None, nmax=100)
+pnlss1.optimize(weight=False, nmax=100)
 pnlss2.optimize(weight=True, nmax=100)
 
 # add two transient period
