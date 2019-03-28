@@ -282,8 +282,11 @@ def lm(fun, x0, jac, info=2, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
     nfev = 1
     status = None
     message = ''
-    cost_vec = np.empty(nmax)
-    x0_mat = np.empty((nmax, len(x0)))
+    cost_vec = np.empty(nmax+1)
+    x0_mat = np.empty((nmax+1, len(x0)))
+    # save initial guess
+    x0_mat[0] = x0.copy()
+    cost_vec[0] = cost.copy()
 
     if info == 2:
         print(f"{'i':3} | {'inner':5} | {'cost':12} | {'cond':12} |"
@@ -352,13 +355,13 @@ def lm(fun, x0, jac, info=2, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
             print(f"{niter:3d} | {ninner:5d} | {cost:12.8g} | {jac_cond:12.3f}"
                   f" | {lamb:6.3f}")
 
-        if cost < cost_old:
+        if cost < cost_old or stop:
             cost_old = cost
             err_old = err
             x0 = x0test
             # save intermediate models
-            x0_mat[niter] = x0.copy()
-            cost_vec[niter] = cost.copy()
+            x0_mat[niter+1] = x0.copy()
+            cost_vec[niter+1] = cost.copy()
 
         niter += 1
         nfev += ninner
@@ -372,6 +375,6 @@ def lm(fun, x0, jac, info=2, nmax=50, lamb=None, ftol=1e-8, xtol=1e-8,
               f"final cost {cost:.4e}")
 
     res = {'x':x0, 'cost': cost, 'fun':err, 'niter': niter, 'x_mat':
-           x0_mat[:niter-1], 'cost_vec':cost_vec[niter-1], 'message':message,
+           x0_mat[:niter], 'cost_vec':cost_vec[niter], 'message':message,
            'success':status > 0, 'nfev':nfev, 'njev':niter, 'status':status}
     return res
