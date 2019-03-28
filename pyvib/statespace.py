@@ -333,17 +333,12 @@ class NonlinearStateSpace(StateSpace):
     def extract(self, x0):
         """Extract state space from from flattened array"""
         n, m, p = self.n, self.m, self.p
-        # n_nx, n_ny = self.n_nx, self.n_ny
         # index of active elements
         xact = self.xactive
         yact = self.yactive
         ne = len(xact)
         nf = len(yact)
 
-        # if E and F are initialized as zero, then non-zero non-active elements
-        # unintentional get set to zero
-        # E = np.zeros((n, n_nx))
-        # F = np.zeros((p, n_ny))
         E = self.E
         F = self.F
         A = x0.flat[:n**2].reshape((n,n))
@@ -356,13 +351,10 @@ class NonlinearStateSpace(StateSpace):
 
     def flatten(self):
         """Returns the state space as flattened array"""
-        # index of active elements
         xact = self.xactive
         yact = self.yactive
         ne = len(xact)
         nf = len(yact)
-
-        # samples per period
         n, m, p = self.n, self.m, self.p
         npar = n**2 + n*m + p*n + p*m + ne + nf
 

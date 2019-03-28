@@ -102,6 +102,10 @@ yval = y[:,:,-2,-1]
 # all other realizations are used for estimation
 uest = u[...,:-2,:]
 yest = y[...,:-2,:]
+# noise estimate over periods. This sets the performace limit for the estimated
+# model
+covY = covariance(yest)
+Pest = yest.shape[-1]
 
 # create signal object
 sig = Signal(uest,yest,fs=fs)
@@ -136,7 +140,7 @@ model = PNLSS(linmodel)
 model.nlterms('x', [2,3], 'full')
 model.nlterms('y', [2,3], 'full')
 model.transient(T1)
-model.optimize(lamb=100, weight=weight, nmax=100)
+model.optimize(lamb=100, weight=weight, nmax=60)
 
 # get best model on validation data. Change Transient settings, as there is
 # only one realization
@@ -157,17 +161,13 @@ rms = lambda y: np.sqrt(np.mean(y**2, axis=0))
 est_err = np.hstack((ym, (ym.T - est).T))
 val_err = np.hstack((yval, (yval.T - val).T))
 test_err = np.hstack((ytest, (ytest.T - test).T))
+noise = np.abs(np.sqrt(Pest*covY.squeeze()))
 print(f"err for models {descrip}")
-print(f'rms error noise: {np.sqrt(Pest*covY.squeeze())}')
+print(f'rms error noise: {rms(noise)}\tdb: {db(rms(noise))} ')
 print(f'rms error est:\n    {rms(est_err[:,1:])}\ndb: {db(rms(est_err[:,1:]))}')
 print(f'rms error val:\n    {rms(val_err[:,1:])}\ndb: {db(rms(val_err[:,1:]))}')
 print(f'rms error test:\n    {rms(test_err[:,1:])}\ndb: {db(rms(test_err[:,1:]))}')
 
-
-# noise estimate over periods. This sets the performace limit for the estimated
-# model
-covY = covariance(yest)
-Pest = yest.shape[-1]
 
 ## Plots ##
 # store figure handle for saving the figures later
