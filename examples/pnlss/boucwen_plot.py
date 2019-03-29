@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import argparse
 from copy import deepcopy
 import pickle
 
@@ -12,9 +11,8 @@ from scipy.linalg import norm
 
 from pyvib.common import db
 from pyvib.frf import covariance
-from pyvib.pnlss import PNLSS
 from pyvib.signal import Signal
-from pyvib.subspace import Subspace
+from pyvib.pnlss import PNLSS
 
 """PNLSS model of BoucWen system with hysteresis acting as a dynamic
 nonlinearity. The input-output data is synthetic.
@@ -32,15 +30,6 @@ From the paper by J.P. Noel: https://arxiv.org/pdf/1610.09138.pdf
 
 See http://www.nonlinearbenchmark.org/#BoucWen
 """
-def parse_cli(args):
-    nlterms = {}
-    for pair in args.nlterms:
-        k, v = pair.split('=')
-        if k not in nlterms:
-            nlterms[k] = []
-        nls = list(map(int, v.split(',')))
-        nlterms[k].append(nls)
-    return nlterms
 
 
 # default values. Can be changed when running the script from CLI
@@ -48,22 +37,34 @@ savefig = True
 savedata = True
 weight = False  # Unit weight as specified in JP. article
 
-# default. All models
-nlterms = {'x':[[2], [2,3], [2,3,4], [2,3,4,5], [2,3,4,5,6], [2,3,4,5,6,7],
-                [3,5,7]]}
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--weight", "-w", dest='weight', default=False,
-                        action='store_true', help="set nonlinear weight")
-    parser.add_argument("--nlterms", "-n", dest='nlterms',nargs='*',
-                        help="set nonlinear weight")
-    args = parser.parse_args()
-    print(f'boucwen called with {args}')
-    if args.nlterms is not None:
-        nlterms = parse_cli(args)
-    weight = args.weight
+# different model to load
+nlterms = [[2], [2,3], [2,3,4], [2,3,4,5], [2,3,4,5,6], [2,3,4,5,6,7],
+                [3,5,7]]
+
+def load(desc, weight=False):
+    fname = f'boucwen_W_{weight}_model_{desc}.pkl'
+    with open(fname,'rb') as f:
+        data = pickle.load(f)
+    return data['linmodel'], data['model'], data['errvec'], data['desc']
 
 
+models = []
+descrip = []
+opt_path = []
+for nl in nlterms:
+    try:
+        desc = str(nl).replace(" ","").replace("]","").replace("[","")
+        linmodel, model, errvec, desc = load(desc, weight)
+        models.append(model)
+        opt_path.append(errvec)
+        descrip.append(desc)
+    except FileNotFoundError:
+        pass  # data file does not exist
+
+models.insert(0, linmodel)
+descrip.insert(0, 'linmodel')
+
+# load data
 data = sio.loadmat('data/BoucWenData.mat')
 # partition the data
 uval = data['uval_multisine'].T
@@ -76,71 +77,20 @@ lines = data['lines'].squeeze()  # lines already are 0-indexed
 fs = data['fs'].item()
 nfreq = len(lines)
 npp, m, R, P = uest.shape
+sig = Signal(uest,yest,fs=fs)
+um, ym = sig.average()
 
 # noise estimate over estimation periods
 covY = covariance(yest)
 Pest = yest.shape[-1]
 
-# model orders and Subspace dimensioning parameter
-nvec = [2,3,4]
-maxr = 7
-
-sig = Signal(uest,yest,fs=fs)
-sig.lines = lines
-sig.bla()
-# average signal over periods. Used for estimation of PNLSS model
-um, ym = sig.average()
-
-linmodel = Subspace(sig)
-models, infodict = linmodel.scan(nvec, maxr, nmax=50, weight=True)
-# set model manual, as in matlab program
-# linmodel.extract_model()
-linmodel.estimate(n=3,r=4)
 print(f'linear model: n,r:{linmodel.n},{linmodel.r}.')
 print(f'Weighted Cost/nfreq: {linmodel.cost(weight=True)/nfreq}')
 
-## estimate PNLSS ##
-# transient: Add one period before the start of each realization of the
-# averaged signal used for estimation
+# transient for estimate data
 T1 = np.r_[npp, np.r_[0:(R-1)*npp+1:npp]]
-
-# set common properties for PNLSS
-pnlss = PNLSS(linmodel)
-pnlss.transient(T1)
-
-# initialize pnlss models specified by cli or default nlterms
-models = [linmodel]
-descrip = ['linmodel']
-for k, value in nlterms.items():
-    if not isinstance(value[0], list):
-        value = [value]
-
-    for v in value:
-        model = deepcopy(pnlss)
-        model.nlterms(k, v,'statesonly')
-        models.append(model)
-        # strip some unnecessary chars from the description
-        # see more ways https://stackoverflow.com/q/3939361/1121523
-        descrip.append(str(v).replace(" ","").replace("]","").replace("[",""))
-
-opt_path = []
-for desc, model in zip(descrip[1:], models[1:]):
-    print(f"Optimizing xdegree: {str(model.xdegree)}")
-    model.optimize(weight=weight, nmax=150)
-
-    # get best model on validation data. Change Transient settings, as there is
-    # only one realization
-    nl_errvec = model.extract_model(yval, uval, T1=npp)
-    opt_path.append(nl_errvec)
-    if savedata:
-        with open(f'boucwen_W_{weight}_model_{desc}.pkl', 'bw') as f:
-            pickler = pickle.Pickler(f)
-            data = {'linmodel': linmodel, 'model':model, 'errvec':nl_errvec,
-                    'desc':desc}
-            pickler.dump(data)
-
-# add one transient period
 Ptr2 = 1
+
 # simulation error
 # estimation simulation is done on final model, not model extracted on val data
 est = np.empty((len(models),len(um)))
@@ -168,12 +118,12 @@ print(f'rms error val:\n    {rms(val_err[:,1:])}\ndb: {db(rms(val_err[:,1:]))}')
 print(f'rms error test:\n    {rms(test_err[:,1:])}\ndb: {db(rms(test_err[:,1:]))}')
 
 if savedata:
-    fname = 'boucwen_lin.out'
+    fname = 'boucwen_lin.pkl'
     if len(models) > 1:
-        fname = f'boucwen_W_{weight}_model_{descrip[1:]}.pkl'
-    with open(fname, 'bw') as f:
+        fname = f'boucwen_W_{weight}_full.pkl'
+    with open(fname, 'wb') as f:
         pickler = pickle.Pickler(f)
-        data = {'linmodel':linmodel, 'models':models, 'opt_path':opt_path,
+        data = {'models':models, 'opt_path':opt_path,
                 'est_err':est_err, 'val_err':val_err, 'test_err':test_err,
                 'descrip':descrip}
         pickler.dump(data)
@@ -250,6 +200,6 @@ if savefig:
         fig = fig if isinstance(fig, list) else [fig]
         for i, f in enumerate(fig):
             f[0].tight_layout()
-            f[0].savefig(f"boucwen_{k}{i}_W_{weight}_model_{descrip[1:]}.pdf")
+            f[0].savefig(f"boucwen_{k}{i}.pdf")
 
 plt.show()

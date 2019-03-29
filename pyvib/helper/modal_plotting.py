@@ -13,6 +13,7 @@ class scaler():
 
     def ratio(self):
         return self.scale
+
     def label(self):
         if self.scale == 1:
             xstr = '(Hz)'
@@ -150,7 +151,7 @@ def plot_frf(freq, G, p=0, m=0, sca=1, fig=None, ax=None, *args, **kwargs):
     return fig, ax
 
 def plot_subspace_info(infodict, fig=None, ax=None, *args, **kwargs):
-    """Plot summary of subspace identification"""
+    """Plot summary of subspace identification normalized by len(flines)"""
     fig, ax = fig_ax_getter(fig, ax)
     for k,v in infodict.items():
         r = np.fromiter(v.keys(), dtype=int)
@@ -169,15 +170,14 @@ def plot_subspace_info(infodict, fig=None, ax=None, *args, **kwargs):
                  'subspace models (dots, stabilized models encircled in black)\n'
                  'LM-optimized models (stars, unstable models encircled in black)')
     ax.set_xlabel('r')
-    ax.set_ylabel(r'$V_{WLS}$')
+    ax.set_ylabel(r'$Normalized V_{WLS}$')
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.legend(loc='center right')
 
     return fig, ax
 
-def plot_subspace_model(models, G, covG, freq, fs, *args, **kwargs):
+def plot_subspace_model(models, G, covG, norm_freq, fs, *args, **kwargs):
     """Plot identified subspace models"""
-
     dictget = lambda d, *k: [d[i] for i in k]
     F, m, p = G.shape
 
@@ -196,16 +196,16 @@ def plot_subspace_model(models, G, covG, freq, fs, *args, **kwargs):
     for k, model in models.items():
         fig, ax = plt.subplots(nrows=1, ncols=1)
         A, B, C, D = dictget(model, 'A', 'B', 'C', 'D')
-        Gss = ss2frf(A,B,C,D,freq/fs)
+        Gss = ss2frf(A,B,C,D,norm_freq)
 
         lsopt = {'ls':'none', 'marker':'.', 'mfc':'none'}
         figopt = {'fig':fig, 'ax':ax}
         # The CN notation allows to get the Nth color of the color cycle
-        plot_frf(freq, G, **figopt, **lsopt, c='C1', label='BLA (non-par)')
-        plot_frf(freq, Gss, **figopt, ls='-', c='C0', label='BLA (par)')
-        plot_frf(freq, G-Gss, **figopt, **lsopt, c='r', label='error')
+        plot_frf(norm_freq*fs, G, **figopt, **lsopt, c='C1', label='BLA (non-par)')
+        plot_frf(norm_freq*fs, Gss, **figopt, ls='-', c='C0', label='BLA (par)')
+        plot_frf(norm_freq*fs, G-Gss, **figopt, **lsopt, c='r', label='error')
         if stdG is not None:
-            plot_frf(freq, stdG, **figopt, ls='--', c='k', label='stdG')
+            plot_frf(norm_freq*fs, stdG, **figopt, ls='--', c='k', label='stdG')
 
         ax.legend(loc='upper right')
         tstr = ax.get_title() + f" | n={k}"
@@ -216,7 +216,6 @@ def plot_subspace_model(models, G, covG, freq, fs, *args, **kwargs):
 
 def plot_svg(Sn, fig=None, ax=None, **kwargs):
     """Plot singular values of Sn. Alternative to stabilization diagram"""
-
     fig, ax = fig_ax_getter(fig, ax)
     ax.semilogy(Sn/np.sum(Sn),'sk', markersize=6)
     ax.set_xlabel('Model order')
