@@ -16,7 +16,7 @@ from pyvib.frf import covariance, periodic
 from pyvib.helper.modal_plotting import plot_frf, plot_knl, plot_svg
 from pyvib.modal import frf_mkc, modal_ac
 from pyvib.signal import Signal
-
+from pyvib.subspace import Subspace
 
 """FNSI model of the silverbox system.
 
@@ -52,6 +52,8 @@ RMS of validation data
 
 """
 
+savedata = True
+
 def load(var, amp, fnsi=True):
     fnsi = 'FNSI_' if fnsi else ''
     path = 'data/'
@@ -63,15 +65,11 @@ def load(var, amp, fnsi=True):
     else:
         return data['ym']
 
-# save figures to disk
-savefig = True
-savedata = True
-
 # estimation data.
 # 1 realization, 30 periods of 8192 samples. 5 discarded as transient (Ptr)
 amp = 100
 u, fs, lines, P = load('u',amp)
-lines = lines[1:] - 1
+lines = lines - 1
 y = load('y',amp)
 
 NT, R = u.shape
@@ -82,28 +80,36 @@ m = 1
 p = 1
 
 # partitioning the data
-u = u.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:-1]
-y = y.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:-1]
+u = u.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:]
+y = y.reshape(npp,P,R,order='F').swapaxes(1,2)[:,None,:,Ptr:]
 # FNSI can only use one realization
 uest = u[:,:,0,:]
 yest = y[:,:,0,:]
 Pest = yest.shape[-1]
+# noise estimate over Pest periods
+covY = covariance(yest[:,:,None])
 
 # Validation data. 50 different realizations of 3 periods. Use the last
 # realization and last period
-uval_raw, _, _, Puval = load('u', 100, fnsi=False)
+uval_raw, _, _, Pval = load('u', 100, fnsi=False)
 yval_raw = load('y', 100, fnsi=False)
-uval_raw = uval_raw.reshape(npp,Puval,50,order='F').swapaxes(1,2)[:,None]
-yval_raw = yval_raw.reshape(npp,Puval,50,order='F').swapaxes(1,2)[:,None]
+uval_raw = uval_raw.reshape(npp,Pval,50,order='F').swapaxes(1,2)[:,None]
+yval_raw = yval_raw.reshape(npp,Pval,50,order='F').swapaxes(1,2)[:,None]
 uval = uval_raw[:,:,-1,-1]
 yval = yval_raw[:,:,-1,-1]
 utest = uval_raw[:,:,1,-1]
 ytest = yval_raw[:,:,1,-1]
+Rval = uval_raw.shape[2]
 
 sig = Signal(uest,yest, fs=fs)
 sig.lines = lines
 um, ym = sig.average()
 # sig.periodicity()
+
+# for subspace model (from BLA)
+sig2 = Signal(uest[:,:,None],yest[:,:,None], fs=fs)
+sig2.lines = lines
+sig2.bla()
 
 # model orders and Subspace dimensioning parameter
 n = 2
@@ -111,6 +117,14 @@ maxr = 20
 dof = 0
 iu = 0
 xpowers = np.array([[2],[3]])
+
+# subspace model
+lin1 = Subspace(sig2)
+# models, infodict = linmodel.scan(n, maxr, weight=False)
+# ensure we use same dimension as for the fnsi model
+lin1.estimate(n,maxr)
+lin2 = deepcopy(lin1)
+lin2.optimize(weight=False)
 
 # Linear model
 fnsi1 = FNSI(sig)
@@ -122,114 +136,60 @@ fnsi2 = FNSI(sig)
 fnsi2.nlterms('state',xpowers)
 fnsi2.estimate(n,maxr)
 fnsi2.nl_coeff(iu)
+fnsi2.transient(T1=npp)
 
 # optimized models
 fnsi3 = deepcopy(fnsi2)
 fnsi4 = deepcopy(fnsi2)  # freq. weighted model
-weights = (None, True)
+weights = (False, True)
 for w, model in zip(weights,[fnsi3, fnsi4]):
-    model.transient(T1=npp)
-    model.optimize(weight=w, nmax=50, xtol=1e-16, ftol=1e-16, gtol=1e-16)
+    model.optimize(weight=w, nmax=50, xtol=1e-20, ftol=1e-20, gtol=1e-20)
     model.nl_coeff(iu)
 
-# select best model on validation data
-errvec3 = fnsi3.extract_model(yval, uval, T1=npp)
-errvec4 = fnsi4.extract_model(yval, uval, T1=npp)
+models = [lin1, lin2, fnsi1, fnsi2, fnsi3, fnsi4]
+descrip = ('subspace', 'subspace opt', 'fnsi linear','fnsi init',
+           'fnsi opt', 'fnsi weight')
 
-models = [fnsi1, fnsi2, fnsi3, fnsi4]
-descrip = ('linear','fnsi init','fnsi optim', 'fnsi weight')
-sca = 1
-def print_modal(model):
-    # calculate modal parameters
-    modal = model.modal
-    natfreq = modal['wn']
-    dampfreq = modal['wd']
-    damping = modal['zeta']
-    nw = min(len(natfreq), 8)
-    print('Undamped ω: {}'.format(natfreq[:nw]*sca))
-    print('damped ω: {}'.format(dampfreq[:nw]*sca))
-    print('damping: {}'.format(damping[:nw]))
-
-for model, string in zip(models, descrip):
-    print(f'### {string} identified at high level ###')
-    print_modal(model)
-    print('# Nonlinear coefficients #')
-    print(model.knl_str)
-
+# find validation error for all models
 # add one transient period
-Ptr2 = 1
-# simulation error
-val = np.empty((len(models),len(uval)))
-est = np.empty((len(models),len(um)))
+Ptr2 = 2
+nmodels = len(models)
+opt_path = [[] for i in range(nmodels)]
+knl = [[] for i in range(nmodels)]
+x0 = [[] for i in range(nmodels)]
+est = np.empty((nmodels,len(um)))
+val_err = np.zeros((nmodels,Rval,len(uval)))
 for i, model in enumerate(models):
-    val[i] = model.simulate(uval, T1=Ptr2*npp)[1].T
-    est[i] = model.simulate(um, T1=Ptr2*npp)[1].T
+    # get est error on best model
+    est[i] = model.simulate(um, T1=npp)[1].T
+    for j in range(Rval):
+        uval = uval_raw[:,:,j,-1]
+        yval = yval_raw[:,:,j,-1]
+        try:
+            # select best model on fresh data (val)
+            nl_errvec = model.extract_model(yval, uval, T1=npp)
+            opt_path[i].append(nl_errvec)
+            knl[i].append(model.nl_coeff(iu)[1])
+        except:
+            pass
+        x0[i].append(model.flatten())
+        val = model.simulate(uval, T1=Ptr2*npp)[1].T
+        val_err[i,j] = (yval.T - val)
 
 rms = lambda y: np.sqrt(np.mean(y**2, axis=0))
+rms2 = lambda y: np.sqrt(np.mean(y**2, axis=2))
+val_rms = rms2(val_err)
 est_err = np.hstack((ym, (ym.T - est).T))
-val_err = np.hstack((yval, (yval.T - val).T))
+noise = np.abs(np.sqrt(Pest*covY.squeeze()))
 print(descrip)
+print(f'rms error noise. db: {db(rms(noise))} ')
 print(f'rms error est:\n    {rms(est_err[:,1:])}\ndb: {db(rms(est_err[:,1:]))}')
-print(f'rms error val:\n    {rms(val_err[:,1:])}\ndb: {db(rms(val_err[:,1:]))}')
-
-# noise estimate over Pest periods
-covY = covariance(yest[:,:,None])
-
-## Plots ##
-# store figure handle for saving the figures later
-figs = {}
-
-plt.ion()
-# result on estimation data
-resamp = 1
-plt.figure()
-plt.plot(est_err)
-plt.xlabel('Time index')
-plt.ylabel('Output (errors)')
-plt.legend(('Output',) + descrip)
-plt.title('Estimation results')
-figs['estimation_error'] = (plt.gcf(), plt.gca())
-
-# result on validation data
-plt.figure()
-N = len(yval)
-freq = np.arange(N)/N*fs
-plottime = val_err
-plotfreq = np.fft.fft(plottime, axis=0)/np.sqrt(N)
-nfd = plotfreq.shape[0]
-plt.plot(freq[lines], db(plotfreq[lines]), '.')
-plt.plot(freq[lines], db(np.sqrt(Pest*covY[lines].squeeze() / N)), '.')
-#plt.xlim((0, 300))
-plt.ylim([-110,10])
-plt.xlabel('Frequency')
-plt.ylabel('Output (errors) (dB)')
-plt.legend(('Output',) + descrip + ('Noise',))
-plt.title('Validation results')
-figs['val_data'] = (plt.gcf(), plt.gca())
-
-# optimization path
-plt.figure()
-for err in [errvec3, errvec4]:
-    plt.plot(db(err))
-    imin = np.argmin(err)
-    plt.scatter(imin, db(err[imin]))
-plt.xlabel('Successful iteration number')
-plt.ylabel('Validation error [dB]')
-plt.title('Selection of the best model on a separate data set')
-figs['fnsi_path'] = (plt.gcf(), plt.gca())
-plt.legend(descrip[2:])
-
-# subspace plots
-#figs['subspace_optim'] = linmodel.plot_info()
-#figs['subspace_models'] = linmodel.plot_models()
-
-if savefig:
-    figs['periodicity'] = sig.periodicity()
-    for k, fig in figs.items():
-        fig = fig if isinstance(fig, list) else [fig]
-        for i, f in enumerate(fig):
-            f[0].tight_layout()
-            f[0].savefig(f"fig/silverbox_jp_fnsi_{k}{i}.pdf")
+print(f'rms error val:\n{val_rms.T}\ndb:\n{db(val_rms.T)}')
+idx = np.argmin(val_rms,axis=1)
+print(f'Minimum db rms {db(val_rms.min(axis=1))}')
+print(f'index {idx}')
 
 if savedata:
-    pickle.dump(models,open('sn_jp_fnsi.pkl', 'bw'))
+    data = {'models':models, 'opt_path':opt_path, 'est_err':est_err,
+            'val_err':val_err, 'descrip':descrip, 'knl': knl, 'x0':x0}
+    pickle.dump(data, open('sn_jp_fnsi.pkl', 'bw'))

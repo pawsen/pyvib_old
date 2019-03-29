@@ -35,7 +35,7 @@ See http://www.nonlinearbenchmark.org/#BoucWen
 # default values. Can be changed when running the script from CLI
 savefig = True
 savedata = True
-weight = False  # Unit weight as specified in JP. article
+weight = True  # Unit weight as specified in JP. article
 
 # different model to load
 nlterms = [[2], [2,3], [2,3,4], [2,3,4,5], [2,3,4,5,6], [2,3,4,5,6,7],
@@ -120,13 +120,17 @@ print(f'rms error test:\n    {rms(test_err[:,1:])}\ndb: {db(rms(test_err[:,1:]))
 if savedata:
     fname = 'boucwen_lin.pkl'
     if len(models) > 1:
-        fname = f'boucwen_W_{weight}_full.pkl'
-    with open(fname, 'wb') as f:
+        fname = f'boucwen_W_{weight}_full'
+    with open(fname + '.pkl', 'wb') as f:
         pickler = pickle.Pickler(f)
         data = {'models':models, 'opt_path':opt_path,
                 'est_err':est_err, 'val_err':val_err, 'test_err':test_err,
                 'descrip':descrip}
         pickler.dump(data)
+    data = np.vstack([rms(est_err[:,1:]), rms(val_err[:,1:]), rms(test_err[:,1:])])
+    data = np.char.mod("%4.2f",db(data)) 
+    data = np.vstack([descrip, data]).T
+    np.savetxt(fname + '.csv', data,fmt='%12s, %s, %s, %s',header='type, est, val, test')
 
 
 ## Plots ##
@@ -193,6 +197,7 @@ figs['pnlss_path'] = (plt.gcf(), plt.gca())
 
 # subspace plots
 figs['subspace_optim'] = linmodel.plot_info()
+figs['subspace_optim'][1].set_ylim((0,5))
 figs['subspace_models'] = linmodel.plot_models()
 
 if savefig:
@@ -200,6 +205,6 @@ if savefig:
         fig = fig if isinstance(fig, list) else [fig]
         for i, f in enumerate(fig):
             f[0].tight_layout()
-            f[0].savefig(f"boucwen_{k}{i}.pdf")
+            f[0].savefig(f"boucwen_W_{weight}_{k}{i}.pdf")
 
 plt.show()

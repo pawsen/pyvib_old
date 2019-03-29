@@ -74,7 +74,7 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         npp = sig.npp
 
         fs = 1/self.dt
-        if fmin and fmax is not None:
+        if fmin is not None and fmax is not None:
             f1 = int(np.floor(fmin/fs * npp))
             f2 = int(np.ceil(fmax/fs * npp))
             self.flines = np.arange(f1,f2+1)
@@ -115,24 +115,25 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
             # concatenate to form extended input spectra matrix
             E = np.hstack((Umean, -FNL))
 
-        self.U = E[self.flines]/np.sqrt(npp)
-        self.Y = Yext[self.flines]/np.sqrt(npp)
-        self.scaling = scaling
+        U = E[self.flines]/np.sqrt(npp)
+        Y = Yext[self.flines]/np.sqrt(npp)
+        scaling = scaling
+        return U, Y, scaling
 
     def estimate(self, n, r, bd_method='explicit', fmin=None, fmax=None,
                  vel=False):
         # form the extended input
-        self.ext_input(fmin=fmin, fmax=fmax, vel=vel)
+        U, Y, scaling = self.ext_input(fmin=fmin, fmax=fmax, vel=vel)
 
         self.r = r
         self.n = n
 
         # normalized frequency [0-0.5]
         freq = self.flines / self.signal.npp
-        covarG = None
+        covG = False
         G = None
         Ad, Bd, Cd, Dd, z, isstable = \
-            subspace(G, covarG, freq, self.n, self.r, self.U, self.Y, bd_method)
+            subspace(G, covG, freq, self.n, self.r, U, Y, bd_method)
 
         # the number of input p, might be different for the data and the model,
         # if velocities are included in the model.
@@ -144,8 +145,8 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         E = np.zeros((n, n_nx))
         F = np.zeros((p, n_nx))
         for i in range(n_nx):
-            E[:,i] = - self.scaling[i]*Bd[:,m+i]
-            F[:,i] = - self.scaling[i]*Dd[:,m+i]
+            E[:,i] = - scaling[i]*Bd[:,m+i]
+            F[:,i] = - scaling[i]*Dd[:,m+i]
 
         self.A = Ad
         self.B = Bd[:,:m]
@@ -185,7 +186,7 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         Bext = np.hstack((self.Bc, -self.Ec))
         Dext = np.hstack((self.D, -self.F))
 
-        freq = np.arange(sig.npp)*sig.fs/sig.npp
+        freq = np.arange(sig.npp)/self.dt/sig.npp
         F = len(flines)
 
         nnl = n_nx
@@ -215,7 +216,6 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
             for j, dof in enumerate(range(p)):
                 G[j,k] = He[dof, 0, k]
 
-        self.G = G
         self.knl = knl
         return G, knl
 
