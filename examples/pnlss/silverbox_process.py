@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import pickle
 from copy import deepcopy
 
@@ -150,13 +153,6 @@ fnsi = load_sim('fnsi')
 pnlss = load_sim('pnlss')
 fnsid = calc_model(fnsi)
 pnlssd = calc_model(pnlss)
-# Rearrange pnlss data because I didn't run pnlss in a good way.
-tmp = pnlssd['val_err']
-pnlssd['val_err'] = np.zeros((4,50,8192))
-pnlssd['val_err'][2:] = tmp
-tmp = pnlssd['idx']
-pnlssd['idx'] = np.zeros((4), dtype=int)
-pnlssd['idx'][2:] = tmp
 
 model = merge_models(fnsid,pnlssd)
 print_model(model)
@@ -164,11 +160,12 @@ print_modal(model)
 
 figs = {}
 plt.ion()
-def opt_path(data, descrip=''):
+def opt_path(*data, descrip='', samefig=False):
     # optimization path
-    plt.figure()
+    if not samefig:
+        plt.figure()
     data = data if isinstance(data[0], list) else [data]
-    for j, errs in enumerate(zip(*data)):
+    for j, errs in enumerate(data):
         for err in (errs):
             plt.plot(db(err))
             imin = np.argmin(err)
@@ -180,17 +177,18 @@ def opt_path(data, descrip=''):
     figs[f'{descrip}_path'] = (plt.gcf(), plt.gca())
 
 
-opt_path(pnlssd['opt_path'][0], descrip='pnlss')
-#opt_path(fnsid['opt_path'][0], descrip='fnsi')
-opt_path(fnsid['opt_path'][1], descrip='fnsi') # 'fnsi_weight')
+opt_path([pnlssd['opt_path'][2][i] for i in [pnlssd['idx'][2]]])
+opt_path([pnlssd['opt_path'][3][i] for i in [pnlssd['idx'][3]]], samefig=True)
+opt_path([fnsid['opt_path'][4][i] for i in [fnsid['idx'][4]]], samefig=True)
+opt_path([fnsid['opt_path'][5][i] for i in [fnsid['idx'][5]]], samefig=True)
+plt.legend(('pnlss','pnlss weight','fnsi','fnsi weight'))
 
 # extract relevant val error. So we don't pollute plot with unneeded data
 data = []
 descrip = []
-extract_val_err(fnsid,[0,1,2,5])
+extract_val_err(fnsid,[0,1,2,4,5])
 extract_val_err(pnlssd, [2])
 data = np.array(data)
-descrip[3] = 'fnsi'
 
 yval = yval_raw[:,:,40,-1]
 plt.figure()
@@ -209,15 +207,15 @@ plt.title(f'Validation results')
 figs[f'val_data'] = (plt.gcf(), plt.gca())
 
 
-# result on estimation data
-resamp = 1
-plt.figure()
-plt.plot(est_err)
-plt.xlabel('Time index')
-plt.ylabel('Output (errors)')
-plt.legend(('Output',) + descrip)
-plt.title('Estimation results')
-figs['estimation_error'] = (plt.gcf(), plt.gca())
+# # result on estimation data
+# resamp = 1
+# plt.figure()
+# plt.plot(est_err)
+# plt.xlabel('Time index')
+# plt.ylabel('Output (errors)')
+# plt.legend(('Output',) + descrip)
+# plt.title('Estimation results')
+# figs['estimation_error'] = (plt.gcf(), plt.gca())
 
 
 if savefig:

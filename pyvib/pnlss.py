@@ -18,10 +18,17 @@ linear state space systems.
 class PNLSS(NonlinearStateSpace, StateSpaceIdent):
     def __init__(self, *system, **kwargs):
         if len(system) == 1:  # and isinstance(system[0], StateSpace):
+            sys = system
             self.signal = system[0].signal
             kwargs['dt'] = 1/self.signal.fs
+        elif len(system) == 2:
+            sys = system[0]
+            self.signal = system[1]
+            kwargs['dt'] = 1/self.signal.fs
+        else:
+            sys = system
 
-        super().__init__(*system, **kwargs)
+        super().__init__(*sys, **kwargs)
         self.xpowers = np.empty(shape=(0,self.m+self.n))
         self.ypowers = np.empty(shape=(0,self.m+self.n))
         self.xactive = np.array([], dtype=int)

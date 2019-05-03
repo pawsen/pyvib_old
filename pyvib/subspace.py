@@ -422,7 +422,7 @@ def subspace(G, covG, freq, n, r, U=None, Y=None, bd_method='nr',
     Z[(r+expl)*m:,F*_m:] = Gmat.imag
 
     # 1.f. Calculate CY from σ²_G
-    if covG is False:
+    if covG is False or covG is None:
         CY = np.eye(p*r)
         # covG = np.tile(np.eye(p*m), (F,1,1))
     else:
@@ -458,6 +458,10 @@ def subspace(G, covG, freq, n, r, U=None, Y=None, bd_method='nr',
         # in case we want to calculate A, C for different n's
         return sqrtCY, Un, sn
 
+    if n == 0:
+        # Offer possibility to choose model order
+        n = int(input('Input model size'))
+
     # 1.i. Estimate extended observability matrix
     Or = sqrtCY @ Un[:,:n]  # @ np.diag(np.sqrt(sn[:n]))
 
@@ -473,7 +477,7 @@ def subspace(G, covG, freq, n, r, U=None, Y=None, bd_method='nr',
     # 3. Estimate B and D given A,C and H: (W)LS estimate
     # Compute weight, W = sqrt(σ²_G^-1)
     weight = False
-    if covG is not False:
+    if covG is not False and covG is not None:
         weight = np.zeros_like(covG)  # .transpose((2,0,1))
         for f in range(F):
             weight[f] = matrix_square_inv(covG[f])

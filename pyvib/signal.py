@@ -91,7 +91,7 @@ class Signal():
             pass
         if self._ydm is None:
             ydm = self._yd.mean(axis=-1)
-            self._ydm = ydm.swapaxes(1,2).reshape(-1,self.m, order='F')
+            self._ydm = ydm.swapaxes(1,2).reshape(-1,self.p, order='F')
         return self._ydm  # (npp*R,m)
 
     def periodicity(self, dof=0, R=0, P=None, n=1, fig=None, ax=None, **kwargs):

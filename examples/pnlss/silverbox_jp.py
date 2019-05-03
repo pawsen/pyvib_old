@@ -154,7 +154,7 @@ print(f'rms error noise. db: {db(rms(noise))} ')
 print(f'rms error est:\n    {rms(est_err[:,1:])}\ndb: {db(rms(est_err[:,1:]))}')
 print(f'rms error val:\n{val_rms.T}\ndb:\n{db(val_rms.T)}')
 idx = np.argmin(val_rms,axis=1)
-print(f'Minimum db rms {val_rms.min(axis=1)}')
+print(f'Minimum db rms {db(val_rms.min(axis=1))}')
 print(f'index {idx}')
 
 if savedata:

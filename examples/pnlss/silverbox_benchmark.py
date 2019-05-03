@@ -111,27 +111,32 @@ T1 = np.r_[2*npp, np.r_[0:(R-1)*npp+1:npp]]
 
 pnlss1 = PNLSS(linmodel2)
 pnlss1.nlterms('x', [2,3], 'full')
-pnlss1.nlterms('y', [2,3], 'empty')
+# pnlss1.nlterms('y', [2,3], 'empty')
 pnlss1.transient(T1)
 
+covY = np.ones((round(npp//2),1,1))
 pnlss2= deepcopy(pnlss1)
-pnlss1.optimize(weight=False, nmax=100)
-pnlss2.optimize(weight=True, nmax=100)
-
-# add two transient period
-Ptr2 = 2
-errvec1 = pnlss1.extract_model(yval, uval, T1=Ptr2*npp)
-errvec2 = pnlss2.extract_model(yval, uval, T1=Ptr2*npp)
-
+pnlss1.optimize(weight=False, nmax=50)
+pnlss2.optimize(weight=covY, nmax=50)
 models = [linmodel, linmodel2, pnlss1, pnlss2]
 descrip = ('Subspace','Subspace opt','pnlss','pnlss weight')
+nmodels = len(models)
 
 # simulation error
 est = np.empty((len(models),len(um)))
 val = np.empty((len(models),len(uval)))
 test = np.empty((len(models),len(utest)))
+
+# add two transient period
+Ptr2 = 2
+opt_path = [[] for i in range(nmodels)]
 for i, model in enumerate(models):
     est[i] = model.simulate(um, T1=Ptr2*npp)[1].T
+    try:
+        nl_errvec = model.extract_model(yval, uval, T1=Ptr2*npp)
+        opt_path[i].append(nl_errvec)
+    except:
+        pass
     val[i] = model.simulate(uval, T1=Ptr2*npp)[1].T
     test[i] = model.simulate(utest, T1=0)[1].T
 
@@ -142,14 +147,19 @@ rms = lambda y: np.sqrt(np.mean(y**2, axis=0))
 est_err = np.hstack((ym, (ym.T - est).T))
 val_err = np.hstack((yval, (yval.T - val).T))
 test_err = np.hstack((ytest, (ytest.T - test).T))
+noise = np.abs(np.sqrt(Pest*covY.squeeze()))
 
 print(descrip)
 print(f'rms error est:\n    {rms(est_err[:,1:])}\ndb: {db(rms(est_err[:,1:]))}')
 print(f'rms error val:\n    {rms(val_err[:,1:])}\ndb: {db(rms(val_err[:,1:]))}')
 print(f'rms error test:\n    {rms(test_err[:,1:])}\ndb: {db(rms(test_err[:,1:]))}')
 
-# noise estimate over estimation periods
-covY = covariance(yest)
+if savedata:
+    data = {'models':models, 'opt_path':opt_path, 'est_err':est_err,
+            'val_err':val_err, 'test_err':test_err, 'descrip':descrip}
+    pickle.dump(data, open('sn_benchmark_pnlss.pkl', 'bw'))
+
+
 
 ## Plots ##
 # store figure handle for saving the figures later
@@ -175,7 +185,6 @@ freq = np.arange(N)/N*fs
 plotfreq = np.fft.fft(plottime, axis=0)/np.sqrt(N)
 nfd = plotfreq.shape[0]
 plt.plot(freq[1:nfd//2:resamp], db(plotfreq[1:nfd//2:resamp]), '.')
-plt.plot(freq[1:nfd//2:resamp], db(np.sqrt(Pest*covY[1:nfd//2:resamp].squeeze() / N)), '.')
 #plt.ylim([-110,10])
 plt.xlim((0, 300))
 plt.xlabel('Frequency')
@@ -193,7 +202,6 @@ freq = np.arange(N)/N*fs
 plotfreq = np.fft.fft(plottime, axis=0)/np.sqrt(N)
 nfd = plotfreq.shape[0]
 plt.plot(freq[1:nfd//2:resamp], db(plotfreq[1:nfd//2:resamp]), '.')
-plt.plot(freq[1:nfd//2:resamp], db(np.sqrt(Pest*covY[1:nfd//2:resamp].squeeze() / N)), '.')
 #plt.ylim([-110,10])
 plt.xlim((0, 300))
 plt.xlabel('Frequency')
@@ -204,7 +212,7 @@ figs['test_data'] = (plt.gcf(), plt.gca())
 
 # optimization path for PNLSS
 plt.figure()
-for err in [errvec1, errvec2]:
+for err in [opt_path[2], opt_path[3]]:
     plt.plot(db(err))
     imin = np.argmin(err)
     plt.scatter(imin, db(err[imin]))
@@ -224,8 +232,3 @@ if savefig:
         for i, f in enumerate(fig):
             f[0].tight_layout()
             f[0].savefig(f"fig/SNbenchmark_{k}{i}.pdf")
-
-if savedata:
-    with open('sn_benchmark_pnlss.pkl', 'bw') as f:
-        pickler = pickle.Pickler(f)
-        pickler.dump(models)

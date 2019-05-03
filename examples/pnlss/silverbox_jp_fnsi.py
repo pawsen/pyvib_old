@@ -138,17 +138,19 @@ fnsi2.estimate(n,maxr)
 fnsi2.nl_coeff(iu)
 fnsi2.transient(T1=npp)
 
+covY = np.ones((round(npp//2),1,1))
 # optimized models
 fnsi3 = deepcopy(fnsi2)
 fnsi4 = deepcopy(fnsi2)  # freq. weighted model
-weights = (False, True)
-for w, model in zip(weights,[fnsi3, fnsi4]):
+fnsi5 = deepcopy(fnsi2)  # freq. weighted model
+weights = (False, True, covY)
+for w, model in zip(weights,[fnsi3, fnsi4, fnsi5]):
     model.optimize(weight=w, nmax=50, xtol=1e-20, ftol=1e-20, gtol=1e-20)
     model.nl_coeff(iu)
 
-models = [lin1, lin2, fnsi1, fnsi2, fnsi3, fnsi4]
+models = [lin1, lin2, fnsi1, fnsi2, fnsi3, fnsi4, fnsi5]
 descrip = ('subspace', 'subspace opt', 'fnsi linear','fnsi init',
-           'fnsi opt', 'fnsi weight')
+           'fnsi opt', 'fnsi weight', 'fnsi unit')
 
 # find validation error for all models
 # add one transient period
@@ -186,6 +188,7 @@ print(f'rms error noise. db: {db(rms(noise))} ')
 print(f'rms error est:\n    {rms(est_err[:,1:])}\ndb: {db(rms(est_err[:,1:]))}')
 print(f'rms error val:\n{val_rms.T}\ndb:\n{db(val_rms.T)}')
 idx = np.argmin(val_rms,axis=1)
+print(descrip)
 print(f'Minimum db rms {db(val_rms.min(axis=1))}')
 print(f'index {idx}')
 

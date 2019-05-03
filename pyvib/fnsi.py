@@ -19,6 +19,7 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         kwargs['dt'] = 1/signal.fs
         super().__init__(*system, **kwargs)
 
+        # actually these should be reintialized after SS matrices are estimated
         self.xpowers = np.empty(shape=(0,self.m+self.n))
         self.ypowers = np.empty(shape=(0,self.m+self.n))
         self.xactive = np.array([],dtype=int)
@@ -154,6 +155,8 @@ class FNSI(NonlinearStateSpace, StateSpaceIdent):
         self.D = Dd[:,:m]
         self.E = E
         self.F = F
+        if vel is True and self.xpowers.size == 0:
+            self.xpowers = np.empty(shape=(0,self.p))
         self.xactive = np.arange(E.size)
         self.yactive = np.arange(0)  # F.size)
 
@@ -319,7 +322,7 @@ def jacobian(x0, system, weight=False):
     nfd = npp//2
     # total number of points
     N = R*npp  # system.signal.um.shape[0]
-    without_T2 = system.without_T2
+    # without_T2 = system.without_T2
 
     A, B, C, D, E, F = system.extract(x0)
 
@@ -363,7 +366,7 @@ def jacobian(x0, system, weight=False):
     else:
         JF = np.array([]).reshape(p*N,0)
 
-    jac = np.hstack((JA, JB, JC, JD, JE, JF))[without_T2]
+    jac = np.hstack((JA, JB, JC, JD, JE, JF))  # [without_T2]
     npar = jac.shape[1]
 
     # add frequency weighting

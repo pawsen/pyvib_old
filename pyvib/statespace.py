@@ -39,7 +39,8 @@ class StateSpace():
         self.dt = dt
         if len(system) == 1:  # TODO fix and isinstance(system[0], StateSpace):
             sys = system[0]
-            sys = sys.A, sys.B, sys.C, sys.D
+            if isinstance(sys, StateSpace):
+                sys = sys.A, sys.B, sys.C, sys.D
 
         if len(sys) == 4:
             self.A, self.B, self.C, self.D = abcd_normalize(*sys)
@@ -174,8 +175,10 @@ class StateSpace():
             self.idx_trans = np.s_[:ns]
             self.idx_remtrans = np.s_[:ns]
 
-        # without_T2 = remove_transient_indices_nonperiodic(system.T2,N,system.p)
-        self.without_T2 = np.s_[:ns]
+        if T2 is not None:
+            self.without_T2, NT = remove_transient_indices_nonperiodic(T2,ns,self.p)
+        else:
+            self.without_T2 = np.s_[:ns]
 
     def output(self, u, t=None, x0=None):
         system = self._get_system()
@@ -455,11 +458,12 @@ def costfcn_time(x0, system, weight=False):
     """
 
     # TODO fix transient
-    T2 = system.T2
+    # T2 = system.T2
     # p is the actual number of output in the signal, not the system output
     R, p, npp = system.signal.R, system.signal.p, system.signal.npp
+    p = system.p
     nfd = npp//2
-    without_T2 = system.without_T2
+    # without_T2 = system.without_T2
 
     # update the state space matrices from x0
     # TODO find a way to avoid explicitly updating the state space model.
@@ -471,7 +475,12 @@ def costfcn_time(x0, system, weight=False):
     t_mod, y_mod, x_mod = system.simulate(system.signal.um)
 
     # Compute the (weighted) error signal without transient
-    err = y_mod[without_T2, :p] - system.signal.ym[without_T2]
+    if system.signal._ydm is not None:
+        ym = np.hstack((system.signal.ym, system.signal._ydm))
+    else:
+        ym = system.signal.ym
+
+    err = y_mod - ym  #[without_T2, :p] - system.signal.ym[without_T2]
     if weight is not False and system.freq_weight:
         err = err.reshape((npp,R,p),order='F').swapaxes(1,2)
         # Select only the positive half of the spectrum
@@ -482,7 +491,7 @@ def costfcn_time(x0, system, weight=False):
         err_w = np.hstack((err.real.squeeze(), err.imag.squeeze()))
     elif weight is not False:
         # TODO time domain weighting. Does not work
-        err_w = err * weight[without_T2]
+        err_w = err * weight  # [without_T2]
         #cost = np.dot(err,err)
     else:
         # no weighting
@@ -681,7 +690,7 @@ def remove_transient_indices_nonperiodic(T2,N,p):
     Parameters
     ----------
     T2 : int
-        scalar indicating how many samples from the start are removed or vector
+        scalar indicating how many samples from the start are removed or array
         indicating which samples are removed
     N : int
         length of the total signal
@@ -691,66 +700,61 @@ def remove_transient_indices_nonperiodic(T2,N,p):
     Returns
     -------
     indices : ndarray(int)
-        vector of indices, such that y(indices) contains the output(s) without
-        transients. If more than one output (p > 1), then y(indices) stacks the
+        vector of indices, such that y[indices] contains the output(s) without
+        transients. If more than one output (p > 1), then y[indices] stacks the
         transient-free outputs on top of each other.
     nt : int
         length of the signal without transients
 
-
     Examples
     --------
-    One output, T2 scalar
-    N = 1000 # Total number of samples
-    T2 = 200; % First 200 samples should be removed after filtering
-    p = 1; % One output
-    [indices, NT] = fComputeIndicesTransientRemovalArb(T2,N,p);
-    % => indices = (201:1000).'; % Indices of the transient-free output (in uint32 format in version 1.0)
-    % => NT = 800; % Number of samples in the transient-free output
+    # One output, T2 scalar
+    >>> N = 1000 # Total number of samples
+    >>> T2 = 200  # First 200 samples should be removed after filtering
+    >>> p = 1  # One output
+    >>> indices, NT = remove_transient_indices_nonperiodic(T2,N,p)
+    np.r_[200:1000]  # Indices of the transient-free output
+    NT = 800  # Number of samples in the transient-free output
 
-    Two outputs, T2 scalar
-    N = 1000; % Total number of samples
-    T2 = 200; % First 200 samples should be removed after filtering
-    p = 2; % Two outputs
-    [indices, NT] = fComputeIndicesTransientRemovalArb(T2,N,p);
-    % => indices = ([201:1000 1201:2000]).'; % Indices of the transient-free outputs (in uint32 format in version 1.0)
-    % => NT = 800; % Number of samples in each transient-free output
-    % If y = [y1 y2] is a 1000 x 2 matrix with the two outputs y1 and y2,
-    % then y(indices) = [y1(201:1000);
-    %                    y2(201:1000)]
-    % is a vector with the transient-free outputs stacked on top of
-    % each other
+    # Two outputs, T2 scalar
+    >>> N = 1000  # Total number of samples
+    >>> T2 = 200  # First 200 samples should be removed after filtering
+    >>> p = 2  # Two outputs
+    >>> indices, NT = remove_transient_indices_nonperiodic(T2,N,p)
+    np.r_[200:1000, 1200:2000]
+    NT = 800
+    If y = [y1, y2] is a 1000 x 2 matrix with the two outputs y1 and y2, then
+    y[indices] = [y1(200:1000]
+                  y2(200:1000)]
+    is a vector with the transient-free outputs stacked on top of each other
 
-   % One output, T2 is a vector
-    N1 = 1000; % Number of samples in a first data set
-    N2 = 500; % Number of samples in a second data set
-    N = N1 + N2; % Total number of samples
-    T2_1 = 1:200; % Transient samples in first data set
-    T2_2 = 1:100; % Transient samples in second data set
-    T2 = [T2_1 (N1+T2_2)]; % Transient samples
-    p = 1; % One output
-    [indices, NT] = fComputeIndicesTransientRemovalArb(T2,N,p);
-    % => indices = ([201:1000 1101:1500])
-    % => NT = 1200;
+    One output, T2 is a vector
+    >>> N1 = 1000  # Number of samples in a first data set
+    >>> N2 = 500  # Number of samples in a second data set
+    >>> N = N1 + N2  # Total number of samples
+    >>> T2_1 = np.r_[:200]  # Transient samples in first data set
+    >>> T2_2 = np.r_[:100]  # Transient samples in second data set
+    >>> T2 = np.r_[T2_1, N1+T2_2]  # Transient samples
+    >>> p = 1  # One output
+    >>> indices, NT = remove_transient_indices_nonperiodic(T2,N,p)
+    np.r_[200:1000, 1100:1500]
+    NT = 1200
     """
 
     if T2 is None:
-        T2 = [0]
+        return np.s_[:N], N
 
-    # TODO make it possible to give T2 as list, T2 = [200]
-    if isinstance(T2, (int, np.integer)):  #np.isscalar(T2):
+    if isinstance(T2, (int, np.integer)):  # np.isscalar(T2):
         # Remove all samples up to T2
         T2 = np.arange(T2)
 
     T2 = np.atleast_1d(np.asarray(T2, dtype=int))
     # Remove transient samples from the total
-    # TODO wrong: now we remove idx 0, which is wrong
     without_T2 = np.delete(np.arange(N), T2)
 
     # Length of the transient-free signal(s)
     NT = len(without_T2)
     if p > 1:  # for multiple outputs
-        # TODO define NT
         indices = np.zeros(p*NT, dtype=int)
         for i in range(p):
             # Stack indices for each output on top of each other
